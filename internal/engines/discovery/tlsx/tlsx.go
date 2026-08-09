@@ -76,11 +76,13 @@ func (Engine) Spec() engines.Spec {
 		Version:     ">=1.3.0",
 		Sections:    catalog,
 		Defaults: engines.DefaultProfile{
-			Name:    "default",
-			Comment: "Certificate posture: identity, validity and the negotiated parameters.",
+			Name: "default",
+			Comment: "Certificate posture: identity, validity and the negotiated parameters.\n" +
+				"The display probes are deliberately unset. They select columns for\n" +
+				"tlsx's text output, and -json already carries every one of those\n" +
+				"fields; asking for them alongside anything else makes tlsx refuse to\n" +
+				"start with \"san or cn flag cannot be used with other probes\".",
 			Config: map[string]any{
-				"san": true, "cn": true, "so": true,
-				"tls-version": true, "cipher": true, "hash": true,
 				"expired": true, "self-signed": true, "mismatched": true, "untrusted": true,
 				"timeout": 10, "concurrency": 50,
 			},

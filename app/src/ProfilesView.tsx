@@ -1,24 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, JsonSchemaForm } from "@flanksource/clicky-ui";
-import { profileSections, sectionSchema } from "../profile-schema/index.ts";
-import { fetchProfiles, saveProfile } from "./api";
-import type { ProfileDocument } from "./types";
-
-function sameConfig(
-  left: Record<string, unknown>,
-  right: Record<string, unknown>,
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function engineLabel(profile: ProfileDocument): string {
-  if (profile.engine === "nuclei") return "Nuclei";
-  if (profile.engine === "naabu") return "Naabu";
-  return "httpx";
-}
+import { sameConfig, sectionSchema } from "./ScanProfileConfig";
+import { fetchEngines, fetchProfiles, saveProfile } from "./api";
+import { profileId } from "./types";
+import type { Engine, Profile } from "./types";
 
 export function ProfilesView() {
-  const [profiles, setProfiles] = useState<ProfileDocument[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [engines, setEngines] = useState<Engine[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>(
     {},
   );
@@ -31,15 +20,19 @@ export function ProfilesView() {
     setBusy(true);
     setError(null);
     try {
-      const next = await fetchProfiles();
-      setProfiles(next);
+      const [nextProfiles, nextEngines] = await Promise.all([
+        fetchProfiles(),
+        fetchEngines(),
+      ]);
+      setProfiles(nextProfiles);
+      setEngines(nextEngines);
       setDrafts(
-        Object.fromEntries(next.map((profile) => [profile.id, profile.config])),
+        Object.fromEntries(nextProfiles.map((profile) => [profileId(profile), profile.config])),
       );
       setSelectedId((current) =>
-        current && next.some((profile) => profile.id === current)
+        current && nextProfiles.some((profile) => profileId(profile) === current)
           ? current
-          : (next[0]?.id ?? null),
+          : (nextProfiles[0] ? profileId(nextProfiles[0]) : null),
       );
     } catch (cause) {
       setError((cause as Error).message);
@@ -52,24 +45,32 @@ export function ProfilesView() {
     void load();
   }, [load]);
 
+  const engineTitle = useCallback(
+    (name: string) => engines.find((engine) => engine.name === name)?.title ?? name,
+    [engines],
+  );
+
   const selected = useMemo(
-    () => profiles.find((profile) => profile.id === selectedId) ?? null,
+    () => profiles.find((profile) => profileId(profile) === selectedId) ?? null,
     [profiles, selectedId],
   );
-  const sections = selected ? profileSections[selected.engine] : [];
+  const sections = useMemo(
+    () => (selected ? (engines.find((engine) => engine.name === selected.engine)?.sections ?? []) : []),
+    [selected, engines],
+  );
   const activeSection =
     sections.find((section) => section.id === sectionId) ?? sections[0];
-  const draft = selected ? (drafts[selected.id] ?? selected.config) : {};
+  const draft = selected ? (drafts[profileId(selected)] ?? selected.config) : {};
   const dirty = selected ? !sameConfig(draft, selected.config) : false;
 
-  const selectProfile = (profile: ProfileDocument) => {
-    setSelectedId(profile.id);
+  const selectProfile = (profile: Profile) => {
+    setSelectedId(profileId(profile));
     setSectionId(null);
   };
 
   const reloadSelected = () => {
     if (!selected) return;
-    setDrafts((current) => ({ ...current, [selected.id]: selected.config }));
+    setDrafts((current) => ({ ...current, [profileId(selected)]: selected.config }));
   };
 
   const saveSelected = async () => {
@@ -77,11 +78,17 @@ export function ProfilesView() {
     setBusy(true);
     setError(null);
     try {
-      const saved = await saveProfile(selected.engine, selected.name, draft);
+      const saved = await saveProfile({
+        kind: selected.kind,
+        engine: selected.engine,
+        name: selected.name,
+        config: draft,
+        comment: selected.comment,
+      });
       setProfiles((current) =>
-        current.map((profile) => (profile.id === saved.id ? saved : profile)),
+        current.map((profile) => (profileId(profile) === profileId(saved) ? saved : profile)),
       );
-      setDrafts((current) => ({ ...current, [saved.id]: saved.config }));
+      setDrafts((current) => ({ ...current, [profileId(saved)]: saved.config }));
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -101,12 +108,12 @@ export function ProfilesView() {
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
           {profiles.map((profile) => (
             <button
-              key={profile.id}
+              key={profileId(profile)}
               type="button"
-              aria-label={`${profile.name} ${engineLabel(profile)}`}
+              aria-label={`${profile.name} ${engineTitle(profile.engine)}`}
               onClick={() => selectProfile(profile)}
               className={`rounded-md border p-3 text-left transition-colors ${
-                selected?.id === profile.id
+                selected && profileId(selected) === profileId(profile)
                   ? "border-primary bg-primary/5"
                   : "border-border bg-background hover:bg-accent"
               }`}
@@ -114,10 +121,10 @@ export function ProfilesView() {
               <span className="flex items-center gap-2">
                 <span className="font-medium">{profile.name}</span>
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {engineLabel(profile)}
+                  {engineTitle(profile.engine)}
                 </span>
                 {!sameConfig(
-                  drafts[profile.id] ?? profile.config,
+                  drafts[profileId(profile)] ?? profile.config,
                   profile.config,
                 ) && (
                   <span
@@ -127,14 +134,12 @@ export function ProfilesView() {
                 )}
               </span>
               <code className="mt-1 block text-[11px] text-muted-foreground">
-                config/{profile.filename}
+                {profileId(profile)}
               </code>
             </button>
           ))}
           {!busy && profiles.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No profile YAML files found.
-            </p>
+            <p className="text-sm text-muted-foreground">No profiles found.</p>
           )}
         </div>
       </aside>
@@ -147,12 +152,10 @@ export function ProfilesView() {
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-semibold">{selected.name}</h2>
                   <span className="text-xs text-muted-foreground">
-                    {engineLabel(selected)} profile
+                    {engineTitle(selected.engine)} profile
                   </span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  config/{selected.filename}
-                </p>
+                <p className="text-xs text-muted-foreground">{profileId(selected)}</p>
               </div>
               <span className="flex-1" />
               {error && (
@@ -209,13 +212,6 @@ export function ProfilesView() {
             </nav>
 
             <main className="min-w-0 flex-1 overflow-y-auto p-5">
-              {(selected.name === "full" || draft.dast === true) &&
-                selected.engine === "nuclei" && (
-                  <div className="mb-5 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-                    This profile can send intrusive exploit payloads. Production
-                    and public scans still require explicit authorization.
-                  </div>
-                )}
               <div className="mb-5 max-w-4xl">
                 <div className="flex items-start gap-3">
                   <div>
@@ -226,26 +222,28 @@ export function ProfilesView() {
                       {activeSection.description}
                     </p>
                   </div>
-                  <a
-                    href={activeSection.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ml-auto shrink-0 text-xs text-primary hover:underline"
-                  >
-                    Upstream flags ↗
-                  </a>
+                  {activeSection.sourceUrl && (
+                    <a
+                      href={activeSection.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto shrink-0 text-xs text-primary hover:underline"
+                    >
+                      Upstream flags ↗
+                    </a>
+                  )}
                 </div>
               </div>
               <div className="max-w-6xl rounded-lg border border-border bg-background p-5 shadow-sm">
                 <JsonSchemaForm
-                  key={`${selected.id}:${activeSection.id}`}
+                  key={`${profileId(selected)}:${activeSection.id}`}
                   idPrefix={`${selected.engine}-${selected.name}-${activeSection.id}`}
                   schema={sectionSchema(activeSection)}
                   value={draft}
                   onChange={(next) =>
                     setDrafts((current) => ({
                       ...current,
-                      [selected.id]: next,
+                      [profileId(selected)]: next,
                     }))
                   }
                   layout={{
@@ -258,9 +256,9 @@ export function ProfilesView() {
                 />
               </div>
               <p className="mt-4 max-w-4xl text-xs text-muted-foreground">
-                Profile YAML is tracked in git. Keep credentials, bearer tokens,
-                and private keys in external secret files rather than these
-                fields.
+                Profile changes are saved to the server. Keep credentials,
+                bearer tokens, and private keys in external secret files
+                rather than these fields.
               </p>
             </main>
           </div>

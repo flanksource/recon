@@ -18,13 +18,20 @@ import (
 // the previous one emitted, which is checked when the chain is built rather
 // than discovered when it runs.
 type Chain struct {
-	Name    string
+	Name string
+
+	// Seed is what the runtime feeds the first stage: zones for a full sweep,
+	// hosts for a targeted one. It is what makes a targeted chain valid — its
+	// first stage consumes hosts that no earlier stage produced because the
+	// caller supplied them.
+	Seed discovery.Kind
+
 	Engines []discovery.Engine
 }
 
 // NewChain builds a chain and verifies the stages fit together.
-func NewChain(name string, names ...string) (Chain, error) {
-	chain := Chain{Name: name}
+func NewChain(name string, seed discovery.Kind, names ...string) (Chain, error) {
+	chain := Chain{Name: name, Seed: seed}
 	for _, engineName := range names {
 		engine, err := discovery.Get(engineName)
 		if err != nil {
@@ -48,7 +55,14 @@ func (c Chain) Validate() error {
 		return fmt.Errorf("chain %s has no stages", c.Name)
 	}
 
-	available := map[discovery.Kind]bool{}
+	if c.Seed == "" {
+		return fmt.Errorf("chain %s: no seed kind", c.Name)
+	}
+
+	// What the caller supplies counts as available: a targeted sweep starts from
+	// hosts it was given, and demanding a stage produce them rejected the chain
+	// outright.
+	available := map[discovery.Kind]bool{c.Seed: true}
 	for _, engine := range c.Engines {
 		accepts := engine.Accepts()
 		if !accepts.Sourced() && !available[accepts] {

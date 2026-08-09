@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchScanStatus } from "./api";
+import { fetchScanStatus, SCAN_EVENTS_URL } from "./api";
 import type { ScanStatus } from "./types";
 
 // Tracks the server-side scan from its SSE stream. The initial request covers server
@@ -37,7 +37,7 @@ export function useScanStatus(onFinish?: (status: ScanStatus) => void) {
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
-    const source = new EventSource("/api/scan/events");
+    const source = new EventSource(SCAN_EVENTS_URL);
     source.onmessage = (event) => {
       try {
         const next = JSON.parse(event.data) as ScanStatus;

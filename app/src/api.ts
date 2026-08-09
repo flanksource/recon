@@ -1,160 +1,262 @@
+// Client for the recon entity API.
+//
+// Every resource is served at /api/v1/<entity> from the same declaration that
+// generates the CLI, so a filter here and a flag on `reconctl` are the same
+// operation. The two hand-written routes — the scan event stream and the target
+// edit schema — are the ones the entity layer cannot express.
+
 import type {
-  DiscoverResult,
-  Finding,
-  Inventory,
-  ProfileDocument,
-  ProfileEngine,
-  ScanProfile,
-  ScanRun,
-  ScanStatus,
   CuratedTarget,
+  Discover,
+  Engine,
+  Finding,
+  Profile,
+  Scan,
+  ScanStatus,
+  Target,
   TargetDocument,
+  TargetSelector,
+  Zone,
 } from "./types";
 
-async function responseJson<T>(res: Response, request: string): Promise<T> {
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `${request} failed: ${res.status}`);
+const API = "/api/v1";
+
+// The executor reports a command failure as 200 with success:false, so the
+// status code alone does not tell us whether the call worked.
+type ExecutorFailure = { success?: boolean; error?: string; message?: string };
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  ...rest: never[]
+): Promise<T> {
+  void rest;
+  const method = init?.method ?? "GET";
+  const res = await fetch(path, init);
+
+  let body: unknown = null;
+  const text = await res.text();
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new Error(`${method} ${path} returned invalid JSON: ${text.slice(0, 200)}`);
+    }
   }
-  return res.json() as Promise<T>;
+
+  const failure = body as ExecutorFailure | null;
+  if (!res.ok) {
+    throw new Error(failure?.error ?? failure?.message ?? `${method} ${path} failed: ${res.status}`);
+  }
+  if (failure && typeof failure === "object" && failure.success === false) {
+    throw new Error(failure.error ?? failure.message ?? `${method} ${path} failed`);
+  }
+  return body as T;
 }
 
-export async function fetchInventory(): Promise<Inventory> {
-  const res = await fetch("/api/inventory");
-  if (!res.ok) throw new Error(`GET /api/inventory failed: ${res.status}`);
-  return res.json();
+function query(params: Record<string, unknown> | undefined): string {
+  if (!params) return "";
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "" || value === false) continue;
+    search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+  }
+  const encoded = search.toString();
+  return encoded ? `?${encoded}` : "";
 }
 
-export async function fetchTarget(host: string): Promise<TargetDocument> {
-  const path = `/api/inventory/${encodeURIComponent(host)}`;
-  return responseJson<TargetDocument>(await fetch(path), `GET ${path}`);
+function json(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  };
 }
 
-export async function fetchTargetSchema(): Promise<Record<string, unknown>> {
-  const path = "/api/inventory/schema/target";
-  return responseJson<Record<string, unknown>>(await fetch(path), `GET ${path}`);
+// ---------------------------------------------------------------- targets
+
+export function fetchTargets(selector?: TargetSelector): Promise<Target[]> {
+  return request<Target[]>(`${API}/target${query(selector)}`);
 }
 
-export async function saveTarget(host: string, curated: CuratedTarget): Promise<TargetDocument> {
-  const path = `/api/inventory/${encodeURIComponent(host)}`;
-  return responseJson<TargetDocument>(
-    await fetch(path, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(curated),
+export function fetchTarget(host: string): Promise<Target> {
+  return request<Target>(`${API}/target/${encodeURIComponent(host)}`);
+}
+
+// The edit form needs constraints the list surface cannot express — conditional
+// requirements, formats, readOnly — so the Draft 2020-12 schema is served whole
+// on its own route rather than derived from the entity.
+export function fetchTargetSchema(): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>("/api/schema/target");
+}
+
+// A save replaces the curated fields wholesale; the machine-owned sections are
+// discovery's and are never sent. Always send every curated field: omitting one
+// clears it rather than leaving it alone.
+export function saveTarget(host: string, curated: CuratedTarget): Promise<Target> {
+  return request<Target>(`${API}/target`, json("PUT", { ...curated, id: host }));
+}
+
+export async function saveTargets(rows: TargetDocument[]): Promise<Target[]> {
+  const saved: Target[] = [];
+  for (const row of rows) {
+    try {
+      saved.push(
+        await saveTarget(row.host, {
+          class: row.class,
+          app: row.app,
+          cluster: row.cluster,
+          source: row.source,
+          profiles: row.profiles,
+          ports: row.ports,
+          tags: row.tags,
+          notes: row.notes,
+          reason: row.reason,
+        }),
+      );
+    } catch (error) {
+      throw new Error(
+        `saved ${saved.length} target(s); ${row.host} failed: ${(error as Error).message}`,
+      );
+    }
+  }
+  return saved;
+}
+
+// ---------------------------------------------------------------- zones
+
+export function fetchZones(): Promise<Zone[]> {
+  return request<Zone[]>(`${API}/zone`);
+}
+
+export function addZone(zone: string): Promise<Zone> {
+  return request<Zone>(`${API}/zone`, json("POST", { zone }));
+}
+
+export function deleteZone(zone: string): Promise<void> {
+  return request<void>(`${API}/zone/${encodeURIComponent(zone)}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------- engines
+
+export function fetchEngines(kind?: "discovery" | "scan"): Promise<Engine[]> {
+  return request<Engine[]>(`${API}/engine${query({ kind })}`);
+}
+
+export function fetchEngine(name: string): Promise<Engine> {
+  return request<Engine>(`${API}/engine/${encodeURIComponent(name)}`);
+}
+
+// ---------------------------------------------------------------- profiles
+
+export function fetchProfiles(params?: {
+  kind?: string;
+  engine?: string;
+}): Promise<Profile[]> {
+  return request<Profile[]>(`${API}/profile${query(params)}`);
+}
+
+export function saveProfile(profile: {
+  kind: string;
+  engine: string;
+  name: string;
+  config: Record<string, unknown>;
+  comment?: string;
+}): Promise<Profile> {
+  return request<Profile>(`${API}/profile`, json("POST", profile));
+}
+
+export function deleteProfile(id: string): Promise<void> {
+  return request<void>(`${API}/profile/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------- scans
+
+export function fetchScans(params?: {
+  engine?: string;
+  profile?: string;
+  phase?: string;
+  since?: string;
+  severity?: string;
+  limit?: number;
+}): Promise<Scan[]> {
+  return request<Scan[]>(`${API}/scan${query(params)}`);
+}
+
+export function fetchScan(id: string): Promise<Scan> {
+  return request<Scan>(`${API}/scan/${encodeURIComponent(id)}`);
+}
+
+// Findings are queried rather than read out of a result file, so the same call
+// drills into one scan or compares a template across every run.
+export function fetchFindings(params: {
+  scan?: string;
+  severity?: string;
+  host?: string;
+  template?: string;
+  tag?: string;
+  limit?: number;
+}): Promise<Finding[]> {
+  return request<Finding[]>(`${API}/finding${query(params)}`);
+}
+
+// The current (or last) scan. The event stream replays this to every new
+// subscriber; this route exists for the first paint and for tests without an
+// EventSource.
+export function fetchScanStatus(): Promise<ScanStatus> {
+  return request<ScanStatus>("/api/scan/current");
+}
+
+export const SCAN_EVENTS_URL = "/api/scan/events";
+
+// Starts a scan over everything the selector matches and returns the created
+// scan — not a live status, which arrives on the event stream. `confirm`
+// authorises an intrusive scan of prod, public or unclassified hosts; the
+// server refuses without it and names the hosts. `wait` is false so the call
+// returns as soon as the run starts.
+export function startScan(args: {
+  selector: TargetSelector;
+  engine: string;
+  profile: string;
+  confirm?: boolean;
+}): Promise<Scan> {
+  return request<Scan>(
+    `${API}/target/scan`,
+    json("POST", {
+      ...args.selector,
+      engine: args.engine,
+      profile: args.profile,
+      confirm: args.confirm ?? false,
+      wait: false,
     }),
-    `PUT ${path}`,
   );
 }
 
-export async function fetchProfiles(): Promise<ProfileDocument[]> {
-  const res = await fetch("/api/profiles");
-  return (
-    await responseJson<{ profiles: ProfileDocument[] }>(
-      res,
-      "GET /api/profiles",
-    )
-  ).profiles;
-}
-
-export async function saveProfile(
-  engine: ProfileEngine,
-  name: string,
-  config: Record<string, unknown>,
-): Promise<ProfileDocument> {
-  const path = `/api/profiles/${encodeURIComponent(engine)}/${encodeURIComponent(name)}`;
-  const res = await fetch(path, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ config }),
-  });
-  return (await responseJson<{ profile: ProfileDocument }>(res, `PUT ${path}`))
-    .profile;
-}
-
-export async function saveTargets(rows: TargetDocument[]): Promise<Inventory> {
-  let saved = 0;
-  for (const row of rows) {
-    try {
-      await saveTarget(row.host, {
-        class: row.class,
-        app: row.app,
-        cluster: row.cluster,
-        source: row.source,
-        profiles: row.profiles,
-        ports: row.ports,
-        tags: row.tags,
-        notes: row.notes,
-        reason: row.reason,
-      });
-      saved += 1;
-    } catch (error) {
-      throw new Error(`saved ${saved} target(s); ${row.host} failed: ${(error as Error).message}`);
-    }
-  }
-  return fetchInventory();
-}
-
-export async function fetchScans(): Promise<ScanRun[]> {
-  const res = await fetch("/api/scans");
-  if (!res.ok) throw new Error(`GET /api/scans failed: ${res.status}`);
-  return (await res.json()).scans;
-}
-
-export async function fetchScanFindings(file: string): Promise<Finding[]> {
-  const res = await fetch(`/api/scans/${encodeURIComponent(file)}`);
-  if (!res.ok) throw new Error(`GET /api/scans/${file} failed: ${res.status}`);
-  return (await res.json()).findings;
-}
-
-// Returns the last cached discovery instantly (empty if none has run yet).
-export async function fetchDiscoveryCache(): Promise<DiscoverResult> {
-  const res = await fetch("/api/discover");
-  if (!res.ok) throw new Error(`GET /api/discover failed: ${res.status}`);
-  return res.json();
-}
-
-// Re-runs static, NS/MX, subfinder, Naabu, and httpx discovery and re-caches.
-export async function runDiscovery(): Promise<DiscoverResult> {
-  const res = await fetch("/api/discover", { method: "POST" });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `POST /api/discover failed: ${res.status}`);
-  }
-  return res.json();
-}
-
-async function scanRequest(init?: RequestInit): Promise<ScanStatus> {
-  const res = await fetch("/api/scan", init);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      body.error ?? `${init?.method ?? "GET"} /api/scan failed: ${res.status}`,
-    );
-  }
-  return res.json();
-}
-
-// Current (or last) scan on the server — stats, live findings, log tail.
-export function fetchScanStatus(): Promise<ScanStatus> {
-  return scanRequest();
-}
-
-// Starts the selected scanner over the given hosts. `confirm` authorises a
-// full/DAST scan of prod/public hosts; the server refuses without it.
-export function startScan(args: {
-  hosts: string[];
-  profile: ScanProfile;
-  confirm?: boolean;
-  config?: Record<string, unknown>;
-}): Promise<ScanStatus> {
-  return scanRequest({
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(args),
-  });
-}
-
 export function cancelScan(): Promise<ScanStatus> {
-  return scanRequest({ method: "DELETE" });
+  return request<ScanStatus>("/api/scan/cancel", { method: "POST" });
+}
+
+// ---------------------------------------------------------------- discovery
+
+export function fetchDiscoveries(params?: {
+  chain?: string;
+  since?: string;
+  limit?: number;
+}): Promise<Discover[]> {
+  return request<Discover[]>(`${API}/discover${query(params)}`);
+}
+
+// The most recent sweep, or null when none has run. This is the cached view the
+// discover dialog opens with.
+export async function fetchLatestDiscovery(): Promise<Discover | null> {
+  const [latest] = await fetchDiscoveries({ limit: 1 });
+  return latest ?? null;
+}
+
+// Runs a sweep. With no selector it enumerates from the configured zones;
+// with one it re-probes just those targets.
+export function runDiscovery(
+  selector?: TargetSelector & { chain?: string },
+): Promise<Discover> {
+  return request<Discover>(`${API}/target/discover`, json("POST", selector ?? {}));
 }

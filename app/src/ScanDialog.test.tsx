@@ -9,14 +9,14 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScanDialog } from "./ScanDialog";
-import type { ScanStatus, TargetRow } from "./types";
+import type { Discover, Engine, Profile, Scan, TargetRow } from "./types";
 
 const rows: TargetRow[] = [
   {
     $schema: "../target.schema.json",
     version: 1,
     host: "api.example.com",
-    class: "prod",
+    class: "non-prod",
     profiles: ["safe"],
     tags: ["api"],
   },
@@ -30,30 +30,79 @@ const rows: TargetRow[] = [
   },
 ];
 
-const running: ScanStatus = {
-  phase: "running",
-  profile: "discovery",
-  group: "prod",
-  hosts: ["api.example.com"],
-  file: null,
-  startedAt: "2026-08-09T08:00:00.000Z",
-  finishedAt: null,
-  stats: null,
-  findings: [],
-  log: ">>> httpx discovery rescan of 1 host\n",
-  error: null,
-  command: ["httpx", "-config", "config/discovery.httpx.yaml"],
-  exitCode: null,
-  observations: null,
-  output: [
-    {
-      sequence: 1,
-      timestamp: "2026-08-09T08:00:00.000Z",
-      stream: "system",
-      text: ">>> httpx discovery rescan of 1 host\n",
-    },
-  ],
+const nucleiEngine: Engine = {
+  _id: "scan:nuclei",
+  name: "nuclei",
+  kind: "scan",
+  title: "Nuclei",
+  binary: "nuclei",
+  installed: true,
+  managed: true,
+  sections: [],
 };
+
+const safeProfile: Profile = {
+  _id: "scan:nuclei:safe",
+  kind: "scan",
+  engine: "nuclei",
+  name: "safe",
+  config: {},
+  intrusive: false,
+};
+
+// The engine reports its own verdict on a configuration, and the confirm gate
+// keys off that rather than off the profile's name.
+const intrusiveProfile: Profile = {
+  _id: "scan:nuclei:full",
+  kind: "scan",
+  engine: "nuclei",
+  name: "full",
+  config: { dast: true },
+  intrusive: true,
+  reason: "DAST sends active payloads",
+};
+
+const createdScan: Scan = {
+  _id: "scan-1",
+  id: "scan-1",
+  name: "run-1",
+  engine: "nuclei",
+  profile: "safe",
+  selector: { hosts: ["api.example.com"] },
+  selectorLabel: "hosts api.example.com",
+  endpointCount: 1,
+  phase: "running",
+  startedAt: "2026-08-09T08:00:00.000Z",
+  findings: 0,
+  severities: {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    info: 0,
+    unknown: 0,
+  },
+  hosts: ["api.example.com"],
+};
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function mockFetch(handlers: Record<string, unknown>) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : (input as Request).url;
+    const path = url.replace(/^https?:\/\/[^/]+/, "");
+    const match = Object.entries(handlers).find(([prefix]) =>
+      path.startsWith(prefix),
+    );
+    if (!match) throw new Error(`unexpected fetch: ${path}`);
+    return jsonResponse(match[1]);
+  });
+}
 
 describe("ScanDialog", () => {
   afterEach(() => {
@@ -61,13 +110,12 @@ describe("ScanDialog", () => {
     vi.restoreAllMocks();
   });
 
-  it("rescans the selected targets with the discovery profile", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(running), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+  it("starts a scan against the selected targets", async () => {
+    const fetchMock = mockFetch({
+      "/api/v1/engine": [nucleiEngine],
+      "/api/v1/profile": [safeProfile],
+      "/api/v1/target/scan": createdScan,
+    });
     const onStatus = vi.fn();
 
     render(
@@ -79,32 +127,106 @@ describe("ScanDialog", () => {
         selectedHosts={["api.example.com"]}
         status={null}
         onStatus={onStatus}
-        onOpenScan={vi.fn()}
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Profile"), {
-      target: { value: "discovery" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Rescan 1 host" }));
+    // Wait for the engine/profile catalog to load before the run starts.
+    await screen.findByText("safe");
+    fireEvent.click(screen.getByRole("button", { name: "Scan 1 host" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/scan",
+        "/api/v1/target/scan",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            hosts: ["api.example.com"],
-            profile: "discovery",
+            hosts: "api.example.com",
+            engine: "nuclei",
+            profile: "safe",
             confirm: false,
+            wait: false,
           }),
         }),
       ),
     );
-    expect(onStatus).toHaveBeenCalledWith(running);
   });
 
-  it("requires new targets to be saved before discovery observations can be rescanned", () => {
+  it("requires confirmation for an intrusive scan of a prod or public host", async () => {
+    const fetchMock = mockFetch({
+      "/api/v1/engine": [nucleiEngine],
+      "/api/v1/profile": [intrusiveProfile],
+      "/api/v1/target/scan": createdScan,
+    });
+
+    render(
+      <ScanDialog
+        open
+        onClose={vi.fn()}
+        rows={rows}
+        savedHosts={rows.map((row) => row.host)}
+        selectedHosts={["docs.example.com"]}
+        status={null}
+        onStatus={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("full");
+    expect(screen.getByRole("button", { name: "Scan 1 host" })).toBeDisabled();
+    expect(
+      screen.getByText(/prod\/public or unsaved host/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Scan 1 host" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/target/scan",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            hosts: "docs.example.com",
+            engine: "nuclei",
+            profile: "full",
+            confirm: true,
+            wait: false,
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("does not ask for confirmation when the profile is not intrusive", async () => {
+    // The server would run this without complaint, so requiring a checkbox
+    // would be friction the rule does not call for.
+    mockFetch({
+      "/api/v1/engine": [nucleiEngine],
+      "/api/v1/profile": [safeProfile],
+      "/api/v1/target/scan": createdScan,
+    });
+
+    render(
+      <ScanDialog
+        open
+        onClose={vi.fn()}
+        rows={rows}
+        savedHosts={rows.map((row) => row.host)}
+        selectedHosts={["docs.example.com"]}
+        status={null}
+        onStatus={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("safe");
+    expect(screen.getByRole("button", { name: "Scan 1 host" })).toBeEnabled();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("requires new targets to be saved before a discovery rescan", () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("unexpected fetch"),
+    );
+
     render(
       <ScanDialog
         open
@@ -114,12 +236,9 @@ describe("ScanDialog", () => {
         selectedHosts={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
+        discoveryOnly
       />,
     );
-
-    fireEvent.change(screen.getByLabelText("Profile"), {
-      target: { value: "discovery" },
-    });
 
     expect(
       screen.getByRole("button", { name: "Rescan 1 host" }),
@@ -129,5 +248,46 @@ describe("ScanDialog", () => {
         "Save 1 new target before rescanning discovery observations.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("rescans saved hosts via discovery instead of a scan engine", async () => {
+    const result: Discover = {
+      _id: "discover-1",
+      id: "discover-1",
+      chain: "naabu,httpx",
+      startedAt: "2026-08-09T08:00:00.000Z",
+      hosts: [],
+      newCount: 0,
+      log: ">>> rescanning 1 host\n",
+    };
+    const fetchMock = mockFetch({
+      "/api/v1/target/discover": result,
+    });
+
+    render(
+      <ScanDialog
+        open
+        onClose={vi.fn()}
+        rows={rows}
+        savedHosts={rows.map((row) => row.host)}
+        selectedHosts={["api.example.com"]}
+        status={null}
+        onStatus={vi.fn()}
+        discoveryOnly
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Rescan 1 host" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/target/discover",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ hosts: "api.example.com" }),
+        }),
+      ),
+    );
+    await screen.findByText("0 hosts probed");
   });
 });

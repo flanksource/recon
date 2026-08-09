@@ -1,32 +1,56 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, JsonSchemaForm } from "@flanksource/clicky-ui";
-import { profileSections, sectionSchema } from "../profile-schema/index.ts";
-import type { ProfileDocument } from "./types";
+import {
+  Button,
+  JsonSchemaForm,
+  type JsonSchemaObject,
+} from "@flanksource/clicky-ui";
+import { profileId } from "./types";
+import type { Engine, EngineSection, Profile } from "./types";
+
+// SchemaProperty (the server's wire type) and JsonSchemaProperty (the form's
+// type) are the same JSON Schema fragment; only `type`'s literal-vs-string
+// typing differs, so the cast is a nominal bridge, not a data transform.
+export function sectionSchema(section: EngineSection): JsonSchemaObject {
+  return {
+    type: "object",
+    properties: section.properties,
+  } as unknown as JsonSchemaObject;
+}
+
+export function sameConfig(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 type Props = {
-  profile: ProfileDocument;
+  engine: Engine;
+  profile: Profile;
   value: Record<string, unknown>;
   onChange: (value: Record<string, unknown>) => void;
   onReset: () => void;
 };
 
 export function ScanProfileConfig({
+  engine,
   profile,
   value,
   onChange,
   onReset,
 }: Props) {
-  const sections = profileSections.nuclei;
+  const sections = engine.sections;
   const [sectionId, setSectionId] = useState(sections[0]?.id ?? "");
   const activeSection =
     sections.find((section) => section.id === sectionId) ?? sections[0];
   const tweaked = useMemo(
-    () => JSON.stringify(value) !== JSON.stringify(profile.config),
+    () => !sameConfig(value, profile.config),
     [profile.config, value],
   );
 
-  useEffect(() => setSectionId(sections[0]?.id ?? ""), [profile.id, sections]);
-  if (!activeSection) throw new Error("Nuclei profile schema has no sections");
+  useEffect(() => setSectionId(sections[0]?.id ?? ""), [profileId(profile), sections]);
+  if (!activeSection)
+    throw new Error(`${engine.title} profile schema has no sections`);
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden rounded-md border border-border">
@@ -57,25 +81,26 @@ export function ScanProfileConfig({
           <span className="flex-1" />
           {tweaked ? (
             <span className="pt-2 text-xs text-amber-600 dark:text-amber-400">
-              Tweaked for this run
+              Unsaved changes
             </span>
           ) : null}
           <Button variant="outline" size="sm" disabled={!tweaked} onClick={onReset}>
-            Reset tweaks
+            Reset changes
           </Button>
         </div>
         <JsonSchemaForm
-          key={`${profile.id}:${activeSection.id}`}
+          key={`${profileId(profile)}:${activeSection.id}`}
           idPrefix={`scan-${profile.name}-${activeSection.id}`}
           schema={sectionSchema(activeSection)}
           value={value}
           onChange={onChange}
           layout={{ mode: "stacked", help: "hover", valueMaxWidth: "100%" }}
           size="sm"
-          preferencesStorageKey="nuclei-run-profile-form-preferences"
+          preferencesStorageKey="scan-run-profile-form-preferences"
         />
         <p className="mt-4 text-xs text-muted-foreground">
-          Changes apply only to this scan. The tracked profile is not modified.
+          Changes here update the "{profile.name}" profile before this scan
+          runs.
         </p>
       </section>
     </div>

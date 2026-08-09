@@ -5,8 +5,8 @@ import { BulkEditBar, type BulkEdit } from "./BulkEditBar";
 import { DiscoverDialog } from "./DiscoverDialog";
 import { ScanDialog } from "./ScanDialog";
 import { useScanStatus } from "./useScanStatus";
-import { fetchInventory, saveTargets } from "./api";
-import { curatedTarget, type Inventory, type TableRow, type TargetRow } from "./types";
+import { fetchTargets, saveTargets } from "./api";
+import { curatedTarget, type TableRow, type TargetRow } from "./types";
 
 function sameDefinition(left: TargetRow, right: TargetRow): boolean {
   return JSON.stringify(curatedTarget(left)) === JSON.stringify(curatedTarget(right));
@@ -37,7 +37,6 @@ export function InventoryView({
   onOpenTarget: (host: string) => void;
 }) {
   const routeParams = new URLSearchParams(window.location.search);
-  const [inventory, setInventory] = useState<Inventory | null>(null);
   const [rows, setRows] = useState<TargetRow[]>([]);
   const [original, setOriginal] = useState<TargetRow[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
@@ -69,10 +68,9 @@ export function InventoryView({
     setBusy(true);
     setError(null);
     try {
-      const inv = await fetchInventory();
-      setInventory(inv);
-      setRows(inv.rows);
-      setOriginal(inv.rows);
+      const targets = await fetchTargets();
+      setRows(targets);
+      setOriginal(targets);
       if (!keepSelection) setSelectedIds([]);
     } catch (e) {
       setError((e as Error).message);
@@ -152,16 +150,22 @@ export function InventoryView({
         const previous = original.find((target) => target.host === row.host);
         return !previous || !sameDefinition(row, previous);
       });
-      const inv = await saveTargets(changed);
-      setInventory(inv);
-      setRows(inv.rows);
-      setOriginal(inv.rows);
+      await saveTargets(changed);
+      const targets = await fetchTargets();
+      setRows(targets);
+      setOriginal(targets);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }, [original, rows]);
+
+  const tagVocabulary = useMemo(() => {
+    const tags = new Set<string>();
+    rows.forEach((r) => r.tags.forEach((t) => tags.add(t)));
+    return [...tags].sort();
+  }, [rows]);
 
   const selectedTags = useMemo(() => {
     const sel = new Set(selectedIds);
@@ -186,7 +190,7 @@ export function InventoryView({
         <h1 className="text-lg font-semibold">Target Inventory</h1>
         <span className="text-sm text-muted-foreground">
           {rows.length} targets · {scannedCount} scanned ·{" "}
-          {inventory?.tagVocabulary.length ?? 0} tags
+          {tagVocabulary.length} tags
         </span>
         <span className="flex-1" />
         {error && (
@@ -221,23 +225,25 @@ export function InventoryView({
       <DiscoverDialog
         open={discoverOpen}
         onClose={() => setDiscoverOpen(false)}
-        tagVocabulary={inventory?.tagVocabulary ?? []}
+        tagVocabulary={tagVocabulary}
         onAdd={addDiscovered}
       />
 
-      <ScanDialog
-        open={scanOpen}
-        onClose={() => setScanOpen(false)}
-        rows={rows}
-        savedHosts={savedHosts}
-        selectedHosts={selectedIds}
-        status={scan}
-        onStatus={setScan}
-        onOpenScan={(file) => {
-          setScanOpen(false);
-          onOpenScan(file);
-        }}
-      />
+      {scanOpen && (
+        <ScanDialog
+          open={scanOpen}
+          onClose={() => setScanOpen(false)}
+          rows={rows}
+          savedHosts={savedHosts}
+          selectedHosts={selectedIds}
+          status={scan}
+          onStatus={setScan}
+          onOpenScan={(file) => {
+            setScanOpen(false);
+            onOpenScan(file);
+          }}
+        />
+      )}
 
       <main className="min-h-0 flex-1 p-3">
         <DataTable<TableRow>
@@ -267,7 +273,7 @@ export function InventoryView({
           selectionActions={({ selectedRowIds, clearSelection }) => (
             <BulkEditBar
               count={selectedRowIds.length}
-              tagVocabulary={inventory?.tagVocabulary ?? []}
+              tagVocabulary={tagVocabulary}
               selectedTags={selectedTags}
               onApply={applyBulk}
               onClear={clearSelection}

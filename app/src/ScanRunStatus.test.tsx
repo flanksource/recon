@@ -1,13 +1,23 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { createRef } from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchFindings } from "./api";
 import { ScanRunStatus } from "./ScanRunStatus";
-import type { ScanStatus } from "./types";
+import { emptySeverities, type Finding, type ScanStatus } from "./types";
+
+vi.mock("./api", () => ({
+  fetchFindings: vi.fn(),
+}));
+
+const fetchFindingsMock = vi.mocked(fetchFindings);
 
 describe("ScanRunStatus", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    fetchFindingsMock.mockReset();
+  });
 
   it("summarises a running Nuclei scan and labels streamed stdout and stderr", () => {
     render(
@@ -16,11 +26,12 @@ describe("ScanRunStatus", () => {
           {
             phase: "running",
             profile: "full",
-            group: "prod",
+            selectorLabel: "class prod",
             hosts: ["api.example.com", "www.example.com"],
-            file: "full-prod-20260809.jsonl",
+            id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            name: "full-prod-20260809-080000",
             startedAt: "2026-08-09T08:00:00.000Z",
-            finishedAt: null,
+            finishedAt: undefined,
             stats: {
               requests: 25,
               total: 100,
@@ -32,12 +43,12 @@ describe("ScanRunStatus", () => {
               templates: 18,
               duration: "5s",
             },
-            findings: [],
+            findings: 0,
+            severities: emptySeverities(),
             log: "",
-            error: null,
+            error: undefined,
             command: ["nuclei", "-config", ".gen/scan-profile.yaml"],
-            exitCode: null,
-            observations: null,
+            exitCode: undefined,
             output: [
               {
                 sequence: 1,
@@ -59,6 +70,7 @@ describe("ScanRunStatus", () => {
     );
 
     expect(screen.getByText("Nuclei full scan")).toBeInTheDocument();
+    expect(screen.getByText("class prod")).toBeInTheDocument();
     expect(screen.getByText("25 / 100")).toBeInTheDocument();
     expect(screen.getByText("18")).toBeInTheDocument();
     expect(screen.getByText("nuclei -config .gen/scan-profile.yaml")).toBeInTheDocument();
@@ -67,33 +79,49 @@ describe("ScanRunStatus", () => {
     expect(within(output).getByText("stderr")).toBeInTheDocument();
     expect(output).toHaveTextContent("loaded 18 templates");
     expect(output).toHaveTextContent("retrying one request");
+    expect(fetchFindingsMock).not.toHaveBeenCalled();
   });
 
-  it("reports refreshed observations and output for a completed discovery rescan", () => {
+  it("fetches and renders findings once the scan reaches a terminal phase", async () => {
+    const findings: Finding[] = [
+      {
+        scanId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        lineNo: 1,
+        templateId: "tls-version",
+        name: "Deprecated TLS version",
+        severity: "high",
+        host: "api.example.com",
+        matchedAt: "https://api.example.com",
+        tags: ["tls"],
+      },
+    ];
+    fetchFindingsMock.mockResolvedValue(findings);
+
     render(
       <ScanRunStatus
         status={
           {
             phase: "done",
-            profile: "discovery",
-            group: "public",
-            hosts: ["www.example.com"],
-            file: null,
+            profile: "full",
+            selectorLabel: "class public",
+            hosts: ["api.example.com"],
+            id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            name: "full-public-20260809-080000",
             startedAt: "2026-08-09T08:00:00.000Z",
             finishedAt: "2026-08-09T08:00:03.000Z",
-            stats: null,
-            findings: [],
+            stats: undefined,
+            findings: 1,
+            severities: { ...emptySeverities(), high: 1 },
             log: "",
-            error: null,
-            command: ["httpx", "-config", "config/discovery.httpx.yaml"],
+            error: undefined,
+            command: ["nuclei", "-config", ".gen/scan-profile.yaml"],
             exitCode: 0,
-            observations: 1,
             output: [
               {
                 sequence: 1,
                 timestamp: "2026-08-09T08:00:03.000Z",
                 stream: "system",
-                text: "refreshed 1 target observation\n",
+                text: "scan finished\n",
               },
             ],
           } as ScanStatus
@@ -102,11 +130,10 @@ describe("ScanRunStatus", () => {
       />,
     );
 
-    expect(screen.getByText("Discovery rescan")).toBeInTheDocument();
-    expect(screen.getByText("1 observation refreshed")).toBeInTheDocument();
+    expect(fetchFindingsMock).toHaveBeenCalledWith({ scan: "01ARZ3NDEKTSV4RRFFQ69G5FAV" });
     expect(screen.getByText("exit 0")).toBeInTheDocument();
-    expect(screen.getByRole("log", { name: "Live scan output" })).toHaveTextContent(
-      "refreshed 1 target observation",
-    );
+    expect(screen.getByText("1 finding")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Deprecated TLS version")).toBeInTheDocument());
+    expect(screen.getByText("tls-version")).toBeInTheDocument();
   });
 });

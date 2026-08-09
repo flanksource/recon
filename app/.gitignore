@@ -1,5 +1,15 @@
 node_modules/
-dist/
+
+# The build output is derived, but the directory itself must exist: the binary
+# embeds it with `//go:embed all:app/dist`, and an embed matching nothing is a
+# compile error on a fresh checkout. Hence the tracked .gitkeep.
+#
+# The first line re-includes the directory, which a global ignore of `dist/`
+# would otherwise exclude outright — and git does not look inside an excluded
+# directory, so without it the negation below could never match.
+!dist/
+dist/*
+!dist/.gitkeep
 *.tsbuildinfo
 .vite/
 .vite-dev.log

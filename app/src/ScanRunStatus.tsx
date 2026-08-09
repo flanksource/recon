@@ -1,12 +1,14 @@
-import { useMemo, type RefObject } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import { AnsiHtml, Button, ProgressBar } from "@flanksource/clicky-ui";
+import { fetchFindings } from "./api";
 import { severityBadge, SEVERITY_RANK } from "./scanColumns";
 import {
   SEVERITIES,
+  TERMINAL_PHASES,
   type Finding,
   type ScanOutputEvent,
   type ScanStatus,
-  type Severity,
+  type SeverityCounts as SeverityCountsMap,
 } from "./types";
 
 const PHASE_LABEL: Record<ScanStatus["phase"], string> = {
@@ -17,7 +19,7 @@ const PHASE_LABEL: Record<ScanStatus["phase"], string> = {
   cancelled: "Cancelled",
 };
 
-function elapsed(from: string, to: string | null): string {
+function elapsed(from: string, to?: string): string {
   const seconds = Math.max(
     0,
     Math.round(
@@ -38,16 +40,7 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function SeverityCounts({ findings }: { findings: Finding[] }) {
-  const counts = useMemo(() => {
-    const byName = {} as Record<Severity, number>;
-    for (const severity of SEVERITIES) byName[severity] = 0;
-    findings.forEach(
-      (finding) =>
-        (byName[finding.severity] = (byName[finding.severity] ?? 0) + 1),
-    );
-    return byName;
-  }, [findings]);
+function SeverityBreakdown({ counts }: { counts: SeverityCountsMap }) {
   const present = SEVERITIES.filter((severity) => counts[severity] > 0);
   if (!present.length) return null;
   return (
@@ -160,11 +153,27 @@ export function ScanRunStatus({
 }) {
   const discovery = status.profile === "discovery";
   const percent = status.phase === "done" ? 100 : (status.stats?.percent ?? 0);
-  const resultFile = status.file;
+  const resultId = status.id;
   const title = discovery
     ? "Discovery rescan"
     : `Nuclei ${status.profile ?? ""} scan`.replace("  ", " ");
-  const observations = status.observations;
+
+  const [findings, setFindings] = useState<Finding[]>([]);
+  const [findingsError, setFindingsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFindings([]);
+    setFindingsError(null);
+    if (!TERMINAL_PHASES.includes(status.phase)) return;
+    let cancelled = false;
+    fetchFindings({ scan: status.id })
+      .then((rows) => !cancelled && setFindings(rows))
+      .catch((e) => !cancelled && setFindingsError((e as Error).message));
+    return () => {
+      cancelled = true;
+    };
+  }, [status.id, status.phase]);
+
   return (
     <>
       <div className="flex shrink-0 flex-col gap-3 rounded-md border border-border p-3">
@@ -173,11 +182,11 @@ export function ScanRunStatus({
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
             {PHASE_LABEL[status.phase]}
           </span>
-          {status.group && (
-            <span className="text-xs text-muted-foreground">group {status.group}</span>
+          {status.selectorLabel && (
+            <span className="text-xs text-muted-foreground">{status.selectorLabel}</span>
           )}
           <span className="flex-1" />
-          {status.exitCode !== null && (
+          {status.exitCode !== undefined && (
             <code className="text-xs text-muted-foreground">exit {status.exitCode}</code>
           )}
         </div>
@@ -199,11 +208,6 @@ export function ScanRunStatus({
               <Stat label="errors" value={status.stats?.errors ?? 0} />
             </>
           )}
-          {discovery && observations !== null && (
-            <span className="text-sm font-medium tabular-nums">
-              {observations} observation{observations === 1 ? "" : "s"} refreshed
-            </span>
-          )}
           <Stat
             label="elapsed"
             value={
@@ -215,10 +219,10 @@ export function ScanRunStatus({
           <span className="flex-1" />
           {!discovery && (
             <>
-              <SeverityCounts findings={status.findings} />
+              <SeverityBreakdown counts={status.severities} />
               <span className="text-sm font-medium tabular-nums">
-                {status.findings.length} finding
-                {status.findings.length === 1 ? "" : "s"}
+                {status.findings} finding
+                {status.findings === 1 ? "" : "s"}
               </span>
             </>
           )}
@@ -242,16 +246,16 @@ export function ScanRunStatus({
               {status.command.join(" ")}
             </code>
           )}
-          {resultFile && <code>{resultFile}</code>}
+          {status.name && <code>{status.name}</code>}
           <span className="flex-1" />
           {status.error && (
             <span className="text-destructive">{status.error}</span>
           )}
-          {status.phase !== "running" && resultFile && onOpenScan && (
+          {status.phase !== "running" && resultId && onOpenScan && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => onOpenScan(resultFile)}
+              onClick={() => onOpenScan(resultId)}
             >
               View in Scans
             </Button>
@@ -260,7 +264,10 @@ export function ScanRunStatus({
       </div>
       {!discovery && (
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border">
-          <LiveFindings findings={status.findings} />
+          {findingsError && (
+            <p className="p-2 text-xs text-destructive">{findingsError}</p>
+          )}
+          <LiveFindings findings={findings} />
         </div>
       )}
       <LiveOutput output={status.output} logRef={logRef} />

@@ -88,15 +88,21 @@ var _ = Describe("the engine registries", func() {
 		}
 	})
 
-	It("chains: every discovery engine's input is produced by an engine or the runtime", func() {
+	It("chains: every discovery engine's input can be supplied by something", func() {
+		// A stage is fed by an earlier engine, by the inventory, or by whatever
+		// seeds the chain. Zones and hosts are the two seeds the runner supports:
+		// a full sweep starts from the configured zones, a targeted one from the
+		// hosts it was handed.
+		seeds := map[discovery.Kind]bool{discovery.Zones: true, discovery.Hosts: true}
+
 		produced := map[discovery.Kind]bool{}
 		for _, engine := range discovery.All() {
 			produced[engine.Emits()] = true
 		}
 		for _, engine := range discovery.All() {
 			accepts := engine.Accepts()
-			if accepts.Sourced() {
-				continue // supplied by the runtime, not by a preceding engine
+			if accepts.Sourced() || seeds[accepts] {
+				continue
 			}
 			Expect(produced).To(HaveKey(accepts),
 				"%s consumes %s, which nothing produces", engine.Spec().Name, accepts)

@@ -2,24 +2,31 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SCAN_EVENTS_URL } from "./api";
 import { useScanStatus } from "./useScanStatus";
-import type { ScanStatus } from "./types";
+import { emptySeverities, type ScanStatus } from "./types";
 
 const idle = {
+  _id: "current",
+  id: "",
+  name: "",
+  engine: "",
+  profile: "",
+  selector: {},
+  selectorLabel: "",
+  endpointCount: 0,
   phase: "idle",
-  profile: null,
-  group: null,
+  startedAt: "",
+  finishedAt: undefined,
+  stats: undefined,
   hosts: [],
-  file: null,
-  startedAt: null,
-  finishedAt: null,
-  stats: null,
-  findings: [],
+  command: undefined,
+  exitCode: undefined,
+  error: undefined,
+  findings: 0,
+  severities: emptySeverities(),
+  running: false,
   log: "",
-  error: null,
-  command: null,
-  exitCode: null,
-  observations: null,
   output: [],
 } as ScanStatus;
 
@@ -65,7 +72,7 @@ describe("useScanStatus", () => {
 
     const view = render(<Probe onFinish={onFinish} />);
     await screen.findByText("idle:0");
-    expect(FakeEventSource.instance?.url).toBe("/api/scan/events");
+    expect(FakeEventSource.instance?.url).toBe(SCAN_EVENTS_URL);
 
     act(() => {
       FakeEventSource.instance?.emit({

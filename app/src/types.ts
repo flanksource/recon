@@ -1,3 +1,8 @@
+// Wire types for the recon entity API.
+//
+// Every shape here is what `/api/v1/<entity>` actually returns — the Go types in
+// internal/api are the source of truth and these mirror them.
+
 export const CLASS_ORDER = [
   "public",
   "prod",
@@ -8,12 +13,12 @@ export const CLASS_ORDER = [
 export type TargetClass = (typeof CLASS_ORDER)[number];
 
 export const PROFILES = ["safe", "full"] as const;
-export const SCAN_PROFILES = ["safe", "full", "discovery"] as const;
 
-export type {
-  ProfileDocument,
-  ProfileEngine,
-} from "../profile-schema/index.ts";
+// The server stamps `_id` onto rows in a list response so one is addressable
+// without knowing which field is its key. A single get does not carry it, hence
+// optional — prefer the entity's own key (host, id, kind:engine:name) wherever
+// the value has to survive a round trip.
+export type Identified = { _id?: string };
 
 export type ObservedState = {
   first_observed?: string;
@@ -68,6 +73,9 @@ export type TargetDocument = {
   scan?: { last_scan?: string; last_findings?: number };
 };
 
+export type Target = TargetDocument & Identified;
+export type TargetRow = TargetDocument;
+
 export type CuratedTarget = Pick<
   TargetDocument,
   | "class"
@@ -81,14 +89,26 @@ export type CuratedTarget = Pick<
   | "reason"
 >;
 
-export type TargetRow = TargetDocument;
-
-export type Inventory = {
-  version: 1;
-  rows: TargetDocument[];
-  zones: string[];
-  tagVocabulary: string[];
+// TargetSelector is the target list-options struct, and it is also what selects
+// the endpoints a scan runs against — the same filter drives the table, the
+// query string and the scan. Every value is a comma-joined list because that is
+// how the CLI's repeated flags arrive over HTTP.
+export type TargetSelector = {
+  class?: string;
+  tags?: string;
+  profiles?: string;
+  hosts?: string;
+  ports?: string;
+  status?: string;
+  "last-seen"?: string;
+  live?: boolean;
+  filter?: string;
 };
+
+// A selector that has been resolved and stored on a scan. It is not the request
+// shape: the server parses the comma-joined query values into lists, and echoes
+// them back that way. Use `selectorLabel` to render one.
+export type StoredSelector = Record<string, string[] | string | boolean>;
 
 export const SEVERITIES = [
   "critical",
@@ -100,7 +120,14 @@ export const SEVERITIES = [
 ] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
+export type SeverityCounts = Record<Severity, number>;
+
+// Findings keep an index signature: nuclei emits template-specific keys the
+// details pane renders without knowing them in advance.
 export type Finding = {
+  _id?: string;
+  scanId: string;
+  lineNo: number;
   templateId: string;
   name: string;
   severity: Severity;
@@ -119,42 +146,9 @@ export type Finding = {
   [key: string]: unknown;
 };
 
-export type ScanRun = {
-  file: string;
-  profile: string;
-  group: string;
-  startedAt: string;
-  mtime: string;
-  findings: number;
-  hosts: string[];
-  severities: Record<Severity, number>;
-};
-
-export type DiscoveredHost = {
-  host: string;
-  status?: number;
-  responseTime?: string;
-  openPorts?: number[];
-  knownPaths?: string[];
-  loginMethods?: string[];
-  title?: string;
-  tech?: string[];
-  live: boolean;
-  isKnown: boolean;
-  [key: string]: unknown;
-};
-
-export type DiscoverResult = {
-  hosts: DiscoveredHost[];
-  newCount: number;
-  ranAt: string | null;
-  cached: boolean;
-  log: string;
-};
-
-export type ScanProfile = string;
-
 export type ScanPhase = "idle" | "running" | "done" | "failed" | "cancelled";
+
+export const TERMINAL_PHASES: ScanPhase[] = ["done", "failed", "cancelled"];
 
 export type ScanStats = {
   requests: number;
@@ -168,6 +162,29 @@ export type ScanStats = {
   duration: string;
 };
 
+export type Scan = Identified & {
+  id: string;
+  name: string;
+  engine: string;
+  engineVersion?: string;
+  profile: string;
+  selector: StoredSelector;
+  // A human-readable rendering of the selector, e.g. "class non-prod". The
+  // server derives it so the CLI and the table describe a scan identically.
+  selectorLabel: string;
+  endpointCount: number;
+  phase: ScanPhase;
+  startedAt: string;
+  finishedAt?: string;
+  command?: string[];
+  exitCode?: number;
+  error?: string;
+  findings: number;
+  severities: SeverityCounts;
+  stats?: ScanStats;
+  hosts: string[];
+};
+
 export type ScanOutputEvent = {
   sequence: number;
   timestamp: string;
@@ -175,27 +192,101 @@ export type ScanOutputEvent = {
   text: string;
 };
 
-export type ScanStatus = {
-  phase: ScanPhase;
-  profile: ScanProfile | null;
-  group: string | null;
-  hosts: string[];
-  file: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  stats: ScanStats | null;
-  findings: Finding[];
+// ScanStatus is the live snapshot pushed over SSE: a scan plus the streaming
+// fields that only exist while it runs.
+export type ScanStatus = Scan & {
+  running: boolean;
   log: string;
-  error: string | null;
-  command: string[] | null;
-  exitCode: number | null;
-  observations: number | null;
   output: ScanOutputEvent[];
 };
 
-// Flattened shape handed to DataTable so its timestamp/tags/status column kinds can
-// read observed state by key. Carries an index signature to satisfy DataTable's
-// `Record<string, unknown>` generic constraint.
+export type EngineKind = "discovery" | "scan";
+
+export type SchemaProperty = {
+  type?: string;
+  title?: string;
+  description?: string;
+  enum?: unknown[];
+  default?: unknown;
+  minimum?: number;
+  maximum?: number;
+  multipleOf?: number;
+  items?: SchemaProperty;
+  [key: string]: unknown;
+};
+
+export type EngineSection = {
+  id: string;
+  title: string;
+  description?: string;
+  sourceUrl?: string;
+  properties: Record<string, SchemaProperty>;
+};
+
+export type Engine = Identified & {
+  name: string;
+  kind: EngineKind;
+  title: string;
+  description?: string;
+  docsUrl?: string;
+  binary: string;
+  // Discovery engines declare what they consume and produce so a chain can be
+  // validated; scan engines leave these empty.
+  accepts?: string;
+  emits?: string;
+  version?: string;
+  installed: boolean;
+  managed: boolean;
+  path?: string;
+  sections: EngineSection[];
+};
+
+export type Profile = Identified & {
+  kind: EngineKind;
+  engine: string;
+  name: string;
+  config: Record<string, unknown>;
+  // The leading comment block of the stored profile, preserved verbatim.
+  comment?: string;
+  // The engine's own verdict on this configuration. Gate on this rather than on
+  // the profile's name: it is the rule the server enforces, so asking for
+  // confirmation whenever it is false would be friction the server would not
+  // have imposed.
+  intrusive?: boolean;
+  reason?: string;
+};
+
+export type Zone = Identified & { zone: string };
+
+export type DiscoveredHost = {
+  host: string;
+  engine?: string;
+  status?: number;
+  responseTime?: string;
+  openPorts?: number[];
+  knownPaths?: string[];
+  loginMethods?: string[];
+  title?: string;
+  tech?: string[];
+  live: boolean;
+  isKnown: boolean;
+  [key: string]: unknown;
+};
+
+export type Discover = Identified & {
+  id: string;
+  chain: string;
+  startedAt: string;
+  finishedAt?: string;
+  hosts: DiscoveredHost[];
+  newCount: number;
+  error?: string;
+  log: string;
+};
+
+// Flattened shape handed to DataTable so its timestamp/tags/status column kinds
+// can read observed state by key. The index signature satisfies DataTable's
+// `Record<string, unknown>` constraint.
 export type TableRow = TargetRow & {
   first_observed?: string;
   last_seen?: string;
@@ -233,4 +324,14 @@ export function curatedTarget(target: TargetDocument): CuratedTarget {
     notes,
     reason,
   };
+}
+
+// A profile's address, computed rather than read off the payload so it is the
+// same value whether the profile came from a list or from a single get.
+export function profileId(profile: Pick<Profile, "kind" | "engine" | "name">): string {
+  return `${profile.kind}:${profile.engine}:${profile.name}`;
+}
+
+export function emptySeverities(): SeverityCounts {
+  return { critical: 0, high: 0, medium: 0, low: 0, info: 0, unknown: 0 };
 }

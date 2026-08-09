@@ -16,7 +16,7 @@ import {
 } from "@flanksource/clicky-ui";
 import {
   curatedTarget,
-  type ProfileDocument,
+  type Profile,
   type TargetDocument,
 } from "./types";
 import {
@@ -38,8 +38,9 @@ const hideInactiveReason: TargetPreExtension = (field, context) =>
   field.key === "reason" && context.rootValue?.class !== "deactivated"
     ? null
     : field;
-const DISCOVERY_PROFILE = ["discovery"] as const;
-type ScanMode = "discovery" | "nuclei";
+// Discovery is no longer a scan profile but a separate operation, so the two
+// buttons open the same dialog in different modes rather than picking a profile.
+type ScanMode = "discovery" | "scan";
 
 function display(value: unknown): ReactNode {
   if (value === undefined || value === null || value === "") return "—";
@@ -139,7 +140,7 @@ export function TargetView({ host, onBack }: Props) {
   const [editing, setEditing] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode | null>(null);
   const [scanRunMode, setScanRunMode] = useState<ScanMode | null>(null);
-  const [nucleiProfiles, setNucleiProfiles] = useState<ProfileDocument[]>([]);
+  const [scanProfiles, setScanProfiles] = useState<Profile[]>([]);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -186,12 +187,11 @@ export function TargetView({ host, onBack }: Props) {
   useEffect(() => {
     let active = true;
     setProfileError(null);
-    fetchProfiles()
+    fetchProfiles({ kind: "scan" })
       .then((profiles) => {
         if (!active) return;
-        const next = profiles.filter((profile) => profile.engine === "nuclei");
-        if (next.length === 0) throw new Error("No Nuclei profiles found");
-        setNucleiProfiles(next);
+        if (profiles.length === 0) throw new Error("No scan profiles found");
+        setScanProfiles(profiles);
       })
       .catch((nextError: Error) => active && setProfileError(nextError.message));
     return () => {
@@ -228,10 +228,7 @@ export function TargetView({ host, onBack }: Props) {
     if (!dirty || window.confirm("Discard unsaved target changes?")) onBack();
   };
 
-  const initialNucleiProfile =
-    target?.profiles.find((name) =>
-      nucleiProfiles.some((profile) => profile.name === name),
-    ) ?? nucleiProfiles[0]?.name;
+  const canScan = scanProfiles.length > 0;
   const dialogStatus =
     scan?.phase === "running" || scanRunMode === scanMode ? scan : null;
 
@@ -307,11 +304,6 @@ export function TargetView({ host, onBack }: Props) {
               variant="outline"
               size="sm"
               disabled={!target}
-              loading={
-                scan?.phase === "running" &&
-                scan.profile === "discovery" &&
-                scan.hosts.includes(host)
-              }
               onClick={() => openScan("discovery")}
             >
               Rescan discovery
@@ -319,15 +311,11 @@ export function TargetView({ host, onBack }: Props) {
             <Button
               variant="outline"
               size="sm"
-              disabled={!target || !initialNucleiProfile}
-              loading={
-                scan?.phase === "running" &&
-                scan.profile !== "discovery" &&
-                scan.hosts.includes(host)
-              }
-              onClick={() => openScan("nuclei")}
+              disabled={!target || !canScan}
+              loading={scan?.phase === "running" && scan.hosts.includes(host)}
+              onClick={() => openScan("scan")}
             >
-              Run Nuclei scan
+              Run scan
             </Button>
             <Button
               size="sm"
@@ -354,17 +342,9 @@ export function TargetView({ host, onBack }: Props) {
             setScanRunMode(scanMode);
             setScan(next);
           }}
-          availableProfiles={
-            scanMode === "discovery"
-              ? DISCOVERY_PROFILE
-              : nucleiProfiles.map((profile) => profile.name)
-          }
-          initialProfile={
-            scanMode === "discovery" ? "discovery" : initialNucleiProfile
-          }
           allowAllTargets={false}
-          nucleiProfiles={nucleiProfiles}
-          editableNucleiProfile={scanMode === "nuclei"}
+          discoveryOnly={scanMode === "discovery"}
+          editableProfile={scanMode === "scan"}
         />
       ) : null}
       <main className="mx-auto max-w-6xl p-4">

@@ -216,11 +216,13 @@ type Curated struct {
 	App      string   `json:"app,omitempty"`
 	Cluster  string   `json:"cluster,omitempty"`
 	Source   string   `json:"source,omitempty"`
-	Profiles []string `json:"profiles"`
-	Ports    []int    `json:"ports,omitempty"`
-	Tags     []string `json:"tags"`
-	Notes    string   `json:"notes,omitempty"`
-	Reason   string   `json:"reason,omitempty"`
+	// The list fields take either a JSON array or the comma-joined form a CLI
+	// flag produces, because one operation is served on both surfaces.
+	Profiles StringList `json:"profiles"`
+	Ports    IntList    `json:"ports,omitempty"`
+	Tags     StringList `json:"tags"`
+	Notes    string     `json:"notes,omitempty"`
+	Reason   string     `json:"reason,omitempty"`
 }
 
 // Curated extracts the editable projection.

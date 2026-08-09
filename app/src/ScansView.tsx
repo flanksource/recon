@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, DataTable, Select, type DataTableGrouping } from "@flanksource/clicky-ui";
-import { fetchScanFindings, fetchScans } from "./api";
+import { fetchFindings, fetchScans } from "./api";
 import {
   findingColumns,
   FindingDetail,
@@ -8,7 +8,7 @@ import {
   SEVERITY_RANK,
   worstSeverity,
 } from "./scanColumns";
-import { SEVERITIES, type Finding, type ScanRun, type Severity } from "./types";
+import { SEVERITIES, type Finding, type Scan, type Severity } from "./types";
 
 type GroupBy = "type" | "severity" | "host" | "none";
 
@@ -129,7 +129,7 @@ function relative(iso: string): string {
   return `${Math.round(s / 86400)}d ago`;
 }
 
-function SeverityBar({ run }: { run: ScanRun }) {
+function SeverityBar({ run }: { run: Scan }) {
   const total = run.findings || 1;
   return (
     <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -152,7 +152,7 @@ function RunCard({
   active,
   onClick,
 }: {
-  run: ScanRun;
+  run: Scan;
   active: boolean;
   onClick: () => void;
 }) {
@@ -169,9 +169,9 @@ function RunCard({
         <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">
           {run.profile}
         </span>
-        <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{run.group}</span>
+        <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{run.selectorLabel}</span>
         <span className="flex-1" />
-        <span className="text-xs text-muted-foreground">{relative(run.mtime)}</span>
+        <span className="text-xs text-muted-foreground">{relative(run.finishedAt ?? "")}</span>
       </div>
       <div className="flex items-center gap-2 text-sm">
         <span className="font-semibold">{run.findings}</span>
@@ -182,9 +182,9 @@ function RunCard({
   );
 }
 
-// `file` preselects a run — set when the Targets tab hands off a scan it just finished.
+// `file` preselects a run by scan id — set when the Targets tab hands off a scan it just finished.
 export function ScansView({ file }: { file?: string | null }) {
-  const [runs, setRuns] = useState<ScanRun[]>([]);
+  const [runs, setRuns] = useState<Scan[]>([]);
   const [selected, setSelected] = useState<string | null>(file ?? null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [groupBy, setGroupBy] = useState<GroupBy>("type");
@@ -199,7 +199,7 @@ export function ScansView({ file }: { file?: string | null }) {
     try {
       const list = await fetchScans();
       setRuns(list);
-      setSelected((cur) => cur ?? list[0]?.file ?? null);
+      setSelected((cur) => cur ?? list[0]?.id ?? null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -219,7 +219,7 @@ export function ScansView({ file }: { file?: string | null }) {
     if (!selected) return;
     let cancelled = false;
     setBusy(true);
-    fetchScanFindings(selected)
+    fetchFindings({ scan: selected })
       .then((f) => !cancelled && setFindings(f))
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setBusy(false));
@@ -229,7 +229,7 @@ export function ScansView({ file }: { file?: string | null }) {
   }, [selected]);
 
   const activeRun = useMemo(
-    () => runs.find((r) => r.file === selected),
+    () => runs.find((r) => r.id === selected),
     [runs, selected],
   );
 
@@ -250,10 +250,10 @@ export function ScansView({ file }: { file?: string | null }) {
         )}
         {runs.map((run) => (
           <RunCard
-            key={run.file}
+            key={run.id}
             run={run}
-            active={run.file === selected}
-            onClick={() => setSelected(run.file)}
+            active={run.id === selected}
+            onClick={() => setSelected(run.id)}
           />
         ))}
       </aside>
@@ -262,7 +262,7 @@ export function ScansView({ file }: { file?: string | null }) {
         <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
           {activeRun && (
             <>
-              <code className="text-foreground">{activeRun.file}</code>
+              <code className="text-foreground">{activeRun.name}</code>
               <span>·</span>
               <span>{activeRun.findings} findings</span>
               <span>·</span>

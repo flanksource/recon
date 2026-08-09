@@ -6,6 +6,7 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 
 	"github.com/flanksource/clicky/rpc"
@@ -40,6 +41,11 @@ type Config struct {
 
 	// Sweeps is the discovery runner. Optional, like Scans.
 	Sweeps *discovery.Runner
+
+	// UI is the built web interface. Optional: a test exercising the API does
+	// not need it, and leaving it nil serves the API alone.
+	UI    fs.FS
+	UIDir string
 }
 
 // Handler builds the mux.
@@ -63,6 +69,7 @@ func Handler(config Config) http.Handler {
 		broadcaster := httpapi.NewBroadcaster(httpapi.BroadcasterOptions{})
 		config.Scans.Publisher = broadcaster
 		mux.Handle("GET /api/scan/events", broadcaster)
+		httpapi.RegisterScan(mux, config.Scans)
 
 		// The broadcaster replays the last frame to a new subscriber, so a page
 		// loaded before anything has run needs one published up front.
@@ -85,5 +92,20 @@ func Handler(config Config) http.Handler {
 	// two routes claiming one path is a wiring bug, and it should stop the
 	// process at startup rather than serve whichever won.
 	swagger.RegisterRoutes(mux)
+
+	httpapi.RegisterSchema(mux)
+
+	// The SPA claims "/", so it is the fallback for everything the API did not
+	// match. Registered last for readability only — net/http resolves by
+	// specificity, not by registration order.
+	if config.UI != nil {
+		mux.Handle("/", httpapi.SPA(config.UI, config.UIDir))
+
+		// "/api/" is more specific than "/", so this stops an unmatched API path
+		// falling through to the SPA. Without it a request for a route that does
+		// not exist — or one deliberately kept off the surface, like migrate —
+		// answers 200 with index.html, which reads to a client as success.
+		mux.Handle("/api/", httpapi.NotFound())
+	}
 	return mux
 }

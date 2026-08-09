@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/flanksource/recon"
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/cli"
 	"github.com/flanksource/recon/internal/schema"
@@ -47,8 +48,12 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 		// Building the command tree is what registers the entities, so the
 		// server under test is wired exactly as `reconctl serve` wires it.
 		root := cli.New()
+		// The UI is wired as `serve` wires it: with the SPA claiming "/", an
+		// unmatched API path could otherwise fall through to index.html, and a
+		// suite that left it out would not see that.
 		suite = httptest.NewServer(server.Handler(server.Config{
 			Host: "localhost", Root: root, Registry: cli.EntityRegistry(), Store: st,
+			UI: recon.UI, UIDir: recon.UIDir,
 		}))
 		DeferCleanup(suite.Close)
 
@@ -80,6 +85,24 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 						"%s is claimed by both %s and %s", key, seen[key], id)
 					seen[key] = id
 				}
+			}
+		})
+
+		It("keeps the commands that administer the process off the API", func() {
+			// Publishing a CLI publishes every runnable command in the tree. These
+			// three are not resources: `migrate` altered the schema on an
+			// unauthenticated POST, `db url` printed the DSN, and `serve` would
+			// start a second server inside this one.
+			paths, _ := spec["paths"].(map[string]any)
+			for _, local := range []string{"/api/v1/migrate", "/api/v1/serve", "/api/v1/db/url"} {
+				Expect(paths).ToNot(HaveKey(local), local)
+			}
+
+			for _, local := range []string{"/api/v1/migrate", "/api/v1/serve", "/api/v1/db/url"} {
+				res, err := http.Post(suite.URL+local, "application/json", strings.NewReader("{}"))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(res.StatusCode).To(Equal(http.StatusNotFound), local)
+				Expect(res.Body.Close()).To(Succeed())
 			}
 		})
 

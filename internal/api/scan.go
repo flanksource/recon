@@ -135,6 +135,14 @@ type Profile struct {
 	// implementation preserved across edits.
 	Comment string   `json:"comment,omitempty"`
 	Paths   []string `json:"paths,omitempty"`
+
+	// Intrusive is the engine's own verdict on this configuration, and Reason
+	// says why. Reported so a caller gates on the same judgement the runtime
+	// enforces rather than guessing from the profile's name — the alternative
+	// was a client asking for confirmation on every scan of a production host,
+	// including ones the server would have run without complaint.
+	Intrusive bool   `json:"intrusive"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // ID is the composite key, which is what an entity get takes. Colon-separated

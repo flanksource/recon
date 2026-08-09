@@ -29,12 +29,11 @@ const (
 	Observations Kind = "observations"
 )
 
-// Sourced reports whether the runtime supplies this kind directly rather than
-// an engine producing it: zones come from the configured zone list, and origins
-// are projected from the inventory — the endpoints that already answered over
-// HTTP. Every other kind has to be some engine's output for a chain to be
-// constructible at all.
-func (k Kind) Sourced() bool { return k == Zones || k == Origins }
+// Sourced reports whether the runtime supplies this kind from the inventory
+// rather than an engine producing it. Origins are projected from the targets
+// that already answered over HTTP, so a stage consuming them needs no
+// predecessor. What seeds a chain is separate — see Chain.Seed.
+func (k Kind) Sourced() bool { return k == Origins }
 
 // Engine finds or characterises hosts.
 type Engine interface {

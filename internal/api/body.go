@@ -31,10 +31,10 @@ func CuratedFrom(body map[string]any) (Curated, error) {
 		return Curated{}, err
 	}
 	if curated.Profiles == nil {
-		curated.Profiles = []string{}
+		curated.Profiles = StringList{}
 	}
 	if curated.Tags == nil {
-		curated.Tags = []string{}
+		curated.Tags = StringList{}
 	}
 	return curated, nil
 }

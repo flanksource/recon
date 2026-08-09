@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/flanksource/recon"
 	"github.com/flanksource/recon/internal/db"
 	"github.com/flanksource/recon/internal/server"
 	"github.com/flanksource/recon/internal/store"
@@ -54,6 +55,7 @@ func serve(cmd *cobra.Command, st *store.Store, host string, port int) error {
 	handler := server.Handler(server.Config{
 		Host: host, Port: port,
 		Root: cmd.Root(), Registry: registry, Store: st, Scans: scans, Sweeps: sweeps,
+		UI: recon.UI, UIDir: recon.UIDir,
 	})
 
 	httpServer := &http.Server{

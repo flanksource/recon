@@ -8,12 +8,12 @@ import {
   type DataTableColumn,
 } from "@flanksource/clicky-ui";
 import { HttpStatusBadge } from "./columns";
-import { fetchDiscoveryCache, runDiscovery } from "./api";
+import { fetchLatestDiscovery, runDiscovery } from "./api";
 import {
   CLASS_ORDER,
   PROFILES,
   type DiscoveredHost,
-  type DiscoverResult,
+  type Discover,
   type TargetClass,
   type TargetRow,
 } from "./types";
@@ -65,6 +65,7 @@ const discoveredColumns: DataTableColumn<DiscoveredHost>[] = [
   { key: "loginMethods", label: "Login methods", kind: "tags", tags: { maxVisible: 2 } },
   { key: "title", label: "Title", grow: true },
   { key: "tech", label: "Tech", kind: "tags", tags: { maxVisible: 3 } },
+  { key: "engine", label: "Engine", shrink: true },
 ];
 
 type Props = {
@@ -88,9 +89,9 @@ export function DiscoverDialog({ open, onClose, tagVocabulary, onAdd }: Props) {
 
   const [loaded, setLoaded] = useState(false);
 
-  const applyResult = (res: DiscoverResult) => {
+  const applyResult = (res: Discover) => {
     setHosts(res.hosts);
-    setRanAt(res.ranAt);
+    setRanAt(res.startedAt);
     // Pre-select new + live hosts.
     setSelectedIds(res.hosts.filter((h) => !h.isKnown && h.live).map((h) => h.host));
   };
@@ -108,11 +109,12 @@ export function DiscoverDialog({ open, onClose, tagVocabulary, onAdd }: Props) {
     }
   }, []);
 
-  // On open, load the cached prior results instantly (cheap GET). Never auto-runs the
+  // On open, load the most recent sweep instantly (cheap GET). Never auto-runs the
   // expensive refresh — the user triggers that explicitly.
   const loadCache = useCallback(async () => {
     try {
-      applyResult(await fetchDiscoveryCache());
+      const latest = await fetchLatestDiscovery();
+      if (latest) applyResult(latest);
     } catch (e) {
       setError((e as Error).message);
     } finally {

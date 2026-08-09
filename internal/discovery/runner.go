@@ -191,11 +191,11 @@ func (r *Runner) seed(ctx context.Context, opts Options) ([]string, error) {
 func (r *Runner) chainFor(name string) (Chain, error) {
 	switch name {
 	case "full":
-		return NewChain("full", "subfinder", "naabu", "httpx", "tlsx")
+		return NewChain("full", enginediscovery.Zones, "subfinder", "naabu", "httpx", "tlsx")
 	case "targeted":
 		// Skips enumeration: the hosts are already known, and this is the
 		// rescan that refreshes what is recorded about them.
-		return NewChain("targeted", "naabu", "httpx", "tlsx")
+		return NewChain("targeted", enginediscovery.Hosts, "naabu", "httpx", "tlsx")
 	default:
 		return Chain{}, fmt.Errorf("unknown chain %q: expected full or targeted", name)
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines"
+	enginescan "github.com/flanksource/recon/internal/engines/scan"
 	"github.com/flanksource/recon/internal/store"
 )
 
@@ -194,12 +195,47 @@ func (r *Registry) registerProfile() {
 	clicky.NewEntity[api.Profile, store.ProfileOpts, api.Profile]("profile").
 		Aliases("profiles").
 		ToolGroup("configuration").
-		ListWithContext(bind(r, (*store.Store).ListProfiles)).
-		GetWithContext(bind(r, (*store.Store).GetProfile)).
+		ListWithContext(bind(r, listProfiles)).
+		GetWithContext(bind(r, getProfile)).
 		CreateWithContext(bind(r, saveProfile)).
 		UpdateWithContext(bind2(r, updateProfile)).
 		DeleteWithContext(deleteProfile(r)).
 		Register()
+}
+
+// withRisk asks the scan engine what it makes of a stored configuration.
+//
+// The judgement lives in the engine, so this is the only way a caller can gate
+// on the same rule the runtime enforces. Discovery profiles are never intrusive
+// and an unregistered engine is left unannotated rather than assumed safe.
+func withRisk(profile api.Profile) api.Profile {
+	if profile.Kind != "scan" {
+		return profile
+	}
+	engine, err := enginescan.Get(profile.Engine)
+	if err != nil {
+		return profile
+	}
+
+	risk := engine.Risk(profile.Config)
+	profile.Intrusive, profile.Reason = risk.Intrusive, risk.Reason
+	return profile
+}
+
+func listProfiles(st *store.Store, ctx context.Context, opts store.ProfileOpts) ([]api.Profile, error) {
+	profiles, err := st.ListProfiles(ctx, opts)
+	for i := range profiles {
+		profiles[i] = withRisk(profiles[i])
+	}
+	return profiles, err
+}
+
+func getProfile(st *store.Store, ctx context.Context, id string) (api.Profile, error) {
+	profile, err := st.GetProfile(ctx, id)
+	if err != nil {
+		return profile, err
+	}
+	return withRisk(profile), nil
 }
 
 func saveProfile(st *store.Store, ctx context.Context, body map[string]any) (api.Profile, error) {

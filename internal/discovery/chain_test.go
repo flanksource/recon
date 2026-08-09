@@ -64,18 +64,36 @@ var _ = Describe("composing a discovery chain", func() {
 	It("rejects a chain whose stages do not fit together", func() {
 		// A chain that produces nothing while reporting success is the worst way
 		// for discovery to fail: it looks like an estate with no hosts in it.
-		chain := discovery.Chain{Name: "broken", Engines: []enginediscovery.Engine{
+		chain := discovery.Chain{Name: "broken", Seed: enginediscovery.Zones, Engines: []enginediscovery.Engine{
 			fakeEngine{name: "b", accepts: enginediscovery.Endpoints, emits: enginediscovery.Observations},
 		}}
 		Expect(chain.Validate()).To(MatchError(ContainSubstring(
 			"consumes endpoints, which no earlier stage produces")))
 	})
 
-	It("accepts a stage fed by the runtime rather than an engine", func() {
-		// Zones are configured and origins come from the inventory, so neither
-		// needs a preceding stage.
-		chain := discovery.Chain{Name: "seeded", Engines: []enginediscovery.Engine{
+	It("accepts a first stage that consumes what seeds the chain", func() {
+		// A targeted sweep is handed the hosts to re-probe, so its first stage
+		// consumes hosts no earlier stage produced. Treating the seed as
+		// unavailable rejected the whole chain, and the rescan failed with
+		// "naabu consumes hosts, which no earlier stage produces".
+		chain := discovery.Chain{Name: "targeted", Seed: enginediscovery.Hosts, Engines: []enginediscovery.Engine{
+			fakeEngine{name: "a", accepts: enginediscovery.Hosts, emits: enginediscovery.Endpoints},
+		}}
+		Expect(chain.Validate()).To(Succeed())
+	})
+
+	It("still rejects a stage consuming what neither the seed nor a stage supplies", func() {
+		chain := discovery.Chain{Name: "mismatched", Seed: enginediscovery.Hosts, Engines: []enginediscovery.Engine{
 			fakeEngine{name: "a", accepts: enginediscovery.Zones, emits: enginediscovery.Hosts},
+		}}
+		Expect(chain.Validate()).To(MatchError(ContainSubstring("consumes zones")))
+	})
+
+	It("accepts a stage fed from the inventory rather than an engine", func() {
+		// Origins are projected from the targets that already answered over HTTP,
+		// so katana needs no preceding stage whatever seeds the chain.
+		chain := discovery.Chain{Name: "sourced", Seed: enginediscovery.Zones, Engines: []enginediscovery.Engine{
+			fakeEngine{name: "a", accepts: enginediscovery.Origins, emits: enginediscovery.Endpoints},
 		}}
 		Expect(chain.Validate()).To(Succeed())
 	})
@@ -86,13 +104,19 @@ var _ = Describe("composing a discovery chain", func() {
 	})
 
 	It("builds the real full chain from the registry", func() {
-		chain, err := discovery.NewChain("full", "subfinder", "naabu", "httpx", "tlsx")
+		chain, err := discovery.NewChain("full", enginediscovery.Zones, "subfinder", "naabu", "httpx", "tlsx")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(chain.Engines).To(HaveLen(4))
 	})
 
+	It("builds the real targeted chain, which starts from supplied hosts", func() {
+		chain, err := discovery.NewChain("targeted", enginediscovery.Hosts, "naabu", "httpx", "tlsx")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(chain.Engines).To(HaveLen(3))
+	})
+
 	It("refuses to build a chain naming an engine that does not exist", func() {
-		_, err := discovery.NewChain("bogus", "nmap")
+		_, err := discovery.NewChain("bogus", enginediscovery.Zones, "nmap")
 		Expect(err).To(MatchError(ContainSubstring("unknown discovery engine: nmap")))
 	})
 })

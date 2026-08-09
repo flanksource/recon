@@ -1,28 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, SegmentedControl, Select } from "@flanksource/clicky-ui";
-import { cancelScan, startScan } from "./api";
-import { ScanProfileConfig } from "./ScanProfileConfig";
-import { ScanRunStatus } from "./ScanRunStatus";
 import {
-  SCAN_PROFILES,
-  type ScanProfile,
-  type ScanStatus,
-  type ProfileDocument,
-  type TargetRow,
-} from "./types";
+  AnsiHtml,
+  Button,
+  Modal,
+  SegmentedControl,
+  Select,
+} from "@flanksource/clicky-ui";
+import {
+  cancelScan,
+  fetchEngines,
+  fetchProfiles,
+  runDiscovery,
+  saveProfile,
+  startScan,
+} from "./api";
+import { sameConfig, ScanProfileConfig } from "./ScanProfileConfig";
+import { ScanRunStatus } from "./ScanRunStatus";
+import type { Discover, Engine, Profile, ScanStatus, TargetRow } from "./types";
 
-// Classes where a full/DAST run would send malicious payloads at something real —
-// same gate the server enforces and `task scan:full` enforces on the CLI. A host not yet
-// written to the inventory is treated the same way: the server cannot verify its class,
-// so an unsaved "non-prod" is not proof of anything.
+// Classes where a scan would send malicious payloads at something real — same
+// gate the server enforces. A host not yet written to the inventory is
+// treated the same way: the server cannot verify its class, so an unsaved
+// "non-prod" is not proof of anything.
 const CONFIRM_CLASSES = new Set(["prod", "public"]);
-
-const PROFILE_LABELS: Record<string, string> = {
-  safe: "safe (non-intrusive)",
-  full: "full (DAST)",
-  discovery: "discovery (Naabu + httpx)",
-};
-const EMPTY_PROFILES: ProfileDocument[] = [];
+const DEFAULT_ENGINE = "nuclei";
+const DEFAULT_PROFILE = "safe";
 
 type Scope = "selected" | "all";
 
@@ -35,13 +37,48 @@ type Props = {
   selectedHosts: string[];
   status: ScanStatus | null;
   onStatus: (status: ScanStatus) => void;
-  onOpenScan?: (file: string) => void;
-  availableProfiles?: readonly ScanProfile[];
-  initialProfile?: ScanProfile;
+  onOpenScan?: (id: string) => void;
   allowAllTargets?: boolean;
-  nucleiProfiles?: ProfileDocument[];
-  editableNucleiProfile?: boolean;
+  /** Re-probes the selected hosts via discovery instead of running a scan engine. */
+  discoveryOnly?: boolean;
+  /** Lets this run's profile configuration be tweaked before starting. */
+  editableProfile?: boolean;
 };
+
+function DiscoveryRunSummary({
+  result,
+  running,
+}: {
+  result: Discover | null;
+  running: boolean;
+}) {
+  if (running && !result) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-border p-6 text-sm text-muted-foreground">
+        Probing selected hosts…
+      </div>
+    );
+  }
+  if (!result) return null;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="font-medium">
+          {result.hosts.length} host{result.hosts.length === 1 ? "" : "s"} probed
+        </span>
+        <span className="text-muted-foreground">
+          {result.newCount} new observation{result.newCount === 1 ? "" : "s"}
+        </span>
+        {result.error && <span className="text-destructive">{result.error}</span>}
+      </div>
+      <AnsiHtml
+        as="pre"
+        text={result.log}
+        className="min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all rounded-md bg-muted/30 p-2 font-mono text-xs"
+      />
+    </div>
+  );
+}
 
 export function ScanDialog({
   open,
@@ -52,26 +89,27 @@ export function ScanDialog({
   status,
   onStatus,
   onOpenScan,
-  availableProfiles = SCAN_PROFILES,
-  initialProfile,
   allowAllTargets = true,
-  nucleiProfiles = EMPTY_PROFILES,
-  editableNucleiProfile = false,
+  discoveryOnly = false,
+  editableProfile = false,
 }: Props) {
-  const defaultProfile = initialProfile ?? availableProfiles[0];
-  if (!defaultProfile)
-    throw new Error("ScanDialog requires at least one profile");
   const [scope, setScope] = useState<Scope>("selected");
-  const [profile, setProfile] = useState<ScanProfile>(defaultProfile);
+  const [engines, setEngines] = useState<Engine[]>([]);
+  const [engineName, setEngineName] = useState(DEFAULT_ENGINE);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profileName, setProfileName] = useState(DEFAULT_PROFILE);
   const [runConfig, setRunConfig] = useState<Record<string, unknown> | null>(
     null,
   );
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverResult, setDiscoverResult] = useState<Discover | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
-  const running = status?.phase === "running";
+  const scanRunning = status?.phase === "running";
+  const running = discoveryOnly ? discovering : scanRunning;
 
   // Scope defaults on open only. Re-deriving it while the dialog is open would silently
   // widen a run to every target if the selection changed underneath it.
@@ -80,21 +118,69 @@ export function ScanDialog({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setConfirmed(false);
+    setDiscoverResult(null);
     setScope(selectionCount.current ? "selected" : "all");
-    setProfile(defaultProfile);
-    if (editableNucleiProfile) {
-      const defaults = nucleiProfiles.find(
-        (candidate) =>
-          candidate.engine === "nuclei" && candidate.name === defaultProfile,
-      );
-      if (!defaults) {
-        setRunConfig(null);
-        setError(`Nuclei profile defaults not found: ${defaultProfile}`);
-        return;
-      }
-      setRunConfig(structuredClone(defaults.config));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || discoveryOnly) return;
+    let cancelled = false;
+    fetchEngines("scan")
+      .then((list) => {
+        if (cancelled) return;
+        setEngines(list);
+        setEngineName((current) =>
+          list.some((engine) => engine.name === current)
+            ? current
+            : (list.find((engine) => engine.name === DEFAULT_ENGINE)?.name ??
+                list[0]?.name ??
+                DEFAULT_ENGINE),
+        );
+      })
+      .catch((cause) => !cancelled && setError((cause as Error).message));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, discoveryOnly]);
+
+  useEffect(() => {
+    if (!open || discoveryOnly || !engineName) return;
+    let cancelled = false;
+    fetchProfiles({ kind: "scan", engine: engineName })
+      .then((list) => {
+        if (cancelled) return;
+        setProfiles(list);
+        setProfileName((current) =>
+          list.some((profile) => profile.name === current)
+            ? current
+            : (list.find((profile) => profile.name === DEFAULT_PROFILE)?.name ??
+                list[0]?.name ??
+                DEFAULT_PROFILE),
+        );
+      })
+      .catch((cause) => !cancelled && setError((cause as Error).message));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, discoveryOnly, engineName]);
+
+  const selectedEngine = useMemo(
+    () => engines.find((engine) => engine.name === engineName) ?? null,
+    [engines, engineName],
+  );
+  const selectedProfile = useMemo(
+    () => profiles.find((profile) => profile.name === profileName) ?? null,
+    [profiles, profileName],
+  );
+
+  useEffect(() => {
+    if (!editableProfile || !selectedProfile) {
+      setRunConfig(null);
+      return;
     }
-  }, [open, defaultProfile, editableNucleiProfile, nucleiProfiles]);
+    setRunConfig(structuredClone(selectedProfile.config));
+  }, [editableProfile, selectedProfile]);
 
   // Follow status while the scanner writes.
   useEffect(() => {
@@ -119,16 +205,17 @@ export function ScanDialog({
     const saved = new Set(savedHosts);
     return targets.filter((target) => !saved.has(target.host));
   }, [savedHosts, targets]);
+  // The server refuses an intrusive scan of these hosts without confirmation,
+  // and only an intrusive one. Both halves of that rule are the server's: the
+  // profile reports the engine's own verdict, so a safe profile does not ask.
   const needsConfirm =
-    (editableNucleiProfile ? runConfig?.dast === true : profile === "full") &&
-    risky.length > 0;
-  const needsSavedTargets = profile === "discovery" && unsaved.length > 0;
+    !discoveryOnly && risky.length > 0 && selectedProfile?.intrusive === true;
+  const needsSavedTargets = discoveryOnly && unsaved.length > 0;
 
-  // Authorisation covers exactly the hosts named in the banner — changing the scope or
-  // effective configuration revokes it rather than carrying consent to another run.
+  // Authorisation covers exactly the hosts named in the banner — changing the scope
+  // revokes it rather than carrying consent to another run.
   const riskyKey = risky.map((r) => r.host).join(",");
-  const configKey = editableNucleiProfile ? JSON.stringify(runConfig) : "";
-  useEffect(() => setConfirmed(false), [riskyKey, profile, configKey]);
+  useEffect(() => setConfirmed(false), [riskyKey, profileName]);
 
   const classCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -137,33 +224,58 @@ export function ScanDialog({
   }, [targets]);
 
   const start = useCallback(async () => {
-    if (editableNucleiProfile && !runConfig) {
-      setError(`Nuclei profile defaults not found: ${profile}`);
-      return;
-    }
     setStarting(true);
     setError(null);
     try {
-      onStatus(
-        await startScan({
-          hosts: targets.map((r) => r.host),
-          profile,
-          confirm: confirmed,
-          config: editableNucleiProfile ? runConfig ?? undefined : undefined,
-        }),
-      );
+      if (discoveryOnly) {
+        setDiscovering(true);
+        setDiscoverResult(
+          await runDiscovery({ hosts: targets.map((r) => r.host).join(",") }),
+        );
+        return;
+      }
+      if (editableProfile && !runConfig) {
+        setError(`Profile defaults not found: ${profileName}`);
+        return;
+      }
+      if (
+        editableProfile &&
+        runConfig &&
+        selectedProfile &&
+        !sameConfig(runConfig, selectedProfile.config)
+      ) {
+        await saveProfile({
+          kind: "scan",
+          engine: engineName,
+          name: profileName,
+          config: runConfig,
+          comment: selectedProfile.comment,
+        });
+      }
+      // startScan returns the created scan record, not a live status — the
+      // running status arrives over the event stream the parent already
+      // subscribes to, so there is nothing to hand to onStatus here.
+      await startScan({
+        selector: { hosts: targets.map((r) => r.host).join(",") },
+        engine: engineName,
+        profile: profileName,
+        confirm: confirmed,
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setStarting(false);
+      setDiscovering(false);
     }
   }, [
+    discoveryOnly,
     targets,
-    profile,
-    confirmed,
-    editableNucleiProfile,
+    editableProfile,
     runConfig,
-    onStatus,
+    selectedProfile,
+    engineName,
+    profileName,
+    confirmed,
   ]);
 
   const stop = useCallback(async () => {
@@ -176,30 +288,20 @@ export function ScanDialog({
 
   // Only a run's progress/findings/log need the tall pinned panel; the setup form alone
   // should size to its content.
-  const hasRun = !!status && status.phase !== "idle";
-  const discoveryRun = status?.profile === "discovery";
-  const discoveryOnly =
-    availableProfiles.length === 1 && availableProfiles[0] === "discovery";
-  const selectedNucleiProfile = nucleiProfiles.find(
-    (candidate) =>
-      candidate.engine === "nuclei" && candidate.name === profile,
-  );
+  const hasRun = discoveryOnly
+    ? discovering || discoverResult !== null
+    : !!status && status.phase !== "idle";
 
-  const chooseProfile = (nextProfile: ScanProfile) => {
-    setProfile(nextProfile);
+  const chooseEngine = (name: string) => {
+    setEngineName(name);
     setConfirmed(false);
     setError(null);
-    if (!editableNucleiProfile) return;
-    const defaults = nucleiProfiles.find(
-      (candidate) =>
-        candidate.engine === "nuclei" && candidate.name === nextProfile,
-    );
-    if (!defaults) {
-      setRunConfig(null);
-      setError(`Nuclei profile defaults not found: ${nextProfile}`);
-      return;
-    }
-    setRunConfig(structuredClone(defaults.config));
+  };
+
+  const chooseProfile = (name: string) => {
+    setProfileName(name);
+    setConfirmed(false);
+    setError(null);
   };
 
   return (
@@ -211,13 +313,13 @@ export function ScanDialog({
       title={
         discoveryOnly
           ? "Rescan discovery"
-          : editableNucleiProfile
-            ? "Run Nuclei scan"
+          : selectedEngine
+            ? `Run ${selectedEngine.title} scan`
             : "Run scan"
       }
       size="xl"
       className={
-        editableNucleiProfile || (hasRun && !discoveryRun)
+        editableProfile || (hasRun && !discoveryOnly)
           ? "h-[calc(100dvh-4rem)]"
           : undefined
       }
@@ -255,25 +357,48 @@ export function ScanDialog({
               </code>
             </span>
           )}
-          <label className="flex flex-col gap-1 text-xs">
-            {editableNucleiProfile ? "Profile defaults" : "Profile"}
-            {availableProfiles.length > 1 ? (
-              <Select
-                className="w-52"
-                value={profile}
-                disabled={running}
-                options={availableProfiles.map((value) => ({
-                  value,
-                  label: PROFILE_LABELS[value] ?? value,
-                }))}
-                onChange={(event) => chooseProfile(event.target.value)}
-              />
-            ) : (
-              <span className="h-control-h rounded-md border border-input bg-background px-3 py-2 text-sm">
-                {PROFILE_LABELS[profile] ?? profile}
-              </span>
-            )}
-          </label>
+          {!discoveryOnly && (
+            <>
+              <label className="flex flex-col gap-1 text-xs">
+                Engine
+                {engines.length > 1 ? (
+                  <Select
+                    className="w-40"
+                    value={engineName}
+                    disabled={running}
+                    options={engines.map((engine) => ({
+                      value: engine.name,
+                      label: engine.title,
+                    }))}
+                    onChange={(event) => chooseEngine(event.target.value)}
+                  />
+                ) : (
+                  <span className="h-control-h rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    {selectedEngine?.title ?? engineName}
+                  </span>
+                )}
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                {editableProfile ? "Profile defaults" : "Profile"}
+                {profiles.length > 1 ? (
+                  <Select
+                    className="w-52"
+                    value={profileName}
+                    disabled={running}
+                    options={profiles.map((profile) => ({
+                      value: profile.name,
+                      label: profile.name,
+                    }))}
+                    onChange={(event) => chooseProfile(event.target.value)}
+                  />
+                ) : (
+                  <span className="h-control-h rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    {profileName}
+                  </span>
+                )}
+              </label>
+            </>
+          )}
           <span className="flex flex-wrap items-center gap-1 pb-1.5 text-xs text-muted-foreground">
             {classCounts.map(([cls, n]) => (
               <span key={cls} className="rounded bg-muted px-1.5 py-0.5">
@@ -283,9 +408,15 @@ export function ScanDialog({
           </span>
           <span className="flex-1" />
           {running ? (
-            <Button variant="destructive" onClick={() => void stop()}>
-              Cancel scan
-            </Button>
+            discoveryOnly ? (
+              <Button disabled loading>
+                Rescanning…
+              </Button>
+            ) : (
+              <Button variant="destructive" onClick={() => void stop()}>
+                Cancel scan
+              </Button>
+            )
           ) : (
             <Button
               onClick={() => void start()}
@@ -297,8 +428,7 @@ export function ScanDialog({
                 (needsConfirm && !confirmed)
               }
             >
-              {profile === "discovery" ? "Rescan" : "Scan"} {targets.length}{" "}
-              host
+              {discoveryOnly ? "Rescan" : "Scan"} {targets.length} host
               {targets.length === 1 ? "" : "s"}
             </Button>
           )}
@@ -313,7 +443,7 @@ export function ScanDialog({
               onChange={(e) => setConfirmed(e.target.checked)}
             />
             <span>
-              This configuration sends <strong>DAST/fuzzing payloads</strong> at{" "}
+              This scan may send <strong>intrusive payloads</strong> at{" "}
               <strong>{risky.length}</strong> prod/public or unsaved host
               {risky.length === 1 ? "" : "s"} (
               {risky.map((r) => r.host).join(", ")}). I authorise this scan.
@@ -338,20 +468,22 @@ export function ScanDialog({
         )}
 
         {!hasRun &&
-          editableNucleiProfile &&
-          selectedNucleiProfile &&
+          editableProfile &&
+          selectedEngine &&
+          selectedProfile &&
           runConfig && (
             <ScanProfileConfig
-              profile={selectedNucleiProfile}
+              engine={selectedEngine}
+              profile={selectedProfile}
               value={runConfig}
               onChange={setRunConfig}
               onReset={() =>
-                setRunConfig(structuredClone(selectedNucleiProfile.config))
+                setRunConfig(structuredClone(selectedProfile.config))
               }
             />
           )}
 
-        {status && status.phase !== "idle" && (
+        {!discoveryOnly && status && status.phase !== "idle" && (
           <ScanRunStatus
             status={status}
             logRef={logRef}
@@ -359,22 +491,25 @@ export function ScanDialog({
           />
         )}
 
-        {!hasRun && profile === "discovery" && (
+        {discoveryOnly && hasRun && (
+          <DiscoveryRunSummary result={discoverResult} running={discovering} />
+        )}
+
+        {!hasRun && discoveryOnly && (
           <p className="px-3 pb-2 text-sm text-muted-foreground">
-            Runs Naabu with <code>config/discovery.naabu.yaml</code>, then probes
-            open endpoints and known login paths with httpx. It refreshes
-            machine-owned ports, HTTP status, response time, paths, login
-            methods, network, TLS, and technology observations without creating
-            Nuclei findings.
+            Re-probes the selected hosts and refreshes their machine-owned
+            observation fields — ports, HTTP status, response time, known
+            paths, login methods, network, TLS, and technology — without
+            creating scan findings.
           </p>
         )}
 
-        {!hasRun && profile !== "discovery" && !editableNucleiProfile && (
+        {!hasRun && !discoveryOnly && selectedEngine && (
           <p className="px-3 pb-2 text-sm text-muted-foreground">
-            Runs the same nuclei command as <code>task scan:{profile}</code>{" "}
-            over the chosen hosts, writes <code>results/*.jsonl</code>, and
-            updates each host's machine-owned scan fields in its inventory
-            document.
+            Runs {selectedEngine.title} with the "{profileName}" profile over
+            the chosen hosts and updates each host's machine-owned scan
+            fields.{" "}
+            {selectedEngine.description}
           </p>
         )}
       </div>

@@ -49,7 +49,14 @@ func New() *cobra.Command {
 	flags.StringVar(&root, "root", ".",
 		"working root for engine inputs and artifacts")
 
-	cmd.AddCommand(newMigrateCommand(), newDBCommand(), newServeCommand())
+	// These administer the process rather than serve a resource, so they are
+	// kept off the generated HTTP surface: publishing the CLI would otherwise
+	// let an unauthenticated request migrate the schema, print the DSN, or start
+	// a second server inside this one.
+	for _, local := range []*cobra.Command{newMigrateCommand(), newDBCommand(), newServeCommand()} {
+		clicky.MarkLocalOnly(local)
+		cmd.AddCommand(local)
+	}
 
 	// Entities are declared before the tree is generated and before any flag is
 	// parsed, so their subcommands exist to be parsed into. The database they
