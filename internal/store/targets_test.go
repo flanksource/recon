@@ -37,7 +37,6 @@ func repoRoot() string {
 func loadDocuments(pattern string) []api.TargetDocument {
 	paths, err := filepath.Glob(filepath.Join(repoRoot(), pattern))
 	Expect(err).ToNot(HaveOccurred())
-	Expect(paths).ToNot(BeEmpty(), "no documents matched %s", pattern)
 
 	documents := make([]api.TargetDocument, 0, len(paths))
 	for _, path := range paths {
@@ -74,9 +73,13 @@ var _ = Describe("the target store", Ordered, Label("db"), func() {
 	// The wire round-trip already proved the Go types are lossless. This proves
 	// the same for a full trip through Postgres, where the jsonb encoding and the
 	// text[]/integer[] conversions are the parts that can quietly drop data.
-	It("round-trips all 207 live documents through the database", func() {
-		documents := loadDocuments("inventory/targets/*.json")
-		Expect(documents).To(HaveLen(207))
+	//
+	// The committed snapshot is the floor; the gitignored full capture is the
+	// stronger version and runs whenever a developer still has it locally.
+	It("round-trips every captured document through the database", func() {
+		documents := loadDocuments("contract/snapshot/inventory/targets/*.json")
+		Expect(documents).ToNot(BeEmpty())
+		documents = append(documents, loadDocuments("contract/golden/full/targets/*.json")...)
 
 		for _, document := range documents {
 			Expect(st.SaveTarget(ctx, document)).To(Succeed(), document.Host)

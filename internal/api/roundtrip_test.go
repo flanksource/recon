@@ -39,10 +39,13 @@ func repoRoot() string {
 // Decoding and re-encoding every checked-in document is a mechanical,
 // exhaustive proof that the projection is lossless.
 var _ = Describe("TargetDocument", func() {
-	DescribeTable("round-trips every checked-in document byte-for-byte",
-		func(dir string) {
+	DescribeTable("round-trips every captured document byte-for-byte",
+		func(dir string, required bool) {
 			paths, err := filepath.Glob(filepath.Join(repoRoot(), dir, "*.json"))
 			Expect(err).ToNot(HaveOccurred())
+			if !required && len(paths) == 0 {
+				Skip("no local capture in " + dir)
+			}
 			Expect(paths).ToNot(BeEmpty(), "no documents found in %s", dir)
 
 			for _, path := range paths {
@@ -57,9 +60,12 @@ var _ = Describe("TargetDocument", func() {
 				Expect(encoded).To(MatchJSON(original), "re-encoding %s", filepath.Base(path))
 			}
 		},
-		Entry("the live inventory (207 targets)", "inventory/targets"),
-		Entry("the committed snapshot", "contract/snapshot/inventory/targets"),
-		Entry("the API responses captured from the TypeScript server", "contract/golden/subset/targets"),
+		Entry("the committed snapshot", "contract/snapshot/inventory/targets", true),
+		Entry("the API responses captured from the TypeScript server", "contract/golden/subset/targets", true),
+		// The full 207-host capture is gitignored — it describes live
+		// infrastructure. It is the strongest version of this assertion, so run
+		// it whenever the developer still has it, and skip in CI.
+		Entry("the full local capture, when present", "contract/golden/full/targets", false),
 	)
 
 	// Decoding must not invent fields either: an unknown key in a document would
