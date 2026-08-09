@@ -47,6 +47,19 @@ func (f Finding) GetID() string { return f.ScanID + "#" + strconv.Itoa(f.LineNo)
 // shows.
 func (f Finding) GetName() string { return f.Name }
 
+// Zone is a DNS zone discovery enumerates. Zones are configured rather than
+// discovered — they are what a sweep starts from, so there is nothing to infer
+// them from.
+type Zone struct {
+	Zone string `json:"zone"`
+}
+
+// GetID returns the zone name.
+func (z Zone) GetID() string { return z.Zone }
+
+// GetName returns the zone name.
+func (z Zone) GetName() string { return z.Zone }
+
 // EngineSpec is an engine as the API exposes it: the registry entry plus what
 // is installed on this machine. Read-only — engines are compiled in, so there
 // is nothing to create or edit.

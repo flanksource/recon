@@ -26,6 +26,10 @@ import (
 type Registry struct {
 	Provisioner *engines.Provisioner
 
+	// Runtimes drive the operations that do something rather than return
+	// something. Optional: without them those commands are simply not offered.
+	Runtimes Runtimes
+
 	st *store.Store
 }
 
@@ -77,6 +81,39 @@ func (r *Registry) Register() {
 	r.registerDiscover()
 	r.registerProfile()
 	r.registerEngine()
+	r.registerZone()
+	r.registerActions()
+}
+
+// registerZone exposes the zones discovery enumerates. They are configured, not
+// discovered: with none set, a sweep has nothing to start from.
+func (r *Registry) registerZone() {
+	clicky.NewEntity[api.Zone, store.ZoneOpts, api.Zone]("zone").
+		Aliases("zones").
+		ToolGroup("configuration").
+		ListWithContext(bind(r, (*store.Store).ListZoneDocuments)).
+		GetWithContext(bind(r, (*store.Store).GetZone)).
+		CreateWithContext(bind(r, addZone)).
+		DeleteWithContext(deleteZone(r)).
+		Register()
+}
+
+func addZone(st *store.Store, ctx context.Context, body map[string]any) (api.Zone, error) {
+	name, _ := body["zone"].(string)
+	if name == "" {
+		name, _ = body["id"].(string)
+	}
+	return st.AddZone(ctx, name)
+}
+
+func deleteZone(r *Registry) func(context.Context, string) error {
+	return func(ctx context.Context, id string) error {
+		st, err := r.store()
+		if err != nil {
+			return err
+		}
+		return st.DeleteZone(ctx, id)
+	}
 }
 
 func (r *Registry) registerTarget() {

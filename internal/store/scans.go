@@ -15,7 +15,7 @@ import (
 type ScanOpts struct {
 	Engine   []string `flag:"engine" help:"Only runs of these engines"`
 	Profile  []string `flag:"profile" help:"Only runs of these profiles"`
-	Phase    []string `flag:"phase" help:"Only runs in these phases (queued, running, completed, failed, cancelled)"`
+	Phase    []string `flag:"phase" help:"Only runs in these phases (idle, running, done, failed, cancelled)"`
 	Severity []string `flag:"severity" help:"Only runs that found at least one finding of these severities"`
 	Since    string   `flag:"since" help:"Only runs started since this time (RFC3339 or a duration such as 24h)"`
 	Limit    int      `flag:"limit" help:"Most recent N runs" default:"100"`
@@ -142,7 +142,14 @@ func (s *Store) CreateScan(ctx context.Context, scan models.Scan) (models.Scan, 
 		scan.StartedAt = time.Now()
 	}
 	if scan.Phase == "" {
-		scan.Phase = string(api.PhaseQueued)
+		scan.Phase = string(api.PhaseIdle)
+	}
+	// The column is NOT NULL with a default, but gorm sends an explicit NULL
+	// for a nil wrapper rather than omitting the column, so the default never
+	// applies. A run that has found nothing yet has zero of every severity.
+	if scan.Severities.V == nil {
+		counts := api.SeverityCounts(nil)
+		scan.Severities = models.Wrap(&counts)
 	}
 	if err := s.DB(ctx).Create(&scan).Error; err != nil {
 		return models.Scan{}, fmt.Errorf("create scan: %w", err)

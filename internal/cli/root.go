@@ -12,8 +12,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/flanksource/recon/internal/db"
+	"github.com/flanksource/recon/internal/discovery"
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/entities"
+	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
 
@@ -52,7 +54,13 @@ func New() *cobra.Command {
 	// Entities are declared before the tree is generated and before any flag is
 	// parsed, so their subcommands exist to be parsed into. The database they
 	// need is attached later, in the PersistentPreRun below.
-	registry = &entities.Registry{Provisioner: engines.NewProvisioner(binDir)}
+	provisioner := engines.NewProvisioner(binDir)
+	scans = &scan.Runtime{Provisioner: provisioner, Root: root}
+	sweeps = &discovery.Runner{Provisioner: provisioner, Root: root}
+	registry = &entities.Registry{
+		Provisioner: provisioner,
+		Runtimes:    entities.Runtimes{Scans: scans, Discovery: sweeps},
+	}
 	registry.Register()
 	registerEngineCommands()
 	clicky.GenerateCLI(cmd)
@@ -70,7 +78,10 @@ func New() *cobra.Command {
 			return err
 		}
 		opened = handle
-		registry.SetStore(store.New(handle.Gorm))
+		st := store.New(handle.Gorm)
+		registry.SetStore(st)
+		scans.Store = st
+		sweeps.Store = st
 		return nil
 	}
 
@@ -89,8 +100,14 @@ func New() *cobra.Command {
 // flags eventually name.
 var (
 	registry *entities.Registry
+	scans    *scan.Runtime
+	sweeps   *discovery.Runner
 	opened   *db.Handle
 )
+
+// Runtimes returns the scan and discovery runtimes the command tree built, so
+// the server can serve their streaming and action routes. Valid only after New.
+func Runtimes() (*scan.Runtime, *discovery.Runner) { return scans, sweeps }
 
 // EntityRegistry returns the registry the command tree registered, so a test
 // can serve the same entities against its own database. Valid only after New.

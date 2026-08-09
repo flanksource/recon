@@ -53,7 +53,7 @@ func newServeCommand() *cobra.Command {
 func serve(cmd *cobra.Command, st *store.Store, host string, port int) error {
 	handler := server.Handler(server.Config{
 		Host: host, Port: port,
-		Root: cmd.Root(), Registry: registry, Store: st,
+		Root: cmd.Root(), Registry: registry, Store: st, Scans: scans, Sweeps: sweeps,
 	})
 
 	httpServer := &http.Server{

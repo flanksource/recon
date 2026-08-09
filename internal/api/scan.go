@@ -1,21 +1,32 @@
 package api
 
+import "encoding/json"
+
 // Phase is where a run has got to. The vocabulary is the UI's, not clicky's:
 // the task manager supervises the process, but what the Scans tab renders comes
 // from here.
 type Phase string
 
+// The vocabulary is the one the browser and the schema already use — "idle"
+// rather than "queued", "done" rather than "completed". It is not clicky's task
+// vocabulary and must not drift into it: the frontend switches on these strings
+// and the scans table has a check constraint listing them.
 const (
-	PhaseQueued    Phase = "queued"
+	PhaseIdle      Phase = "idle"
 	PhaseRunning   Phase = "running"
-	PhaseCompleted Phase = "completed"
+	PhaseDone      Phase = "done"
 	PhaseFailed    Phase = "failed"
 	PhaseCancelled Phase = "cancelled"
 )
 
+// Phases lists every phase, in the order a run moves through them.
+func Phases() []Phase {
+	return []Phase{PhaseIdle, PhaseRunning, PhaseDone, PhaseFailed, PhaseCancelled}
+}
+
 // Terminal reports whether a run has stopped.
 func (p Phase) Terminal() bool {
-	return p == PhaseCompleted || p == PhaseFailed || p == PhaseCancelled
+	return p == PhaseDone || p == PhaseFailed || p == PhaseCancelled
 }
 
 // Scan is one run of a scan engine over a resolved selection of endpoints.
@@ -48,6 +59,29 @@ type Scan struct {
 	Stats      *ScanStats     `json:"stats,omitempty"`
 	Hosts      []string       `json:"hosts"`
 	Result     string         `json:"resultPath,omitempty"`
+}
+
+// MarshalJSON emits empty collections rather than null.
+//
+// Go marshals a nil slice as null where the browser expects []. The frontend
+// maps over hosts and indexes severities without checking, so a null is a
+// runtime error there rather than an empty list.
+func (s Scan) MarshalJSON() ([]byte, error) {
+	type alias Scan // shed the method set, or this recurses
+	out := alias(s)
+	if out.Selector == nil {
+		out.Selector = map[string]any{}
+	}
+	if out.Severities == nil {
+		out.Severities = SeverityCounts(nil)
+	}
+	if out.Hosts == nil {
+		out.Hosts = []string{}
+	}
+	if out.Command == nil {
+		out.Command = []string{}
+	}
+	return json.Marshal(out)
 }
 
 // SeverityCounts builds the per-severity map with every level present, so the
@@ -84,7 +118,7 @@ type Discover struct {
 
 // DiscoveredHost is one host a sweep observed.
 type DiscoveredHost struct {
-	Host    string `json:"host"`
+	Host    string   `json:"host"`
 	Engines []string `json:"engines"`
 	Live    bool     `json:"live"`
 	Known   bool     `json:"known"`

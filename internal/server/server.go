@@ -11,7 +11,10 @@ import (
 	"github.com/flanksource/clicky/rpc"
 	"github.com/spf13/cobra"
 
+	"github.com/flanksource/recon/internal/discovery"
 	"github.com/flanksource/recon/internal/entities"
+	"github.com/flanksource/recon/internal/httpapi"
+	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
 
@@ -29,11 +32,42 @@ type Config struct {
 	Registry *entities.Registry
 
 	Store *store.Store
+
+	// Scans is the scan runtime. Optional: a test that only exercises the
+	// entity routes does not need one, and the streaming route is left
+	// unregistered rather than serving a nil runtime.
+	Scans *scan.Runtime
+
+	// Sweeps is the discovery runner. Optional, like Scans.
+	Sweeps *discovery.Runner
 }
 
 // Handler builds the mux.
 func Handler(config Config) http.Handler {
+	// Every component that reaches the database is given it here, in one place.
+	// The CLI path attaches it in a pre-run hook, which serve deliberately skips
+	// because it opens its own connection — so missing one here left the scan
+	// runtime holding a nil store until someone started a scan.
 	config.Registry.SetStore(config.Store)
+	if config.Sweeps != nil {
+		config.Sweeps.Store = config.Store
+	}
+
+	mux := http.NewServeMux()
+
+	if config.Scans != nil {
+		config.Scans.Store = config.Store
+		// Hand-written, not clicky's task SSE handler: that one writes named
+		// events, and the browser's EventSource.onmessage fires only for
+		// unnamed ones, so every frame would be silently discarded.
+		broadcaster := httpapi.NewBroadcaster(httpapi.BroadcasterOptions{})
+		config.Scans.Publisher = broadcaster
+		mux.Handle("GET /api/scan/events", broadcaster)
+
+		// The broadcaster replays the last frame to a new subscriber, so a page
+		// loaded before anything has run needs one published up front.
+		config.Scans.PublishCurrent()
+	}
 
 	swagger := rpc.NewSwaggerServer(
 		&rpc.ServeConfig{
@@ -47,7 +81,6 @@ func Handler(config Config) http.Handler {
 		nil,
 	)
 
-	mux := http.NewServeMux()
 	// Registering panics on a duplicate pattern, which is the behaviour we want:
 	// two routes claiming one path is a wiring bug, and it should stop the
 	// process at startup rather than serve whichever won.

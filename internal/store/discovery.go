@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/models"
@@ -52,6 +56,98 @@ func (s *Store) ListDiscoveries(ctx context.Context, opts DiscoverOpts) ([]api.D
 		sweeps = append(sweeps, sweep)
 	}
 	return sweeps, nil
+}
+
+// CreateDiscovery records a sweep before it starts, so a crashed process still
+// leaves evidence that something was attempted.
+func (s *Store) CreateDiscovery(ctx context.Context, row *models.Discovery) error {
+	if row.RanAt.IsZero() {
+		row.RanAt = time.Now()
+	}
+	if err := s.DB(ctx).Create(row).Error; err != nil {
+		return fmt.Errorf("create discovery: %w", err)
+	}
+	return nil
+}
+
+// FinishDiscovery writes a sweep's outcome.
+func (s *Store) FinishDiscovery(ctx context.Context, row models.Discovery) error {
+	err := s.DB(ctx).Model(&models.Discovery{}).Where("id = ?", row.ID).Updates(map[string]any{
+		"duration_ms": row.DurationMs,
+		"failed":      row.Failed,
+		"error":       row.Error,
+		"log":         row.Log,
+	}).Error
+	if err != nil {
+		return fmt.Errorf("finish discovery %s: %w", row.ID, err)
+	}
+	return nil
+}
+
+// SaveDiscoveryHosts records what each engine saw.
+//
+// Unknown hosts are stamped in the same transaction: a host discovery keeps
+// seeing but nobody has classified is the backlog, and first_seen has to
+// survive later sweeps or "how long has this been exposed" has no answer.
+func (s *Store) SaveDiscoveryHosts(ctx context.Context, rows []models.DiscoveryHost) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	return s.DB(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "discovery_id"}, {Name: "host"}, {Name: "engine"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{"live", "probe"}),
+		}).CreateInBatches(rows, 500).Error
+		if err != nil {
+			return fmt.Errorf("save discovery hosts: %w", err)
+		}
+
+		seen := map[string]bool{}
+		hosts := make([]string, 0, len(rows))
+		for _, row := range rows {
+			if !seen[row.Host] {
+				seen[row.Host] = true
+				hosts = append(hosts, row.Host)
+			}
+		}
+
+		var known []string
+		if err := tx.Model(&models.Target{}).
+			Where("host = ANY(?)", stringArray(hosts)).Pluck("host", &known).Error; err != nil {
+			return fmt.Errorf("known hosts: %w", err)
+		}
+		inInventory := map[string]bool{}
+		for _, host := range known {
+			inInventory[host] = true
+		}
+
+		now := time.Now()
+		var unknown []models.UnknownHost
+		for _, host := range hosts {
+			if inInventory[host] {
+				continue
+			}
+			unknown = append(unknown, models.UnknownHost{
+				Host: host, FirstSeen: now, LastSeen: now,
+			})
+		}
+		if len(unknown) == 0 {
+			return nil
+		}
+
+		err = tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "host"}},
+			// first_seen is deliberately not updated.
+			DoUpdates: clause.AssignmentColumns([]string{"last_seen"}),
+		}).CreateInBatches(unknown, 500).Error
+		if err != nil {
+			return fmt.Errorf("save unknown hosts: %w", err)
+		}
+		return nil
+	})
 }
 
 // GetDiscovery returns one sweep with the hosts it saw.
