@@ -1,0 +1,134 @@
+{
+  "profiles": [
+    {
+      "id": "httpx:discovery",
+      "engine": "httpx",
+      "name": "discovery",
+      "filename": "discovery.httpx.yaml",
+      "config": {
+        "status-code": true,
+        "response-time": true,
+        "include-response-header": true,
+        "title": true,
+        "tech-detect": true,
+        "probe": true,
+        "threads": 50,
+        "rate-limit": 100,
+        "timeout": 5,
+        "retries": 1,
+        "jarm": true,
+        "web-server": true,
+        "cpe": true,
+        "extract-fqdn": true,
+        "http2": true,
+        "wordpress": true,
+        "ip": true,
+        "asn": true,
+        "tls-grab": true,
+        "cname": true,
+        "cdn": true,
+        "pipeline": true,
+        "location": true,
+        "no-fallback": true,
+        "tls-probe": true
+      }
+    },
+    {
+      "id": "naabu:discovery",
+      "engine": "naabu",
+      "name": "discovery",
+      "filename": "discovery.naabu.yaml",
+      "config": {
+        "top-ports": "100",
+        "exclude-cdn": true,
+        "scan-type": "c",
+        "rate": 250,
+        "retries": 1,
+        "timeout": "1s",
+        "verify": true
+      }
+    },
+    {
+      "id": "nuclei:full",
+      "engine": "nuclei",
+      "name": "full",
+      "filename": "full.yaml",
+      "config": {
+        "severity": [
+          "critical",
+          "high",
+          "medium",
+          "low",
+          "info"
+        ],
+        "type": [
+          "dns",
+          "ssl",
+          "tcp",
+          "http",
+          "javascript"
+        ],
+        "exclude-tags": [
+          "dos"
+        ],
+        "dast": true,
+        "fuzzing-type": "replace",
+        "payload-concurrency": 25,
+        "rate-limit": 150,
+        "concurrency": 25,
+        "bulk-size": 25,
+        "timeout": 10,
+        "retries": 1,
+        "max-redirects": 5,
+        "disable-update-check": true,
+        "stats": true,
+        "stats-interval": 30,
+        "header": [
+          "User-Agent: flanksource-security-scan/nuclei (+security@flanksource.com)",
+          "X-Flanksource-Scan: nuclei-full"
+        ]
+      }
+    },
+    {
+      "id": "nuclei:safe",
+      "engine": "nuclei",
+      "name": "safe",
+      "filename": "safe.yaml",
+      "config": {
+        "severity": [
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ],
+        "type": [
+          "dns",
+          "ssl",
+          "tcp",
+          "http"
+        ],
+        "exclude-tags": [
+          "dos",
+          "fuzz",
+          "fuzzing",
+          "bruteforce",
+          "brute-force",
+          "intrusive"
+        ],
+        "rate-limit": 50,
+        "concurrency": 20,
+        "bulk-size": 20,
+        "timeout": 10,
+        "retries": 2,
+        "max-redirects": 3,
+        "disable-update-check": true,
+        "stats": true,
+        "stats-interval": 30,
+        "header": [
+          "User-Agent: flanksource-security-scan/nuclei (+security@flanksource.com)",
+          "X-Flanksource-Scan: nuclei-safe"
+        ]
+      }
+    }
+  ]
+}

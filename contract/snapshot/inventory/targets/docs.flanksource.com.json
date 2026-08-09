@@ -1,0 +1,90 @@
+{
+  "$schema": "../target.schema.json",
+  "app": "docs",
+  "class": "public",
+  "cluster": "external",
+  "host": "docs.flanksource.com",
+  "http": {
+    "content_type": "text/html",
+    "failed": false,
+    "location": "https://flanksource.com/docs/",
+    "port": 443,
+    "response_time": "454.133584ms",
+    "scheme": "https",
+    "status_code": 301,
+    "title": "301 Moved Permanently",
+    "url": "https://docs.flanksource.com",
+    "webserver": "cloudflare"
+  },
+  "network": {
+    "asn": {
+      "country": "US",
+      "name": "cloudflarenet",
+      "number": 13335
+    },
+    "cdn": {
+      "enabled": true,
+      "name": "cloudflare",
+      "type": "waf"
+    },
+    "ip": "104.26.1.73",
+    "ipv4": [
+      "104.26.0.73",
+      "104.26.1.73",
+      "172.67.73.121"
+    ],
+    "ipv6": [
+      "2606:4700:20::681a:149",
+      "2606:4700:20::681a:49",
+      "2606:4700:20::ac43:4979"
+    ],
+    "resolvers": [
+      "8.8.8.8:53"
+    ]
+  },
+  "notes": "Static docs site, hosted outside this repo.",
+  "observed": {
+    "first_observed": "2026-08-08T20:23:03Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z",
+    "last_seen": "2026-08-09T09:45:27.785Z"
+  },
+  "profiles": [
+    "safe"
+  ],
+  "scan": {
+    "last_findings": 1,
+    "last_scan": "2026-08-08T20:23:03Z"
+  },
+  "source": "specs/bases/apps",
+  "tags": [
+    "docs",
+    "third-party",
+    "ui"
+  ],
+  "tech": {
+    "names": [
+      "Cloudflare",
+      "HSTS",
+      "HTTP/3"
+    ]
+  },
+  "tls": {
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "fingerprint_hash": "5f7a41bd8104ef45d50ae0374947557bc83b73b451ed65a00ae23ca78800baef",
+    "issuer_cn": "WE1",
+    "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+    "issuer_org": [
+      "Google Trust Services"
+    ],
+    "not_after": "2026-09-21T21:14:22Z",
+    "not_before": "2026-06-23T20:14:24Z",
+    "serial": "83:B0:1E:A2:8C:1B:EE:7F:0E:DB:85:03:F4:27:25:00",
+    "subject_an": [
+      "docs.flanksource.com"
+    ],
+    "subject_cn": "docs.flanksource.com",
+    "subject_dn": "CN=docs.flanksource.com",
+    "tls_version": "tls13"
+  },
+  "version": 1
+}

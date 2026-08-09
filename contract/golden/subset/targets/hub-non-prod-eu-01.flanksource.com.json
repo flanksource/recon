@@ -1,0 +1,27 @@
+{
+  "$schema": "../target.schema.json",
+  "app": "gke-control-plane",
+  "class": "internal",
+  "cluster": "hub-non-prod-eu-01",
+  "host": "hub-non-prod-eu-01.flanksource.com",
+  "notes": "Private endpoint.",
+  "observed": {
+    "error": "cause=\"no address found for host\"",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "ports": [
+    443,
+    6443,
+    10250
+  ],
+  "profiles": [
+    "safe"
+  ],
+  "source": "terraform/gcp/envs/flanksource-sandbox/hub.tfvars",
+  "tags": [
+    "control-plane",
+    "dns-apex",
+    "kubernetes"
+  ],
+  "version": 1
+}

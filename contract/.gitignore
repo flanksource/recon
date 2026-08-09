@@ -1,0 +1,7 @@
+# The full capture mirrors every API response for all 207 live hosts — it
+# describes real infrastructure and must never be committed. It is produced once,
+# at cutover, by hack/capture-golden.sh and consumed by the Go contract suite.
+golden/full/
+
+# snapshot/ and fixtures/ ARE committed: a curated, redacted subset that the Go
+# tests replay forever.

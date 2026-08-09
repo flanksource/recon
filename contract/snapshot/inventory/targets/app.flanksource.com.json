@@ -1,0 +1,102 @@
+{
+  "$schema": "../target.schema.json",
+  "app": "mission-control",
+  "class": "prod",
+  "cluster": "workload-prod-eu-02",
+  "host": "app.flanksource.com",
+  "http": {
+    "content_type": "text/html",
+    "failed": false,
+    "port": 443,
+    "response_time": "483.418667ms",
+    "scheme": "https",
+    "status_code": 200,
+    "url": "https://app.flanksource.com",
+    "webserver": "Vercel"
+  },
+  "network": {
+    "asn": {
+      "country": "US",
+      "name": "amazon-02",
+      "number": 16509
+    },
+    "cname": [
+      "cname.vercel-dns.com"
+    ],
+    "ip": "76.76.21.98",
+    "ipv4": [
+      "66.33.60.67",
+      "76.76.21.98"
+    ],
+    "resolvers": [
+      "1.0.0.1:53",
+      "8.8.4.4:53"
+    ]
+  },
+  "notes": "Production Mission Control UI + Ory Kratos auth. Ingress lives in flanksource/saas-prod.",
+  "observed": {
+    "first_observed": "2026-08-08T21:16:00Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z",
+    "last_seen": "2026-08-09T09:45:27.785Z"
+  },
+  "profiles": [
+    "safe",
+    "full"
+  ],
+  "scan": {
+    "last_findings": 0,
+    "last_scan": "2026-08-09T10:51:53.937Z"
+  },
+  "source": "specs/workload-prod-eu-02/last-line/vcluster/flanksource-playwright-canary.yaml",
+  "tags": [
+    "mission-control",
+    "kratos",
+    "vercel",
+    "auth",
+    "ui",
+    "api"
+  ],
+  "tech": {
+    "cpe": [
+      {
+        "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*",
+        "product": "webp_server_go",
+        "vendor": "webp"
+      },
+      {
+        "cpe": "cpe:2.3:a:zeit:next.js:*:*:*:*:*:*:*:*",
+        "product": "next.js",
+        "vendor": "zeit"
+      },
+      {
+        "cpe": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*",
+        "product": "next.js",
+        "vendor": "vercel"
+      }
+    ],
+    "names": [
+      "C3.js",
+      "HSTS",
+      "Vercel"
+    ]
+  },
+  "tls": {
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "fingerprint_hash": "88559b26f58293091f451594d2a02cee51b410f97b0b318969f92b64391899d4",
+    "issuer_cn": "YR2",
+    "issuer_dn": "CN=YR2, O=Let's Encrypt, C=US",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_after": "2026-11-01T16:09:06Z",
+    "not_before": "2026-08-03T16:09:07Z",
+    "serial": "05:0F:E3:4F:F8:FA:3C:20:E3:54:2D:0C:A3:EC:84:2B:CA:3D",
+    "subject_an": [
+      "app.flanksource.com"
+    ],
+    "subject_cn": "app.flanksource.com",
+    "subject_dn": "CN=app.flanksource.com",
+    "tls_version": "tls13"
+  },
+  "version": 1
+}

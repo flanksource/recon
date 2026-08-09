@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flanksource.com/schemas/nuclei/inventory.schema.json",
+  "title": "Nuclei target inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "version", "zones"],
+  "properties": {
+    "$schema": { "const": "./inventory.schema.json" },
+    "version": { "const": 1 },
+    "zones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hostname" },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "hostname": {
+      "type": "string",
+      "format": "hostname",
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+    }
+  }
+}

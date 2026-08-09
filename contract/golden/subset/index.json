@@ -1,0 +1,107 @@
+[
+  {
+    "path": "/api/inventory",
+    "status": 200,
+    "file": "inventory.json"
+  },
+  {
+    "path": "/api/inventory/schema/target",
+    "status": 200,
+    "file": "target-schema.json"
+  },
+  {
+    "path": "/api/profiles",
+    "status": 200,
+    "file": "profiles.json"
+  },
+  {
+    "path": "/api/inventory/abp-sample-admin-dev.canary.lab.flanksource.com",
+    "status": 200,
+    "file": "targets/abp-sample-admin-dev.canary.lab.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/accounts.flanksource.com",
+    "status": 200,
+    "file": "targets/accounts.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/app.flanksource.com",
+    "status": 200,
+    "file": "targets/app.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/beta.app.flanksource.com",
+    "status": 200,
+    "file": "targets/beta.app.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/beta.flanksource.com",
+    "status": 200,
+    "file": "targets/beta.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/canaries.flanksource.com",
+    "status": 200,
+    "file": "targets/canaries.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/demo.flanksource.com",
+    "status": 200,
+    "file": "targets/demo.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/docs.flanksource.com",
+    "status": 200,
+    "file": "targets/docs.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/httpbin.flanksource.com",
+    "status": 200,
+    "file": "targets/httpbin.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/hub-non-prod-eu-01.flanksource.com",
+    "status": 200,
+    "file": "targets/hub-non-prod-eu-01.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com",
+    "status": 200,
+    "file": "targets/mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com.json"
+  },
+  {
+    "path": "/api/inventory/abp-sample-admin-dev.canary.lab.flanksource.com",
+    "status": 400,
+    "file": "err-not-editable.json"
+  },
+  {
+    "path": "/api/inventory/abp-sample-admin-dev.canary.lab.flanksource.com",
+    "status": 400,
+    "file": "err-host-immutable.json"
+  },
+  {
+    "path": "/api/inventory/abp-sample-admin-dev.canary.lab.flanksource.com",
+    "status": 400,
+    "file": "err-deactivated-needs-reason.json"
+  },
+  {
+    "path": "/api/inventory/abp-sample-admin-dev.canary.lab.flanksource.com",
+    "status": 400,
+    "file": "err-reason-without-deactivated.json"
+  },
+  {
+    "path": "/api/inventory/no-such-host.example.test",
+    "status": 404,
+    "file": "err-target-404.json"
+  },
+  {
+    "path": "/api/profiles/nuclei/safe/extra",
+    "status": 400,
+    "file": "err-profile-path.json"
+  },
+  {
+    "path": "/api/profiles/bogus/safe",
+    "status": 400,
+    "file": "err-profile-engine.json"
+  }
+]

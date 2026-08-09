@@ -1,0 +1,428 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flanksource.com/schemas/nuclei/target.schema.json",
+  "title": "Nuclei target",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "version",
+    "host",
+    "class",
+    "profiles",
+    "tags"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "../target.schema.json",
+      "readOnly": true
+    },
+    "version": {
+      "const": 1,
+      "readOnly": true
+    },
+    "host": {
+      "$ref": "#/$defs/hostname",
+      "readOnly": true
+    },
+    "class": {
+      "type": "string",
+      "enum": [
+        "public",
+        "prod",
+        "non-prod",
+        "internal",
+        "deactivated"
+      ]
+    },
+    "app": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "cluster": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "source": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "safe",
+          "full"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "ports": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      },
+      "uniqueItems": true
+    },
+    "notes": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "reason": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "observed": {
+      "type": "object",
+      "readOnly": true,
+      "additionalProperties": false,
+      "properties": {
+        "first_observed": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_seen": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_attempt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "error": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "readOnly": true,
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "$ref": "#/$defs/ip"
+        },
+        "ipv4": {
+          "$ref": "#/$defs/ipv4List"
+        },
+        "ipv6": {
+          "$ref": "#/$defs/ipv6List"
+        },
+        "cname": {
+          "$ref": "#/$defs/stringList"
+        },
+        "resolvers": {
+          "$ref": "#/$defs/stringList"
+        },
+        "open_ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "uniqueItems": true
+        },
+        "cdn": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "type": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "asn": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "number": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "name": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "country": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "range": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      }
+    },
+    "http": {
+      "type": "object",
+      "readOnly": true,
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "http",
+            "https"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "status_code": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "title": {
+          "type": "string"
+        },
+        "webserver": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "response_time": {
+          "type": "string"
+        },
+        "known_paths": {
+          "$ref": "#/$defs/stringList"
+        },
+        "login_methods": {
+          "$ref": "#/$defs/stringList"
+        },
+        "failed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "tech": {
+      "type": "object",
+      "readOnly": true,
+      "additionalProperties": false,
+      "properties": {
+        "names": {
+          "$ref": "#/$defs/stringList"
+        },
+        "cpe": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cpe"
+            ],
+            "properties": {
+              "product": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              },
+              "cpe": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
+            }
+          }
+        }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "readOnly": true,
+      "additionalProperties": false,
+      "properties": {
+        "tls_version": {
+          "type": "string"
+        },
+        "cipher": {
+          "type": "string"
+        },
+        "subject_dn": {
+          "type": "string"
+        },
+        "subject_cn": {
+          "type": "string"
+        },
+        "subject_org": {
+          "$ref": "#/$defs/stringList"
+        },
+        "subject_an": {
+          "$ref": "#/$defs/stringList"
+        },
+        "issuer_dn": {
+          "type": "string"
+        },
+        "issuer_cn": {
+          "type": "string"
+        },
+        "issuer_org": {
+          "$ref": "#/$defs/stringList"
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "not_after": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "serial": {
+          "type": "string"
+        },
+        "expired": {
+          "type": "boolean"
+        },
+        "self_signed": {
+          "type": "boolean"
+        },
+        "mismatched": {
+          "type": "boolean"
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "untrusted": {
+          "type": "boolean"
+        },
+        "wildcard_certificate": {
+          "type": "boolean"
+        },
+        "fingerprint_hash": {
+          "type": "string"
+        }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "readOnly": true,
+      "additionalProperties": false,
+      "properties": {
+        "last_scan": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_findings": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "class": {
+            "const": "deactivated"
+          }
+        },
+        "required": [
+          "class"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reason": true
+        },
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "class": {
+            "not": {
+              "const": "deactivated"
+            }
+          }
+        },
+        "required": [
+          "class"
+        ]
+      },
+      "then": {
+        "not": {
+          "properties": {
+            "reason": true
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "hostname": {
+      "type": "string",
+      "format": "hostname",
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "ipv4List": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "ipv4"
+      },
+      "uniqueItems": true
+    },
+    "ipv6List": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "ipv6"
+      },
+      "uniqueItems": true
+    },
+    "ip": {
+      "type": "string",
+      "anyOf": [
+        {
+          "format": "ipv4"
+        },
+        {
+          "format": "ipv6"
+        }
+      ]
+    }
+  }
+}

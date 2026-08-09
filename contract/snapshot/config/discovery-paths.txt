@@ -1,0 +1,5 @@
+/
+/.well-known/openid-configuration
+/login
+/oauth2/authorize
+/signin

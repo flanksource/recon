@@ -1,0 +1,86 @@
+{
+  "$schema": "../target.schema.json",
+  "class": "non-prod",
+  "host": "accounts.flanksource.com",
+  "http": {
+    "content_type": "text/html",
+    "failed": false,
+    "port": 443,
+    "response_time": "310.497ms",
+    "scheme": "https",
+    "status_code": 403,
+    "title": "Just a moment...",
+    "url": "https://accounts.flanksource.com",
+    "webserver": "cloudflare"
+  },
+  "network": {
+    "asn": {
+      "country": "US",
+      "name": "cloudflarenet",
+      "number": 13335
+    },
+    "cdn": {
+      "enabled": true,
+      "name": "cloudflare",
+      "type": "waf"
+    },
+    "cname": [
+      "accounts.clerk.services",
+      "worker.clerkprod-cloudflare.net"
+    ],
+    "ip": "172.64.153.110",
+    "ipv4": [
+      "104.18.34.146",
+      "172.64.153.110"
+    ],
+    "ipv6": [
+      "2606:4700:4408::ac40:996e",
+      "2a06:98c1:3100::6812:2292"
+    ],
+    "resolvers": [
+      "1.1.1.1:53",
+      "8.8.4.4:53"
+    ]
+  },
+  "notes": "Discovered — Just a moment...",
+  "observed": {
+    "first_observed": "2026-08-08T21:16:00Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z",
+    "last_seen": "2026-08-09T09:45:27.785Z"
+  },
+  "profiles": [
+    "safe"
+  ],
+  "scan": {
+    "last_findings": 4,
+    "last_scan": "2026-08-09T07:32:50Z"
+  },
+  "source": "discovered",
+  "tags": [],
+  "tech": {
+    "names": [
+      "Cloudflare",
+      "Cloudflare Bot Management",
+      "HSTS"
+    ]
+  },
+  "tls": {
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "fingerprint_hash": "a61e0f1bb21f709c0d10b3b0691b6a250c99b7cb9468782222e87ce85df816c4",
+    "issuer_cn": "WE1",
+    "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+    "issuer_org": [
+      "Google Trust Services"
+    ],
+    "not_after": "2026-09-17T17:07:34Z",
+    "not_before": "2026-06-19T16:07:41Z",
+    "serial": "BC:EC:39:8C:67:CC:92:D6:13:D8:21:D7:1B:81:2F:4F",
+    "subject_an": [
+      "accounts.flanksource.com"
+    ],
+    "subject_cn": "accounts.flanksource.com",
+    "subject_dn": "CN=accounts.flanksource.com",
+    "tls_version": "tls13"
+  },
+  "version": 1
+}

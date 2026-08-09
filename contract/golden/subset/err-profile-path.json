@@ -1,0 +1,6 @@
+{
+  "status": 400,
+  "body": {
+    "error": "expected /api/profiles/{nuclei|httpx|naabu}/{name}"
+  }
+}

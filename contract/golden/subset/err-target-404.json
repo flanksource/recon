@@ -1,0 +1,6 @@
+{
+  "status": 404,
+  "body": {
+    "error": "target not found: no-such-host.example.test"
+  }
+}

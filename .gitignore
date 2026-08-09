@@ -1,8 +1,10 @@
-# Scan output against live infrastructure — never commit.
-results/
+# Scan output against live infrastructure — never commit. Anchored: an
+# unanchored `results/` also swallows contract/snapshot/results/, whose findings
+# are synthetic and redacted and MUST be committed.
+/results/
 
 # Rendered target lists and discovery output — derived from the JSON inventory.
-.gen/
+/.gen/
 
 # The nuclei-targets skill is a project deliverable. A global ~/.config/git/ignore
 # excludes all .claude/ dirs, so re-include just the skill (not local settings).

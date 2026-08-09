@@ -1,0 +1,12 @@
+{
+  "$schema": "./inventory.schema.json",
+  "version": 1,
+  "zones": [
+    "flanksource.com",
+    "hub-non-prod-eu-01.flanksource.com",
+    "hub-prod-eu-01.flanksource.com",
+    "workload-non-prod-eu-01.flanksource.com",
+    "workload-prod-eu-01.flanksource.com",
+    "workload-prod-eu-02.flanksource.com"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "../target.schema.json",
+  "app": "canary-checker",
+  "class": "deactivated",
+  "cluster": "external",
+  "host": "canaries.flanksource.com",
+  "notes": "Verify it does not resolve. If it does, it is unmanaged.",
+  "observed": {
+    "error": "cause=\"no address found for host\"",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "profiles": [
+    "safe"
+  ],
+  "reason": "CRD API group leftover; no Ingress defines it.",
+  "source": "specs/bases/apps",
+  "tags": [
+    "canary",
+    "takeover-watch"
+  ],
+  "version": 1
+}

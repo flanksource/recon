@@ -1,0 +1,77 @@
+{
+  "$schema": "../target.schema.json",
+  "app": "mission-control-tenant",
+  "class": "prod",
+  "cluster": "workload-prod-eu-02",
+  "host": "mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com",
+  "http": {
+    "content_type": "text/plain",
+    "failed": false,
+    "port": 443,
+    "response_time": "516.211125ms",
+    "scheme": "https",
+    "status_code": 401,
+    "url": "https://mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com"
+  },
+  "network": {
+    "asn": {
+      "country": "US",
+      "name": "google-cloud-platform",
+      "number": 396982
+    },
+    "cdn": {
+      "enabled": true,
+      "name": "google",
+      "type": "cdn"
+    },
+    "ip": "34.76.46.20",
+    "ipv4": [
+      "34.76.46.20"
+    ],
+    "resolvers": [
+      "8.8.4.4:53",
+      "8.8.8.8:53"
+    ]
+  },
+  "notes": "Live customer tenant. Naming scheme is mc.org-<slug>.workload-prod-eu-01. Safe profile only.",
+  "observed": {
+    "first_observed": "2026-08-08T21:16:00Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z",
+    "last_seen": "2026-08-09T09:45:27.785Z"
+  },
+  "profiles": [
+    "safe"
+  ],
+  "source": "specs/hub-prod-eu-01/specs/mission-control-agent/secret.yaml",
+  "tags": [
+    "mission-control",
+    "tenant",
+    "pii",
+    "api",
+    "ui"
+  ],
+  "tech": {
+    "names": [
+      "HSTS"
+    ]
+  },
+  "tls": {
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "fingerprint_hash": "63c1c890b18ac634716eabdef070c383cb260cb4b556cf0944b42f7bc26e9e07",
+    "issuer_cn": "YR2",
+    "issuer_dn": "CN=YR2, O=Let's Encrypt, C=US",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_after": "2026-10-05T09:40:44Z",
+    "not_before": "2026-07-07T09:40:45Z",
+    "serial": "05:50:F4:06:FF:99:BE:E9:1B:F3:D9:D7:AB:33:75:8A:B0:A3",
+    "subject_an": [
+      "mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com"
+    ],
+    "subject_cn": "mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com",
+    "subject_dn": "CN=mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com",
+    "tls_version": "tls13"
+  },
+  "version": 1
+}

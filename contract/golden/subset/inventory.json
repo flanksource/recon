@@ -1,0 +1,867 @@
+{
+  "version": 1,
+  "zones": [
+    "flanksource.com",
+    "hub-non-prod-eu-01.flanksource.com",
+    "hub-prod-eu-01.flanksource.com",
+    "workload-non-prod-eu-01.flanksource.com",
+    "workload-prod-eu-01.flanksource.com",
+    "workload-prod-eu-02.flanksource.com"
+  ],
+  "rows": [
+    {
+      "$schema": "../target.schema.json",
+      "class": "non-prod",
+      "host": "abp-sample-admin-dev.canary.lab.flanksource.com",
+      "notes": "Discovered via subfinder/httpx.",
+      "observed": {
+        "error": "cause=\"no address found for host\"",
+        "first_observed": "2026-08-09T07:32:50Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe"
+      ],
+      "scan": {
+        "last_findings": 0,
+        "last_scan": "2026-08-09T07:32:50Z"
+      },
+      "source": "discovered",
+      "tags": [],
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "class": "non-prod",
+      "host": "accounts.flanksource.com",
+      "http": {
+        "content_type": "text/html",
+        "failed": false,
+        "port": 443,
+        "response_time": "310.497ms",
+        "scheme": "https",
+        "status_code": 403,
+        "title": "Just a moment...",
+        "url": "https://accounts.flanksource.com",
+        "webserver": "cloudflare"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "cloudflarenet",
+          "number": 13335
+        },
+        "cdn": {
+          "enabled": true,
+          "name": "cloudflare",
+          "type": "waf"
+        },
+        "cname": [
+          "accounts.clerk.services",
+          "worker.clerkprod-cloudflare.net"
+        ],
+        "ip": "172.64.153.110",
+        "ipv4": [
+          "104.18.34.146",
+          "172.64.153.110"
+        ],
+        "ipv6": [
+          "2606:4700:4408::ac40:996e",
+          "2a06:98c1:3100::6812:2292"
+        ],
+        "resolvers": [
+          "1.1.1.1:53",
+          "8.8.4.4:53"
+        ]
+      },
+      "notes": "Discovered — Just a moment...",
+      "observed": {
+        "first_observed": "2026-08-08T21:16:00Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe"
+      ],
+      "scan": {
+        "last_findings": 4,
+        "last_scan": "2026-08-09T07:32:50Z"
+      },
+      "source": "discovered",
+      "tags": [],
+      "tech": {
+        "names": [
+          "Cloudflare",
+          "Cloudflare Bot Management",
+          "HSTS"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "fingerprint_hash": "a61e0f1bb21f709c0d10b3b0691b6a250c99b7cb9468782222e87ce85df816c4",
+        "issuer_cn": "WE1",
+        "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+        "issuer_org": [
+          "Google Trust Services"
+        ],
+        "not_after": "2026-09-17T17:07:34Z",
+        "not_before": "2026-06-19T16:07:41Z",
+        "serial": "BC:EC:39:8C:67:CC:92:D6:13:D8:21:D7:1B:81:2F:4F",
+        "subject_an": [
+          "accounts.flanksource.com"
+        ],
+        "subject_cn": "accounts.flanksource.com",
+        "subject_dn": "CN=accounts.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "mission-control",
+      "class": "prod",
+      "cluster": "workload-prod-eu-02",
+      "host": "app.flanksource.com",
+      "http": {
+        "content_type": "text/html",
+        "failed": false,
+        "port": 443,
+        "response_time": "483.418667ms",
+        "scheme": "https",
+        "status_code": 200,
+        "url": "https://app.flanksource.com",
+        "webserver": "Vercel"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "amazon-02",
+          "number": 16509
+        },
+        "cname": [
+          "cname.vercel-dns.com"
+        ],
+        "ip": "76.76.21.98",
+        "ipv4": [
+          "66.33.60.67",
+          "76.76.21.98"
+        ],
+        "resolvers": [
+          "1.0.0.1:53",
+          "8.8.4.4:53"
+        ]
+      },
+      "notes": "Production Mission Control UI + Ory Kratos auth. Ingress lives in flanksource/saas-prod.",
+      "observed": {
+        "first_observed": "2026-08-08T21:16:00Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe",
+        "full"
+      ],
+      "scan": {
+        "last_findings": 0,
+        "last_scan": "2026-08-09T10:51:53.937Z"
+      },
+      "source": "specs/workload-prod-eu-02/last-line/vcluster/flanksource-playwright-canary.yaml",
+      "tags": [
+        "mission-control",
+        "kratos",
+        "vercel",
+        "auth",
+        "ui",
+        "api"
+      ],
+      "tech": {
+        "cpe": [
+          {
+            "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*",
+            "product": "webp_server_go",
+            "vendor": "webp"
+          },
+          {
+            "cpe": "cpe:2.3:a:zeit:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "zeit"
+          },
+          {
+            "cpe": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "vercel"
+          }
+        ],
+        "names": [
+          "C3.js",
+          "HSTS",
+          "Vercel"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "fingerprint_hash": "88559b26f58293091f451594d2a02cee51b410f97b0b318969f92b64391899d4",
+        "issuer_cn": "YR2",
+        "issuer_dn": "CN=YR2, O=Let's Encrypt, C=US",
+        "issuer_org": [
+          "Let's Encrypt"
+        ],
+        "not_after": "2026-11-01T16:09:06Z",
+        "not_before": "2026-08-03T16:09:07Z",
+        "serial": "05:0F:E3:4F:F8:FA:3C:20:E3:54:2D:0C:A3:EC:84:2B:CA:3D",
+        "subject_an": [
+          "app.flanksource.com"
+        ],
+        "subject_cn": "app.flanksource.com",
+        "subject_dn": "CN=app.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "class": "non-prod",
+      "host": "beta.app.flanksource.com",
+      "http": {
+        "content_type": "text/html",
+        "failed": false,
+        "port": 443,
+        "response_time": "1.591703791s",
+        "scheme": "https",
+        "status_code": 200,
+        "url": "https://beta.app.flanksource.com",
+        "webserver": "Vercel"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "amazon-02",
+          "number": 16509
+        },
+        "cname": [
+          "cname.vercel-dns.com"
+        ],
+        "ip": "76.76.21.98",
+        "ipv4": [
+          "66.33.60.67",
+          "76.76.21.98"
+        ],
+        "resolvers": [
+          "1.1.1.1:53",
+          "8.8.8.8:53"
+        ]
+      },
+      "notes": "Discovered via subfinder/httpx.",
+      "observed": {
+        "first_observed": "2026-08-08T21:16:00Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe"
+      ],
+      "scan": {
+        "last_findings": 4,
+        "last_scan": "2026-08-09T07:32:50Z"
+      },
+      "source": "discovered",
+      "tags": [],
+      "tech": {
+        "cpe": [
+          {
+            "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*",
+            "product": "webp_server_go",
+            "vendor": "webp"
+          },
+          {
+            "cpe": "cpe:2.3:a:zeit:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "zeit"
+          },
+          {
+            "cpe": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "vercel"
+          }
+        ],
+        "names": [
+          "HSTS",
+          "Vercel"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "fingerprint_hash": "70a758dcc06c27e773957a8e0c7019486a508f19753369f47d3ab61b096d685f",
+        "issuer_cn": "YR1",
+        "issuer_dn": "CN=YR1, O=Let's Encrypt, C=US",
+        "issuer_org": [
+          "Let's Encrypt"
+        ],
+        "not_after": "2026-09-28T09:39:55Z",
+        "not_before": "2026-06-30T09:39:56Z",
+        "serial": "05:82:61:2C:88:5B:EB:FA:0F:18:89:E0:28:F3:5F:F9:04:F4",
+        "subject_an": [
+          "beta.app.flanksource.com"
+        ],
+        "subject_cn": "beta.app.flanksource.com",
+        "subject_dn": "CN=beta.app.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "mission-control",
+      "class": "non-prod",
+      "cluster": "workload-non-prod-eu-01",
+      "host": "beta.flanksource.com",
+      "http": {
+        "content_type": "text/html",
+        "failed": false,
+        "port": 443,
+        "response_time": "649.3635ms",
+        "scheme": "https",
+        "status_code": 200,
+        "url": "https://beta.flanksource.com",
+        "webserver": "cloudflare"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "cloudflarenet",
+          "number": 13335
+        },
+        "cdn": {
+          "enabled": true,
+          "name": "cloudflare",
+          "type": "waf"
+        },
+        "ip": "104.26.0.73",
+        "ipv4": [
+          "104.26.0.73",
+          "104.26.1.73",
+          "172.67.73.121"
+        ],
+        "ipv6": [
+          "2606:4700:20::681a:149",
+          "2606:4700:20::681a:49",
+          "2606:4700:20::ac43:4979"
+        ],
+        "resolvers": [
+          "1.0.0.1:53",
+          "8.8.4.4:53"
+        ]
+      },
+      "notes": "Mission Control beta UI. Also served from specs/vps-d1140a41.",
+      "observed": {
+        "first_observed": "2026-08-08T20:23:03Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe",
+        "full"
+      ],
+      "scan": {
+        "last_findings": 2,
+        "last_scan": "2026-08-09T10:55:09.846Z"
+      },
+      "source": "specs/workload-non-prod-eu-01/mission-control/ingress.yml",
+      "tags": [
+        "mission-control",
+        "kratos",
+        "cloudflare",
+        "auth",
+        "ui",
+        "api"
+      ],
+      "tech": {
+        "cpe": [
+          {
+            "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*",
+            "product": "webp_server_go",
+            "vendor": "webp"
+          },
+          {
+            "cpe": "cpe:2.3:a:zeit:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "zeit"
+          },
+          {
+            "cpe": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "vercel"
+          }
+        ],
+        "names": [
+          "Cloudflare",
+          "Cloudflare Browser Insights",
+          "HSTS",
+          "HTTP/3"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "fingerprint_hash": "54df1400093fdb800313e208750a92b58c4178d5ee77f21bc80fe743bc369c75",
+        "issuer_cn": "WE1",
+        "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+        "issuer_org": [
+          "Google Trust Services"
+        ],
+        "not_after": "2026-10-13T16:22:18Z",
+        "not_before": "2026-07-15T15:22:31Z",
+        "serial": "CA:59:A0:C1:6D:F3:08:27:0E:DA:8A:D3:01:C3:8A:59",
+        "subject_an": [
+          "beta.flanksource.com"
+        ],
+        "subject_cn": "beta.flanksource.com",
+        "subject_dn": "CN=beta.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "canary-checker",
+      "class": "deactivated",
+      "cluster": "external",
+      "host": "canaries.flanksource.com",
+      "notes": "Verify it does not resolve. If it does, it is unmanaged.",
+      "observed": {
+        "error": "cause=\"no address found for host\"",
+        "last_attempt": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe"
+      ],
+      "reason": "CRD API group leftover; no Ingress defines it.",
+      "source": "specs/bases/apps",
+      "tags": [
+        "canary",
+        "takeover-watch"
+      ],
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "mission-control-public-demo",
+      "class": "non-prod",
+      "cluster": "workload-non-prod-eu-01",
+      "host": "demo.flanksource.com",
+      "http": {
+        "content_type": "text/html",
+        "failed": false,
+        "port": 443,
+        "response_time": "409.22425ms",
+        "scheme": "https",
+        "status_code": 200,
+        "url": "https://demo.flanksource.com",
+        "webserver": "cloudflare"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "cloudflarenet",
+          "number": 13335
+        },
+        "cdn": {
+          "enabled": true,
+          "name": "cloudflare",
+          "type": "waf"
+        },
+        "ip": "104.26.0.73",
+        "ipv4": [
+          "104.26.0.73",
+          "104.26.1.73",
+          "172.67.73.121"
+        ],
+        "ipv6": [
+          "2606:4700:20::681a:149",
+          "2606:4700:20::681a:49",
+          "2606:4700:20::ac43:4979"
+        ],
+        "resolvers": [
+          "1.0.0.1:53",
+          "8.8.8.8:53"
+        ]
+      },
+      "notes": "Public demo. Backed by ArgoCD + sock-shop + canary-checker.",
+      "observed": {
+        "first_observed": "2026-08-08T20:23:03Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe",
+        "full"
+      ],
+      "scan": {
+        "last_findings": 2,
+        "last_scan": "2026-08-09T10:55:09.846Z"
+      },
+      "source": "specs/workload-non-prod-eu-01/public-demo/ingress.yaml",
+      "tags": [
+        "mission-control",
+        "argocd",
+        "cloudflare",
+        "ui",
+        "api"
+      ],
+      "tech": {
+        "cpe": [
+          {
+            "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*",
+            "product": "webp_server_go",
+            "vendor": "webp"
+          },
+          {
+            "cpe": "cpe:2.3:a:zeit:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "zeit"
+          },
+          {
+            "cpe": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*",
+            "product": "next.js",
+            "vendor": "vercel"
+          }
+        ],
+        "names": [
+          "Cloudflare",
+          "Cloudflare Browser Insights",
+          "HSTS",
+          "HTTP/3"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "fingerprint_hash": "e8e4e7e8341361cc3d6aa4dc0355e53f2039fe87f5e253f9c9103f3b01d993e6",
+        "issuer_cn": "WE1",
+        "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+        "issuer_org": [
+          "Google Trust Services"
+        ],
+        "not_after": "2026-10-13T15:11:52Z",
+        "not_before": "2026-07-15T14:11:56Z",
+        "serial": "11:99:61:AA:9E:7E:17:C1:0E:93:F5:BA:9E:38:6E:96",
+        "subject_an": [
+          "demo.flanksource.com"
+        ],
+        "subject_cn": "demo.flanksource.com",
+        "subject_dn": "CN=demo.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "docs",
+      "class": "public",
+      "cluster": "external",
+      "host": "docs.flanksource.com",
+      "http": {
+        "content_type": "text/html",
+        "failed": false,
+        "location": "https://flanksource.com/docs/",
+        "port": 443,
+        "response_time": "454.133584ms",
+        "scheme": "https",
+        "status_code": 301,
+        "title": "301 Moved Permanently",
+        "url": "https://docs.flanksource.com",
+        "webserver": "cloudflare"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "cloudflarenet",
+          "number": 13335
+        },
+        "cdn": {
+          "enabled": true,
+          "name": "cloudflare",
+          "type": "waf"
+        },
+        "ip": "104.26.1.73",
+        "ipv4": [
+          "104.26.0.73",
+          "104.26.1.73",
+          "172.67.73.121"
+        ],
+        "ipv6": [
+          "2606:4700:20::681a:149",
+          "2606:4700:20::681a:49",
+          "2606:4700:20::ac43:4979"
+        ],
+        "resolvers": [
+          "8.8.8.8:53"
+        ]
+      },
+      "notes": "Static docs site, hosted outside this repo.",
+      "observed": {
+        "first_observed": "2026-08-08T20:23:03Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe"
+      ],
+      "scan": {
+        "last_findings": 1,
+        "last_scan": "2026-08-08T20:23:03Z"
+      },
+      "source": "specs/bases/apps",
+      "tags": [
+        "docs",
+        "third-party",
+        "ui"
+      ],
+      "tech": {
+        "names": [
+          "Cloudflare",
+          "HSTS",
+          "HTTP/3"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "fingerprint_hash": "5f7a41bd8104ef45d50ae0374947557bc83b73b451ed65a00ae23ca78800baef",
+        "issuer_cn": "WE1",
+        "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+        "issuer_org": [
+          "Google Trust Services"
+        ],
+        "not_after": "2026-09-21T21:14:22Z",
+        "not_before": "2026-06-23T20:14:24Z",
+        "serial": "83:B0:1E:A2:8C:1B:EE:7F:0E:DB:85:03:F4:27:25:00",
+        "subject_an": [
+          "docs.flanksource.com"
+        ],
+        "subject_cn": "docs.flanksource.com",
+        "subject_dn": "CN=docs.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "httpbin",
+      "class": "non-prod",
+      "cluster": "workload-non-prod-eu-01",
+      "host": "httpbin.flanksource.com",
+      "http": {
+        "content_type": "text/html",
+        "failed": false,
+        "port": 443,
+        "response_time": "762.551708ms",
+        "scheme": "https",
+        "status_code": 200,
+        "title": "httpbin.org",
+        "url": "https://httpbin.flanksource.com",
+        "webserver": "cloudflare"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "cloudflarenet",
+          "number": 13335
+        },
+        "cdn": {
+          "enabled": true,
+          "name": "cloudflare",
+          "type": "waf"
+        },
+        "ip": "104.26.0.73",
+        "ipv4": [
+          "104.26.0.73",
+          "104.26.1.73",
+          "172.67.73.121"
+        ],
+        "ipv6": [
+          "2606:4700:20::681a:149",
+          "2606:4700:20::681a:49",
+          "2606:4700:20::ac43:4979"
+        ],
+        "resolvers": [
+          "1.0.0.1:53",
+          "1.1.1.1:53"
+        ]
+      },
+      "notes": "kennethreitz/httpbin — open redirect and request reflection by design. Accepted risk, tracked.",
+      "observed": {
+        "first_observed": "2026-08-08T20:23:03Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe",
+        "full"
+      ],
+      "scan": {
+        "last_findings": 0,
+        "last_scan": "2026-08-09T07:41:41Z"
+      },
+      "source": "specs/workload-non-prod-eu-01/httpbin/httpbin.yml",
+      "tags": [
+        "httpbin",
+        "cloudflare",
+        "accepted-risk",
+        "api"
+      ],
+      "tech": {
+        "names": [
+          "Cloudflare",
+          "Cloudflare Browser Insights",
+          "HSTS",
+          "HTTP/3",
+          "React",
+          "Swagger UI",
+          "jQuery"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "fingerprint_hash": "10df1d8d9063e734b60d81a87ed0caf280841212f331cb4a38a43b2b70787551",
+        "issuer_cn": "WE1",
+        "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+        "issuer_org": [
+          "Google Trust Services"
+        ],
+        "not_after": "2026-10-13T15:11:24Z",
+        "not_before": "2026-07-15T14:11:26Z",
+        "serial": "B6:1B:9E:79:7C:8B:47:5F:13:B7:39:A3:FE:B5:76:B2",
+        "subject_an": [
+          "httpbin.flanksource.com"
+        ],
+        "subject_cn": "httpbin.flanksource.com",
+        "subject_dn": "CN=httpbin.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "gke-control-plane",
+      "class": "internal",
+      "cluster": "hub-non-prod-eu-01",
+      "host": "hub-non-prod-eu-01.flanksource.com",
+      "notes": "Private endpoint.",
+      "observed": {
+        "error": "cause=\"no address found for host\"",
+        "last_attempt": "2026-08-09T09:45:27.785Z"
+      },
+      "ports": [
+        443,
+        6443,
+        10250
+      ],
+      "profiles": [
+        "safe"
+      ],
+      "source": "terraform/gcp/envs/flanksource-sandbox/hub.tfvars",
+      "tags": [
+        "control-plane",
+        "dns-apex",
+        "kubernetes"
+      ],
+      "version": 1
+    },
+    {
+      "$schema": "../target.schema.json",
+      "app": "mission-control-tenant",
+      "class": "prod",
+      "cluster": "workload-prod-eu-02",
+      "host": "mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com",
+      "http": {
+        "content_type": "text/plain",
+        "failed": false,
+        "port": 443,
+        "response_time": "516.211125ms",
+        "scheme": "https",
+        "status_code": 401,
+        "url": "https://mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com"
+      },
+      "network": {
+        "asn": {
+          "country": "US",
+          "name": "google-cloud-platform",
+          "number": 396982
+        },
+        "cdn": {
+          "enabled": true,
+          "name": "google",
+          "type": "cdn"
+        },
+        "ip": "34.76.46.20",
+        "ipv4": [
+          "34.76.46.20"
+        ],
+        "resolvers": [
+          "8.8.4.4:53",
+          "8.8.8.8:53"
+        ]
+      },
+      "notes": "Live customer tenant. Naming scheme is mc.org-<slug>.workload-prod-eu-01. Safe profile only.",
+      "observed": {
+        "first_observed": "2026-08-08T21:16:00Z",
+        "last_attempt": "2026-08-09T09:45:27.785Z",
+        "last_seen": "2026-08-09T09:45:27.785Z"
+      },
+      "profiles": [
+        "safe"
+      ],
+      "source": "specs/hub-prod-eu-01/specs/mission-control-agent/secret.yaml",
+      "tags": [
+        "mission-control",
+        "tenant",
+        "pii",
+        "api",
+        "ui"
+      ],
+      "tech": {
+        "names": [
+          "HSTS"
+        ]
+      },
+      "tls": {
+        "cipher": "TLS_AES_256_GCM_SHA384",
+        "fingerprint_hash": "63c1c890b18ac634716eabdef070c383cb260cb4b556cf0944b42f7bc26e9e07",
+        "issuer_cn": "YR2",
+        "issuer_dn": "CN=YR2, O=Let's Encrypt, C=US",
+        "issuer_org": [
+          "Let's Encrypt"
+        ],
+        "not_after": "2026-10-05T09:40:44Z",
+        "not_before": "2026-07-07T09:40:45Z",
+        "serial": "05:50:F4:06:FF:99:BE:E9:1B:F3:D9:D7:AB:33:75:8A:B0:A3",
+        "subject_an": [
+          "mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com"
+        ],
+        "subject_cn": "mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com",
+        "subject_dn": "CN=mc.org-puirhxj5j7oz.workload-prod-eu-01.flanksource.com",
+        "tls_version": "tls13"
+      },
+      "version": 1
+    }
+  ],
+  "tagVocabulary": [
+    "accepted-risk",
+    "api",
+    "argocd",
+    "auth",
+    "canary",
+    "cloudflare",
+    "control-plane",
+    "dns-apex",
+    "docs",
+    "httpbin",
+    "kratos",
+    "kubernetes",
+    "mission-control",
+    "pii",
+    "takeover-watch",
+    "tenant",
+    "third-party",
+    "ui",
+    "vercel"
+  ]
+}
