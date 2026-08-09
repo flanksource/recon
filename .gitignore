@@ -3,8 +3,19 @@
 # are synthetic and redacted and MUST be committed.
 /results/
 
-# Rendered target lists and discovery output — derived from the JSON inventory.
+# Rendered target lists and per-run engine scratch — derived, never edited.
 /.gen/
+
+# Engine binaries provisioned by deps. deps-lock.yaml IS committed, so the
+# resolved versions and checksums stay reproducible.
+/.bin/
+
+# Local development against sibling checkouts; CI resolves the go.mod pins.
+/go.work
+/go.work.sum
+
+# Embedded Postgres data directory — holds the live inventory.
+/.data/
 
 # The nuclei-targets skill is a project deliverable. A global ~/.config/git/ignore
 # excludes all .claude/ dirs, so re-include just the skill (not local settings).
