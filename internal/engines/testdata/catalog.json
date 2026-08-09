@@ -1,0 +1,1394 @@
+{
+  "nuclei": [
+    {
+      "id": "templates",
+      "title": "Templates",
+      "description": "Choose template sources and opt in to protocol capabilities.",
+      "sourceUrl": "https://github.com/projectdiscovery/nuclei#command-line-flags",
+      "properties": {
+        "new-templates": {
+          "type": "boolean",
+          "title": "New templates only",
+          "description": "Run templates added in the latest templates release."
+        },
+        "automatic-scan": {
+          "type": "boolean",
+          "title": "Automatic scan",
+          "description": "Map detected technologies to template tags automatically."
+        },
+        "templates": {
+          "type": "array",
+          "title": "Templates",
+          "description": "Template files or directories to run.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflows": {
+          "type": "array",
+          "title": "Workflows",
+          "description": "Workflow files or directories to run.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "no-strict-syntax": {
+          "type": "boolean",
+          "title": "Disable strict syntax",
+          "description": "Allow templates that do not pass strict syntax checks."
+        },
+        "code": {
+          "type": "boolean",
+          "title": "Code templates",
+          "description": "Enable code protocol templates."
+        },
+        "file": {
+          "type": "boolean",
+          "title": "File templates",
+          "description": "Enable file protocol templates."
+        },
+        "enable-self-contained": {
+          "type": "boolean",
+          "title": "Self-contained templates",
+          "description": "Enable self-contained templates."
+        },
+        "enable-global-matchers": {
+          "type": "boolean",
+          "title": "Global matchers",
+          "description": "Enable global matcher templates."
+        },
+        "disable-unsigned-templates": {
+          "type": "boolean",
+          "title": "Require signed templates",
+          "description": "Disable unsigned templates and templates with mismatched signatures."
+        }
+      }
+    },
+    {
+      "id": "filtering",
+      "title": "Filtering",
+      "description": "Select or exclude templates by metadata, protocol, and matcher.",
+      "sourceUrl": "https://github.com/projectdiscovery/nuclei#command-line-flags",
+      "properties": {
+        "author": {
+          "type": "array",
+          "title": "Authors",
+          "description": "Template authors to include.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "title": "Tags",
+          "description": "Template tags to include.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude-tags": {
+          "type": "array",
+          "title": "Excluded tags",
+          "description": "Template tags to exclude.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include-tags": {
+          "type": "array",
+          "title": "Forced tags",
+          "description": "Tags that run even when excluded elsewhere.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "template-id": {
+          "type": "array",
+          "title": "Template IDs",
+          "description": "Template IDs or wildcard patterns to include.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude-id": {
+          "type": "array",
+          "title": "Excluded template IDs",
+          "description": "Template IDs to exclude.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include-templates": {
+          "type": "array",
+          "title": "Forced templates",
+          "description": "Templates that run even when excluded elsewhere.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude-templates": {
+          "type": "array",
+          "title": "Excluded templates",
+          "description": "Template files or directories to exclude.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude-matchers": {
+          "type": "array",
+          "title": "Excluded matchers",
+          "description": "Template matcher names to suppress.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "type": "array",
+          "title": "Severities",
+          "description": "Severities to include. Empty means all severities.",
+          "items": {
+            "enum": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical",
+              "unknown"
+            ]
+          },
+          "x-array-display": "filter-pills"
+        },
+        "exclude-severity": {
+          "type": "array",
+          "title": "Excluded severities",
+          "description": "Severities to exclude.",
+          "items": {
+            "enum": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical",
+              "unknown"
+            ]
+          },
+          "x-array-display": "filter-pills"
+        },
+        "type": {
+          "type": "array",
+          "title": "Protocol types",
+          "description": "Template protocol types to include. Empty means all types.",
+          "items": {
+            "enum": [
+              "dns",
+              "file",
+              "http",
+              "headless",
+              "tcp",
+              "workflow",
+              "ssl",
+              "websocket",
+              "whois",
+              "code",
+              "javascript"
+            ]
+          },
+          "x-array-display": "filter-pills"
+        },
+        "exclude-type": {
+          "type": "array",
+          "title": "Excluded protocol types",
+          "description": "Template protocol types to exclude.",
+          "items": {
+            "enum": [
+              "dns",
+              "file",
+              "http",
+              "headless",
+              "tcp",
+              "workflow",
+              "ssl",
+              "websocket",
+              "whois",
+              "code",
+              "javascript"
+            ]
+          },
+          "x-array-display": "filter-pills"
+        },
+        "template-condition": {
+          "type": "array",
+          "title": "Template conditions",
+          "description": "Expression conditions applied to template metadata.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "network",
+      "title": "HTTP & network",
+      "description": "Control redirects, transport behavior, headers, and network boundaries.",
+      "sourceUrl": "https://github.com/projectdiscovery/nuclei#command-line-flags",
+      "properties": {
+        "follow-redirects": {
+          "type": "boolean",
+          "title": "Follow redirects",
+          "description": "Follow HTTP redirects globally."
+        },
+        "follow-host-redirects": {
+          "type": "boolean",
+          "title": "Same-host redirects",
+          "description": "Follow redirects only when they remain on the same host."
+        },
+        "max-redirects": {
+          "type": "integer",
+          "title": "Maximum redirects",
+          "description": "Maximum redirects per request. Nuclei defaults to 10.",
+          "multipleOf": 1,
+          "minimum": 0
+        },
+        "disable-redirects": {
+          "type": "boolean",
+          "title": "Disable redirects",
+          "description": "Disable HTTP redirect handling."
+        },
+        "header": {
+          "type": "array",
+          "title": "Headers",
+          "description": "Headers or cookies in Header: value form. Do not store credentials here.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resolvers": {
+          "type": "string",
+          "title": "Resolver file",
+          "description": "Path to a DNS resolver list."
+        },
+        "system-resolvers": {
+          "type": "boolean",
+          "title": "System resolver fallback",
+          "description": "Use system DNS resolution when configured resolvers fail."
+        },
+        "disable-clustering": {
+          "type": "boolean",
+          "title": "Disable clustering",
+          "description": "Do not combine identical requests across templates."
+        },
+        "passive": {
+          "type": "boolean",
+          "title": "Passive mode",
+          "description": "Process supplied HTTP responses without active requests."
+        },
+        "force-http2": {
+          "type": "boolean",
+          "title": "Force HTTP/2",
+          "description": "Force HTTP/2 for requests."
+        },
+        "env-vars": {
+          "type": "boolean",
+          "title": "Environment variables",
+          "description": "Allow environment variables in templates."
+        },
+        "client-cert": {
+          "type": "string",
+          "title": "Client certificate",
+          "description": "Path to a PEM client certificate."
+        },
+        "client-key": {
+          "type": "string",
+          "title": "Client key",
+          "description": "Path to the matching PEM private key. Do not commit the key itself."
+        },
+        "client-ca": {
+          "type": "string",
+          "title": "Client CA",
+          "description": "Path to a PEM certificate authority."
+        },
+        "sni": {
+          "type": "string",
+          "title": "TLS SNI",
+          "description": "TLS server name override. Defaults to the input domain."
+        },
+        "dialer-keep-alive": {
+          "type": "string",
+          "title": "Keep-alive",
+          "description": "Network keep-alive duration, such as 30s."
+        },
+        "allow-local-file-access": {
+          "type": "boolean",
+          "title": "Local file access",
+          "description": "Allow payload files outside the templates directory."
+        },
+        "restrict-local-network-access": {
+          "type": "boolean",
+          "title": "Block private networks",
+          "description": "Prevent connections to local and private networks."
+        },
+        "interface": {
+          "type": "string",
+          "title": "Network interface",
+          "description": "Network interface used for scans."
+        },
+        "source-ip": {
+          "type": "string",
+          "title": "Source IP",
+          "description": "Source IP address used for network scans."
+        },
+        "response-size-read": {
+          "type": "integer",
+          "title": "Response read limit",
+          "description": "Maximum response bytes read into memory.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "response-size-save": {
+          "type": "integer",
+          "title": "Response save limit",
+          "description": "Maximum response bytes written to results.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "tls-impersonate": {
+          "type": "boolean",
+          "title": "TLS impersonation",
+          "description": "Randomize the experimental TLS client hello fingerprint."
+        }
+      }
+    },
+    {
+      "id": "fuzzing",
+      "title": "DAST & fuzzing",
+      "description": "Intrusive controls. Enabling these can send exploit payloads to targets.",
+      "sourceUrl": "https://github.com/projectdiscovery/nuclei#command-line-flags",
+      "properties": {
+        "dast": {
+          "type": "boolean",
+          "title": "DAST",
+          "description": "Enable DAST fuzzing templates. This sends malicious payloads."
+        },
+        "fuzzing-type": {
+          "type": "string",
+          "title": "Fuzzing type",
+          "description": "How payloads modify parameter values.",
+          "enum": [
+            "replace",
+            "prefix",
+            "postfix",
+            "infix"
+          ]
+        },
+        "fuzzing-mode": {
+          "type": "string",
+          "title": "Fuzzing mode",
+          "description": "Whether fuzzing changes one or multiple parameters.",
+          "enum": [
+            "multiple",
+            "single"
+          ]
+        },
+        "fuzz-param-frequency": {
+          "type": "integer",
+          "title": "Parameter frequency",
+          "description": "Skip an uninteresting parameter after this many occurrences. Nuclei defaults to 10.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "fuzz-aggression": {
+          "type": "string",
+          "title": "Aggression",
+          "description": "Payload count and intensity.",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "fuzz-scope": {
+          "type": "array",
+          "title": "In-scope URLs",
+          "description": "Regular expressions that the fuzzer may follow.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fuzz-out-scope": {
+          "type": "array",
+          "title": "Out-of-scope URLs",
+          "description": "Regular expressions excluded from the fuzzer.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "display-fuzz-points": {
+          "type": "boolean",
+          "title": "Display fuzz points",
+          "description": "Show fuzz points for debugging."
+        },
+        "attack-type": {
+          "type": "string",
+          "title": "Payload combinations",
+          "description": "Combination strategy for template payloads.",
+          "enum": [
+            "batteringram",
+            "pitchfork",
+            "clusterbomb"
+          ]
+        }
+      }
+    },
+    {
+      "id": "performance",
+      "title": "Performance",
+      "description": "Bound request rate, parallelism, retries, and scan strategy.",
+      "sourceUrl": "https://github.com/projectdiscovery/nuclei#command-line-flags",
+      "properties": {
+        "rate-limit": {
+          "type": "integer",
+          "title": "Requests per second",
+          "description": "Global request limit. Nuclei defaults to 150.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "rate-limit-duration": {
+          "type": "string",
+          "title": "Rate-limit window",
+          "description": "Window for the request limit, such as 1s."
+        },
+        "per-host-rate-limit": {
+          "type": "boolean",
+          "title": "Per-host rate limit",
+          "description": "Apply the rate limit per host instead of globally."
+        },
+        "bulk-size": {
+          "type": "integer",
+          "title": "Host bulk size",
+          "description": "Hosts analyzed in parallel per template. Default: 25.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "concurrency": {
+          "type": "integer",
+          "title": "Template concurrency",
+          "description": "Templates executed in parallel. Default: 25.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "headless-bulk-size": {
+          "type": "integer",
+          "title": "Headless host bulk",
+          "description": "Hosts analyzed in parallel per headless template. Default: 10.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "headless-concurrency": {
+          "type": "integer",
+          "title": "Headless concurrency",
+          "description": "Headless templates executed in parallel. Default: 10.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "js-concurrency": {
+          "type": "integer",
+          "title": "JavaScript concurrency",
+          "description": "Concurrent JavaScript runtimes. Default: 120.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "payload-concurrency": {
+          "type": "integer",
+          "title": "Payload concurrency",
+          "description": "Payloads executed in parallel per template. Default: 25.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "probe-concurrency": {
+          "type": "integer",
+          "title": "HTTP probe concurrency",
+          "description": "Concurrent httpx probes for non-URL input. Default: 50.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "template-loading-concurrency": {
+          "type": "integer",
+          "title": "Template loading",
+          "description": "Concurrent template loading operations. Default: 50.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "timeout": {
+          "type": "integer",
+          "title": "Request timeout",
+          "description": "Request timeout in seconds. Default: 10.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "retries": {
+          "type": "integer",
+          "title": "Retries",
+          "description": "Retries after a failed request. Default: 1.",
+          "multipleOf": 1,
+          "minimum": 0
+        },
+        "max-host-error": {
+          "type": "integer",
+          "title": "Host error limit",
+          "description": "Skip a host after this many errors. Default: 30.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "no-mhe": {
+          "type": "boolean",
+          "title": "Disable host error limit",
+          "description": "Never skip a host based on its error count."
+        },
+        "stop-at-first-match": {
+          "type": "boolean",
+          "title": "Stop at first match",
+          "description": "Stop HTTP requests after the first match; may alter workflow logic."
+        },
+        "stream": {
+          "type": "boolean",
+          "title": "Stream input",
+          "description": "Process input without sorting it first."
+        },
+        "scan-strategy": {
+          "type": "string",
+          "title": "Scan strategy",
+          "description": "Order hosts and templates are scanned.",
+          "enum": [
+            "auto",
+            "host-spray",
+            "template-spray"
+          ]
+        },
+        "input-read-timeout": {
+          "type": "string",
+          "title": "Input timeout",
+          "description": "Maximum wait for input, such as 3m."
+        },
+        "leave-default-ports": {
+          "type": "boolean",
+          "title": "Keep default ports",
+          "description": "Retain :80 and :443 in HTTP host values."
+        },
+        "no-httpx": {
+          "type": "boolean",
+          "title": "Disable httpx probing",
+          "description": "Do not probe non-URL input with httpx."
+        },
+        "preflight-portscan": {
+          "type": "boolean",
+          "title": "Preflight port scan",
+          "description": "Resolve and port-scan targets before template execution."
+        },
+        "max-time": {
+          "type": "string",
+          "title": "Maximum runtime",
+          "description": "Terminate the scan after a duration such as 1h or 30m."
+        }
+      }
+    },
+    {
+      "id": "headless",
+      "title": "Headless browser",
+      "description": "Configure templates that execute in Chromium.",
+      "sourceUrl": "https://github.com/projectdiscovery/nuclei#command-line-flags",
+      "properties": {
+        "headless": {
+          "type": "boolean",
+          "title": "Enable headless",
+          "description": "Enable templates that require a browser."
+        },
+        "page-timeout": {
+          "type": "integer",
+          "title": "Page timeout",
+          "description": "Seconds to wait for each page. Default: 20.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "show-browser": {
+          "type": "boolean",
+          "title": "Show browser",
+          "description": "Display the browser window during the scan."
+        },
+        "headless-options": {
+          "type": "array",
+          "title": "Chrome options",
+          "description": "Additional Chromium command-line options.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "system-chrome": {
+          "type": "boolean",
+          "title": "System Chrome",
+          "description": "Use the locally installed Chrome browser."
+        },
+        "cdp-endpoint": {
+          "type": "string",
+          "title": "CDP endpoint",
+          "description": "Remote Chrome DevTools Protocol endpoint."
+        }
+      }
+    },
+    {
+      "id": "runtime",
+      "title": "Runtime & telemetry",
+      "description": "Control updates, progress statistics, metrics, and honeypot detection.",
+      "sourceUrl": "https://github.com/projectdiscovery/nuclei#command-line-flags",
+      "properties": {
+        "disable-update-check": {
+          "type": "boolean",
+          "title": "Disable update checks",
+          "description": "Do not check for engine or template updates."
+        },
+        "stats": {
+          "type": "boolean",
+          "title": "Statistics",
+          "description": "Display scan statistics."
+        },
+        "stats-interval": {
+          "type": "integer",
+          "title": "Statistics interval",
+          "description": "Seconds between statistics updates. Default: 5.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "http-stats": {
+          "type": "boolean",
+          "title": "HTTP status capture",
+          "description": "Capture experimental HTTP statistics."
+        },
+        "metrics-port": {
+          "type": "integer",
+          "title": "Metrics port",
+          "description": "Port for the metrics endpoint. Default: 9092.",
+          "multipleOf": 1,
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "honeypot-detect": {
+          "type": "boolean",
+          "title": "Honeypot detection",
+          "description": "Flag hosts with a suspicious concentration of matches."
+        },
+        "honeypot-threshold": {
+          "type": "integer",
+          "title": "Honeypot threshold",
+          "description": "Distinct template IDs required to flag a host. Default: 15.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "suppress-honeypot": {
+          "type": "boolean",
+          "title": "Suppress honeypots",
+          "description": "Suppress findings for hosts flagged as honeypots."
+        }
+      }
+    }
+  ],
+  "httpx": [
+    {
+      "id": "probes",
+      "title": "Response probes",
+      "description": "Choose the metadata collected for each discovered endpoint.",
+      "sourceUrl": "https://github.com/projectdiscovery/httpx/blob/dev/runner/options.go#L383",
+      "properties": {
+        "status-code": {
+          "type": "boolean",
+          "title": "Status code",
+          "description": "Collect the HTTP response status."
+        },
+        "content-length": {
+          "type": "boolean",
+          "title": "Content length",
+          "description": "Collect response content length."
+        },
+        "content-type": {
+          "type": "boolean",
+          "title": "Content type",
+          "description": "Collect the response content type."
+        },
+        "location": {
+          "type": "boolean",
+          "title": "Redirect location",
+          "description": "Collect the Location response header."
+        },
+        "favicon": {
+          "type": "boolean",
+          "title": "Favicon hash",
+          "description": "Calculate the mmh3 hash of /favicon.ico."
+        },
+        "hash": {
+          "type": "string",
+          "title": "Body hash",
+          "description": "Hash algorithm applied to the response body.",
+          "enum": [
+            "md5",
+            "mmh3",
+            "simhash",
+            "sha1",
+            "sha256",
+            "sha512"
+          ]
+        },
+        "jarm": {
+          "type": "boolean",
+          "title": "JARM",
+          "description": "Collect the JARM TLS fingerprint."
+        },
+        "response-time": {
+          "type": "boolean",
+          "title": "Response time",
+          "description": "Collect request latency."
+        },
+        "include-response-header": {
+          "type": "boolean",
+          "title": "Response headers",
+          "description": "Include response headers in JSON output for authentication discovery."
+        },
+        "line-count": {
+          "type": "boolean",
+          "title": "Line count",
+          "description": "Count response body lines."
+        },
+        "word-count": {
+          "type": "boolean",
+          "title": "Word count",
+          "description": "Count response body words."
+        },
+        "title": {
+          "type": "boolean",
+          "title": "Page title",
+          "description": "Collect the HTML page title."
+        },
+        "body-preview": {
+          "type": "integer",
+          "title": "Body preview",
+          "description": "Number of response characters included in the preview. Default: 100.",
+          "multipleOf": 1,
+          "minimum": 0
+        },
+        "web-server": {
+          "type": "boolean",
+          "title": "Web server",
+          "description": "Collect the Server response header."
+        },
+        "tech-detect": {
+          "type": "boolean",
+          "title": "Technology detection",
+          "description": "Detect technologies with the Wappalyzer data set."
+        },
+        "custom-fingerprint-file": {
+          "type": "string",
+          "title": "Fingerprint file",
+          "description": "Custom fingerprints used by technology detection."
+        },
+        "cpe": {
+          "type": "boolean",
+          "title": "CPE",
+          "description": "Collect Common Platform Enumeration product details."
+        },
+        "wordpress": {
+          "type": "boolean",
+          "title": "WordPress",
+          "description": "Detect WordPress plugins and themes."
+        },
+        "method": {
+          "type": "boolean",
+          "title": "HTTP method",
+          "description": "Include the request method in results."
+        },
+        "websocket": {
+          "type": "boolean",
+          "title": "WebSocket",
+          "description": "Detect WebSocket support."
+        },
+        "ip": {
+          "type": "boolean",
+          "title": "IP address",
+          "description": "Collect the resolved host IP."
+        },
+        "cname": {
+          "type": "boolean",
+          "title": "CNAME",
+          "description": "Collect the host CNAME."
+        },
+        "extract-fqdn": {
+          "type": "boolean",
+          "title": "Extract domains",
+          "description": "Extract domains and subdomains from response bodies and headers."
+        },
+        "asn": {
+          "type": "boolean",
+          "title": "ASN",
+          "description": "Collect autonomous system information."
+        },
+        "cdn": {
+          "type": "boolean",
+          "title": "CDN / WAF",
+          "description": "Detect the CDN or web application firewall."
+        },
+        "probe": {
+          "type": "boolean",
+          "title": "Probe status",
+          "description": "Include success or failure of each probe."
+        },
+        "tls-grab": {
+          "type": "boolean",
+          "title": "TLS metadata",
+          "description": "Collect TLS certificate information."
+        },
+        "pipeline": {
+          "type": "boolean",
+          "title": "HTTP pipelining",
+          "description": "Detect HTTP/1.1 pipeline support."
+        },
+        "http2": {
+          "type": "boolean",
+          "title": "HTTP/2",
+          "description": "Detect HTTP/2 support."
+        },
+        "vhost": {
+          "type": "boolean",
+          "title": "Virtual host",
+          "description": "Probe virtual-host behavior."
+        }
+      }
+    },
+    {
+      "id": "filters",
+      "title": "Matchers & filters",
+      "description": "Keep or reject discovery results using response properties and expressions.",
+      "sourceUrl": "https://github.com/projectdiscovery/httpx/blob/dev/runner/options.go#L383",
+      "properties": {
+        "match-code": {
+          "type": "string",
+          "title": "Match status codes",
+          "description": "Comma-separated status codes to keep, such as 200,302."
+        },
+        "match-length": {
+          "type": "string",
+          "title": "Match lengths",
+          "description": "Comma-separated response lengths to keep."
+        },
+        "match-line-count": {
+          "type": "string",
+          "title": "Match line counts",
+          "description": "Comma-separated body line counts to keep."
+        },
+        "match-word-count": {
+          "type": "string",
+          "title": "Match word counts",
+          "description": "Comma-separated body word counts to keep."
+        },
+        "match-favicon": {
+          "type": "array",
+          "title": "Match favicon hashes",
+          "description": "Favicon hashes to keep.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "match-string": {
+          "type": "array",
+          "title": "Match strings",
+          "description": "Response strings to keep.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "match-regex": {
+          "type": "array",
+          "title": "Match regular expressions",
+          "description": "Response regular expressions to keep.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "match-response-time": {
+          "type": "string",
+          "title": "Match response time",
+          "description": "Response-time expression such as < 1."
+        },
+        "match-condition": {
+          "type": "string",
+          "title": "Match condition",
+          "description": "DSL condition that results must satisfy."
+        },
+        "extract-regex": {
+          "type": "array",
+          "title": "Extract expressions",
+          "description": "Regular expressions whose matches are included in output.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extract-preset": {
+          "type": "array",
+          "title": "Extract presets",
+          "description": "Built-in extractors such as url, ipv4, and mail.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filter-code": {
+          "type": "string",
+          "title": "Filter status codes",
+          "description": "Comma-separated status codes to reject, such as 403,401."
+        },
+        "filter-error-page": {
+          "type": "boolean",
+          "title": "Filter error pages",
+          "description": "Use ML-based generic error-page detection."
+        },
+        "filter-duplicates": {
+          "type": "boolean",
+          "title": "Filter duplicates",
+          "description": "Keep only the first near-duplicate response."
+        },
+        "filter-length": {
+          "type": "string",
+          "title": "Filter lengths",
+          "description": "Comma-separated response lengths to reject."
+        },
+        "filter-line-count": {
+          "type": "string",
+          "title": "Filter line counts",
+          "description": "Comma-separated body line counts to reject."
+        },
+        "filter-word-count": {
+          "type": "string",
+          "title": "Filter word counts",
+          "description": "Comma-separated body word counts to reject."
+        },
+        "filter-favicon": {
+          "type": "array",
+          "title": "Filter favicon hashes",
+          "description": "Favicon hashes to reject.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filter-string": {
+          "type": "array",
+          "title": "Filter strings",
+          "description": "Response strings to reject.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filter-regex": {
+          "type": "array",
+          "title": "Filter regular expressions",
+          "description": "Response regular expressions to reject.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filter-response-time": {
+          "type": "string",
+          "title": "Filter response time",
+          "description": "Response-time expression such as > 1."
+        },
+        "filter-condition": {
+          "type": "string",
+          "title": "Filter condition",
+          "description": "DSL condition used to reject results."
+        },
+        "strip": {
+          "type": "string",
+          "title": "Strip markup",
+          "description": "Remove markup before matching.",
+          "enum": [
+            "html",
+            "xml"
+          ]
+        }
+      }
+    },
+    {
+      "id": "network",
+      "title": "Requests & network",
+      "description": "Control ports, paths, redirects, DNS, headers, and TLS behavior.",
+      "sourceUrl": "https://github.com/projectdiscovery/httpx/blob/dev/runner/options.go#L383",
+      "properties": {
+        "ports": {
+          "type": "array",
+          "title": "Ports",
+          "description": "Ports in nmap-style syntax, such as http:80,8080 or https:443.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "path": {
+          "type": "string",
+          "title": "Paths",
+          "description": "Path or comma-separated paths to probe."
+        },
+        "probe-all-ips": {
+          "type": "boolean",
+          "title": "Probe every IP",
+          "description": "Probe all IPs associated with each host."
+        },
+        "tls-probe": {
+          "type": "boolean",
+          "title": "TLS domains",
+          "description": "Probe domains extracted from TLS certificates."
+        },
+        "csp-probe": {
+          "type": "boolean",
+          "title": "CSP domains",
+          "description": "Probe domains extracted from Content-Security-Policy headers."
+        },
+        "resolvers": {
+          "type": "array",
+          "title": "Resolvers",
+          "description": "Custom DNS resolvers or resolver files.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allow": {
+          "type": "array",
+          "title": "Allowed networks",
+          "description": "IP addresses and CIDRs allowed for probing.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "type": "array",
+          "title": "Denied networks",
+          "description": "IP addresses and CIDRs blocked from probing.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sni-name": {
+          "type": "string",
+          "title": "TLS SNI",
+          "description": "Custom TLS server name."
+        },
+        "random-agent": {
+          "type": "boolean",
+          "title": "Random user agent",
+          "description": "Use a randomized User-Agent header."
+        },
+        "auto-referer": {
+          "type": "boolean",
+          "title": "Automatic Referer",
+          "description": "Set Referer to the current URL when following links."
+        },
+        "header": {
+          "type": "array",
+          "title": "Headers",
+          "description": "Headers in Header: value form. Do not store credentials here.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "follow-redirects": {
+          "type": "boolean",
+          "title": "Follow redirects",
+          "description": "Follow HTTP redirects."
+        },
+        "max-redirects": {
+          "type": "integer",
+          "title": "Maximum redirects",
+          "description": "Maximum redirects per host. Default: 10.",
+          "multipleOf": 1,
+          "minimum": 0
+        },
+        "follow-host-redirects": {
+          "type": "boolean",
+          "title": "Same-host redirects",
+          "description": "Follow redirects only on the same host."
+        },
+        "respect-hsts": {
+          "type": "boolean",
+          "title": "Respect HSTS",
+          "description": "Honor HSTS headers for redirects."
+        },
+        "vhost-input": {
+          "type": "boolean",
+          "title": "Virtual-host input",
+          "description": "Treat input as virtual hosts."
+        },
+        "leave-default-ports": {
+          "type": "boolean",
+          "title": "Keep default ports",
+          "description": "Retain :80 and :443 in the Host header."
+        },
+        "ztls": {
+          "type": "boolean",
+          "title": "ZTLS",
+          "description": "Use ZTLS with TLS 1.3 fallback."
+        },
+        "no-decode": {
+          "type": "boolean",
+          "title": "Do not decode body",
+          "description": "Keep encoded response bodies unchanged."
+        },
+        "tls-impersonate": {
+          "type": "boolean",
+          "title": "TLS impersonation",
+          "description": "Randomize the experimental TLS client hello fingerprint."
+        },
+        "no-fallback": {
+          "type": "boolean",
+          "title": "Probe HTTP and HTTPS",
+          "description": "Return both protocols instead of falling back to one."
+        },
+        "no-fallback-scheme": {
+          "type": "boolean",
+          "title": "Keep input scheme",
+          "description": "Probe only the protocol scheme supplied in input."
+        },
+        "exclude": {
+          "type": "array",
+          "title": "Excluded hosts",
+          "description": "Exclude CDN, private IPs, CIDRs, IPs, or matching host expressions.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "performance",
+      "title": "Performance",
+      "description": "Bound concurrency, request rate, retries, delays, and response memory.",
+      "sourceUrl": "https://github.com/projectdiscovery/httpx/blob/dev/runner/options.go#L383",
+      "properties": {
+        "threads": {
+          "type": "integer",
+          "title": "Threads",
+          "description": "Concurrent worker count. httpx defaults to 50.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "rate-limit": {
+          "type": "integer",
+          "title": "Requests per second",
+          "description": "Global request limit. httpx defaults to 150.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "rate-limit-minute": {
+          "type": "integer",
+          "title": "Requests per minute",
+          "description": "Alternative per-minute request limit.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "stream": {
+          "type": "boolean",
+          "title": "Stream input",
+          "description": "Process targets without sorting first."
+        },
+        "skip-dedupe": {
+          "type": "boolean",
+          "title": "Skip deduplication",
+          "description": "Do not deduplicate streamed input."
+        },
+        "max-host-error": {
+          "type": "integer",
+          "title": "Host error limit",
+          "description": "Skip remaining paths after this many errors. Default: 30.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "retries": {
+          "type": "integer",
+          "title": "Retries",
+          "description": "Retries after a failed request.",
+          "multipleOf": 1,
+          "minimum": 0
+        },
+        "timeout": {
+          "type": "integer",
+          "title": "Timeout",
+          "description": "Request timeout in seconds. Default: 10.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "delay": {
+          "type": "string",
+          "title": "Request delay",
+          "description": "Delay between requests, such as 200ms or 1s."
+        },
+        "response-size-to-save": {
+          "type": "integer",
+          "title": "Response save limit",
+          "description": "Maximum response bytes saved to disk.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "response-size-to-read": {
+          "type": "integer",
+          "title": "Response read limit",
+          "description": "Maximum response bytes read into memory.",
+          "multipleOf": 1,
+          "minimum": 1
+        }
+      }
+    }
+  ],
+  "naabu": [
+    {
+      "id": "ports",
+      "title": "Ports & targets",
+      "description": "Choose the port range and bound broad scans of shared infrastructure.",
+      "sourceUrl": "https://github.com/projectdiscovery/naabu#usage",
+      "properties": {
+        "port": {
+          "type": "string",
+          "title": "Ports",
+          "description": "Ports or ranges to scan, such as 80,443,8000-8100."
+        },
+        "top-ports": {
+          "type": "string",
+          "title": "Top ports",
+          "description": "Use Naabu's ranked port set.",
+          "enum": [
+            "100",
+            "1000",
+            "full"
+          ]
+        },
+        "exclude-ports": {
+          "type": "array",
+          "title": "Excluded ports",
+          "description": "Ports, ranges, or files excluded from the scan.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ports-file": {
+          "type": "array",
+          "title": "Port files",
+          "description": "Files containing ports to scan.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "port-threshold": {
+          "type": "integer",
+          "title": "Port threshold",
+          "description": "Stop scanning a host after this many open ports are found.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "exclude-cdn": {
+          "type": "boolean",
+          "title": "Limit CDN scans",
+          "description": "Scan only ports 80 and 443 when the address belongs to a known CDN or WAF."
+        },
+        "display-cdn": {
+          "type": "boolean",
+          "title": "Show CDN",
+          "description": "Include detected CDN details in results."
+        }
+      }
+    },
+    {
+      "id": "network",
+      "title": "Network & services",
+      "description": "Control address selection, scan transport, DNS, and service detection.",
+      "sourceUrl": "https://github.com/projectdiscovery/naabu#usage",
+      "properties": {
+        "scan-all-ips": {
+          "type": "boolean",
+          "title": "Scan every IP",
+          "description": "Scan every address resolved for a hostname."
+        },
+        "ip-version": {
+          "type": "array",
+          "title": "IP versions",
+          "description": "IP versions included in the scan.",
+          "items": {
+            "enum": [
+              "4",
+              "6"
+            ]
+          },
+          "x-array-display": "filter-pills"
+        },
+        "scan-type": {
+          "type": "string",
+          "title": "Scan type",
+          "description": "CONNECT works without raw-socket privileges.",
+          "enum": [
+            "c",
+            "s"
+          ]
+        },
+        "r": {
+          "type": "string",
+          "title": "Resolvers",
+          "description": "Comma-separated custom DNS resolvers or a resolver file."
+        },
+        "service-discovery": {
+          "type": "boolean",
+          "title": "Service discovery",
+          "description": "Identify services on open ports."
+        },
+        "service-version": {
+          "type": "boolean",
+          "title": "Service versions",
+          "description": "Identify service versions when probe data is available."
+        }
+      }
+    },
+    {
+      "id": "performance",
+      "title": "Performance",
+      "description": "Bound connection rate, concurrency, timeouts, retries, and verification.",
+      "sourceUrl": "https://github.com/projectdiscovery/naabu#usage",
+      "properties": {
+        "c": {
+          "type": "integer",
+          "title": "Workers",
+          "description": "Internal worker count. Naabu defaults to 25.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "rate": {
+          "type": "integer",
+          "title": "Packets per second",
+          "description": "Global scan rate limit.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "retries": {
+          "type": "integer",
+          "title": "Retries",
+          "description": "Number of scan attempts per port.",
+          "multipleOf": 1,
+          "minimum": 1
+        },
+        "timeout": {
+          "type": "string",
+          "title": "Timeout",
+          "description": "Port timeout such as 1s or 1500ms."
+        },
+        "warm-up-time": {
+          "type": "integer",
+          "title": "Warm-up time",
+          "description": "Seconds between scan phases.",
+          "multipleOf": 1,
+          "minimum": 0
+        },
+        "verify": {
+          "type": "boolean",
+          "title": "Verify ports",
+          "description": "Confirm discovered ports with a TCP connection."
+        }
+      }
+    }
+  ]
+}

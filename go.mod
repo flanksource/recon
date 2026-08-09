@@ -3,7 +3,10 @@ module github.com/flanksource/recon
 go 1.26.1
 
 require (
+	github.com/flanksource/clicky v1.21.54
+	github.com/flanksource/commons v1.55.0
 	github.com/flanksource/commons-db v0.1.27
+	github.com/flanksource/deps v1.0.38
 	github.com/lib/pq v1.12.3
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
@@ -26,6 +29,7 @@ require (
 	github.com/Masterminds/squirrel v1.5.4 // indirect
 	github.com/TomOnTime/utfutil v1.0.0 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
+	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
 	github.com/alecthomas/chroma/v2 v2.23.1 // indirect
 	github.com/antchfx/xmlquery v1.5.1 // indirect
@@ -69,9 +73,7 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
-	github.com/flanksource/clicky v1.21.48 // indirect
-	github.com/flanksource/commons v1.54.0 // indirect
-	github.com/flanksource/gomplate/v3 v3.24.84 // indirect
+	github.com/flanksource/gomplate/v3 v3.24.86 // indirect
 	github.com/flanksource/is-healthy v1.0.88 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -100,6 +102,8 @@ require (
 	github.com/google/cel-go v0.27.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/go-github/v57 v57.0.0 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect

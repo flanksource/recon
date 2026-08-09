@@ -1,6 +1,8 @@
 package schema_test
 
 import (
+	"testing"
+
 	"github.com/flanksource/commons-db/dbtest"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -16,6 +18,11 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 	var db *dbtest.DB
 
 	BeforeAll(func() {
+		// -short is the suite that needs no database, so that a checkout can be
+		// verified without provisioning Postgres.
+		if testing.Short() {
+			Skip("needs a database")
+		}
 		db = dbtest.ForGinkgo(dbtest.Options{
 			Name:        "recon_schema",
 			Provisioner: schema.NewProvisioner(),

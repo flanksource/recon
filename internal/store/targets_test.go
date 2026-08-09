@@ -57,6 +57,11 @@ var _ = Describe("the target store", Ordered, Label("db"), func() {
 	)
 
 	BeforeAll(func() {
+		// -short is the suite that needs no database, so that a checkout can be
+		// verified without provisioning Postgres.
+		if testing.Short() {
+			Skip("needs a database")
+		}
 		db = dbtest.ForGinkgo(dbtest.Options{
 			Name:        "recon_store",
 			Provisioner: schema.NewProvisioner(),

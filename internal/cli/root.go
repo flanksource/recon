@@ -43,7 +43,7 @@ func New() *cobra.Command {
 	flags.StringVar(&root, "root", ".",
 		"working root for engine inputs and artifacts")
 
-	cmd.AddCommand(newMigrateCommand(), newDBCommand())
+	cmd.AddCommand(newMigrateCommand(), newDBCommand(), newEngineCommand())
 	return cmd
 }
 
