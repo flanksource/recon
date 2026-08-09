@@ -1,0 +1,45 @@
+id: flanksource-httpbin-exposure
+
+info:
+  name: Flanksource - httpbin Open Redirect / SSRF Surface
+  author: flanksource
+  severity: info
+  description: |
+    httpbin.flanksource.com runs kennethreitz/httpbin, which ships open-redirect
+    (/redirect-to) and request-reflection (/anything) endpoints by design. This
+    template does not treat those as bugs — it records that the accepted-risk surface
+    is live and internet-reachable so the finding stays tracked rather than silent.
+    Escalate only if this host ever proxies to something internal.
+  remediation: |
+    This is a deliberate test fixture. Confirm it has no network path to internal
+    services and is not used to reach cloud metadata. If it is no longer needed,
+    remove the Ingress (specs/workload-non-prod-eu-01/httpbin/httpbin.yml).
+  reference:
+    - https://httpbin.org/
+  metadata:
+    max-request: 2
+  tags: flanksource,apps,httpbin,accepted-risk,open-redirect
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/redirect-to?url=https://example.com&status_code=302'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 302
+
+      - type: word
+        part: header
+        words:
+          - 'Location: https://example.com'
+
+    extractors:
+      - type: kval
+        part: header
+        kval:
+          - location

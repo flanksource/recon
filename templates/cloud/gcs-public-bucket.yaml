@@ -1,0 +1,52 @@
+id: flanksource-gcs-public-bucket
+
+info:
+  name: Flanksource - GCS Bucket Publicly Listable
+  author: flanksource
+  severity: critical
+  description: |
+    Checks the GCS buckets this repo depends on for anonymous listing. A readable
+    tfstate bucket exposes every GCP resource id, service-account email and any value
+    Terraform captured; a readable Barman bucket exposes full tenant database backups.
+  remediation: |
+    Remove allUsers/allAuthenticatedUsers from the bucket IAM policy and enable
+    uniform bucket-level access with public access prevention enforced.
+  reference:
+    - https://cloud.google.com/storage/docs/access-control/making-data-public
+  classification:
+    cwe-id: CWE-284
+  metadata:
+    max-request: 4
+  tags: flanksource,cloud,gcp,gcs,exposure
+
+self-contained: true
+
+http:
+  - method: GET
+    path:
+      - 'https://storage.googleapis.com/storage/v1/b/flanksource-prod-tfstate/o?maxResults=1'
+      - 'https://storage.googleapis.com/storage/v1/b/flanksource-sandbox-tfstate/o?maxResults=1'
+      - 'https://storage.googleapis.com/storage/v1/b/flanksource-tenant-db-backup/o?maxResults=1'
+      - 'https://storage.googleapis.com/storage/v1/b/lastline-artifacts/o?maxResults=1'
+
+    stop-at-first-match: false
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - '"kind": "storage#objects"'
+          - '"kind":"storage#objects"'
+        condition: or
+
+    extractors:
+      - type: regex
+        part: body
+        group: 1
+        regex:
+          - '"name":[ ]*"([^"]+)"'

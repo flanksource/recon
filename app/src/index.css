@@ -1,0 +1,15 @@
+/* clicky-ui ships a prebuilt Tailwind v4 bundle with its design tokens; import it
+   first so this app's preflight below wins on overlap. */
+@import "@flanksource/clicky-ui/styles.css";
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--background, #fff);
+}

@@ -1,0 +1,93 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "www.flanksource.com",
+  "app": "webflow-proxy",
+  "cluster": "external",
+  "source": "specs/workload-prod-eu-02/cert-manager/resources/cluster-issuer.yml",
+  "profiles": [
+    "safe"
+  ],
+  "tags": [
+    "webflow",
+    "third-party",
+    "proxy",
+    "ui"
+  ],
+  "notes": "In the ACME http01 solver dnsZones list. Third-party origin.",
+  "class": "public",
+  "observed": {
+    "first_observed": "2026-08-08T20:23:03Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://www.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 301,
+    "title": "301 Moved Permanently",
+    "webserver": "cloudflare",
+    "content_type": "text/html",
+    "location": "https://flanksource.com/",
+    "response_time": "265.009917ms",
+    "failed": false
+  },
+  "tech": {
+    "names": [
+      "Cloudflare",
+      "HSTS",
+      "HTTP/3"
+    ]
+  },
+  "scan": {
+    "last_scan": "2026-08-08T20:23:03Z",
+    "last_findings": 1
+  },
+  "network": {
+    "ip": "104.26.1.73",
+    "ipv4": [
+      "104.26.0.73",
+      "104.26.1.73",
+      "172.67.73.121"
+    ],
+    "ipv6": [
+      "2606:4700:20::681a:149",
+      "2606:4700:20::681a:49",
+      "2606:4700:20::ac43:4979"
+    ],
+    "resolvers": [
+      "8.8.4.4:53",
+      "8.8.8.8:53"
+    ],
+    "cdn": {
+      "enabled": true,
+      "name": "cloudflare",
+      "type": "waf"
+    },
+    "asn": {
+      "number": 13335,
+      "name": "cloudflarenet",
+      "country": "US"
+    }
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "subject_dn": "CN=flanksource.com",
+    "subject_cn": "flanksource.com",
+    "subject_an": [
+      "flanksource.com",
+      "www.flanksource.com"
+    ],
+    "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+    "issuer_cn": "WE1",
+    "issuer_org": [
+      "Google Trust Services"
+    ],
+    "not_before": "2026-07-22T23:34:53Z",
+    "not_after": "2026-10-21T00:34:49Z",
+    "serial": "6A:71:95:5D:BE:16:79:93:0E:83:AF:24:AB:04:7F:03",
+    "fingerprint_hash": "c170d93a189b2f83764734964d9f1781e4a53f301382e71b3913c352a5821c1d"
+  }
+}

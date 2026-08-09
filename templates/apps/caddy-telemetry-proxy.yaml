@@ -1,0 +1,68 @@
+id: flanksource-caddy-telemetry-proxy
+
+info:
+  name: Flanksource - Caddy Telemetry Proxy Misconfiguration
+  author: flanksource
+  severity: high
+  description: |
+    The telemetry endpoints are a Caddy reverse proxy (specs/workload-prod-eu-02/
+    telemetry/caddy.yml) that injects an upstream Basic auth header and forwards to
+    the tenant Mission Control API. Two risks: (1) the Caddy admin API on :2019 must
+    never be reachable — it can rewrite the running config; (2) the proxy must not
+    forward arbitrary paths or preserve a client-supplied Authorization header that
+    overrides the injected one.
+  remediation: |
+    Bind the Caddy admin endpoint to localhost or disable it (admin off). Constrain
+    the reverse_proxy to the exact upstream paths; strip inbound Authorization.
+  reference:
+    - https://caddyserver.com/docs/api
+  classification:
+    cwe-id: CWE-284
+  metadata:
+    max-request: 4
+  tags: flanksource,apps,caddy,proxy,exposure
+
+http:
+  - method: GET
+    path:
+      - 'http://{{Hostname}}:2019/config/'
+      - 'https://{{Hostname}}:2019/config/'
+      - '{{BaseURL}}/config/'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - '"apps"'
+          - '"http"'
+          - '"reverse_proxy"'
+        condition: or
+
+    extractors:
+      - type: kval
+        part: header
+        kval:
+          - server
+
+  - method: GET
+    path:
+      - '{{BaseURL}}/../'
+      - '{{BaseURL}}/%2e%2e/'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        name: path-traversal-through-proxy
+        dsl:
+          - 'status_code == 200'
+          - "contains(body, 'root:') || contains(body, 'Index of /')"
+        condition: and

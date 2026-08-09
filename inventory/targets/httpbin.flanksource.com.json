@@ -1,0 +1,96 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "httpbin.flanksource.com",
+  "app": "httpbin",
+  "cluster": "workload-non-prod-eu-01",
+  "source": "specs/workload-non-prod-eu-01/httpbin/httpbin.yml",
+  "profiles": [
+    "safe",
+    "full"
+  ],
+  "tags": [
+    "httpbin",
+    "cloudflare",
+    "accepted-risk",
+    "api"
+  ],
+  "notes": "kennethreitz/httpbin — open redirect and request reflection by design. Accepted risk, tracked.",
+  "class": "non-prod",
+  "observed": {
+    "first_observed": "2026-08-08T20:23:03Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://httpbin.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 200,
+    "title": "httpbin.org",
+    "webserver": "cloudflare",
+    "content_type": "text/html",
+    "response_time": "762.551708ms",
+    "failed": false
+  },
+  "tech": {
+    "names": [
+      "Cloudflare",
+      "Cloudflare Browser Insights",
+      "HSTS",
+      "HTTP/3",
+      "React",
+      "Swagger UI",
+      "jQuery"
+    ]
+  },
+  "scan": {
+    "last_scan": "2026-08-09T07:41:41Z",
+    "last_findings": 0
+  },
+  "network": {
+    "ip": "104.26.0.73",
+    "ipv4": [
+      "104.26.0.73",
+      "104.26.1.73",
+      "172.67.73.121"
+    ],
+    "ipv6": [
+      "2606:4700:20::681a:149",
+      "2606:4700:20::681a:49",
+      "2606:4700:20::ac43:4979"
+    ],
+    "resolvers": [
+      "1.0.0.1:53",
+      "1.1.1.1:53"
+    ],
+    "cdn": {
+      "enabled": true,
+      "name": "cloudflare",
+      "type": "waf"
+    },
+    "asn": {
+      "number": 13335,
+      "name": "cloudflarenet",
+      "country": "US"
+    }
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "subject_dn": "CN=httpbin.flanksource.com",
+    "subject_cn": "httpbin.flanksource.com",
+    "subject_an": [
+      "httpbin.flanksource.com"
+    ],
+    "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+    "issuer_cn": "WE1",
+    "issuer_org": [
+      "Google Trust Services"
+    ],
+    "not_before": "2026-07-15T14:11:26Z",
+    "not_after": "2026-10-13T15:11:24Z",
+    "serial": "B6:1B:9E:79:7C:8B:47:5F:13:B7:39:A3:FE:B5:76:B2",
+    "fingerprint_hash": "10df1d8d9063e734b60d81a87ed0caf280841212f331cb4a38a43b2b70787551"
+  }
+}

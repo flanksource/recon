@@ -1,0 +1,48 @@
+# Nuclei config profile — SAFE.
+#
+# Non-intrusive only. Suitable for production endpoints.
+# No fuzzing, no DAST, no brute force, no DoS, rate-limited well below stock.
+#
+# Used via: nuclei -config config/safe.yaml
+# Composed with the built-in `recommended` profile by `task scan:safe`.
+
+severity:
+  - critical
+  - high
+  - medium
+  - low
+
+type:
+  - dns
+  - ssl
+  - tcp
+  - http
+
+exclude-tags:
+  - dos
+  - fuzz
+  - fuzzing
+  - bruteforce
+  - brute-force
+  - intrusive
+
+# Stock is 150/25/25. Halved so a scan never looks like an attack in the
+# nginx access logs these endpoints ship to ClickHouse.
+rate-limit: 50
+concurrency: 20
+bulk-size: 20
+timeout: 10
+retries: 2
+# Redirect-following is opt-in per template (host-redirects), not global — the
+# https-redirect baseline must observe the raw :80 response, not the final page.
+max-redirects: 3
+
+disable-update-check: true
+stats: true
+stats-interval: 30
+
+# Makes every scan request attributable in telemetry.nginx_access_logs,
+# which now carries client_ip / x_forwarded_for.
+header:
+  - 'User-Agent: flanksource-security-scan/nuclei (+security@flanksource.com)'
+  - 'X-Flanksource-Scan: nuclei-safe'

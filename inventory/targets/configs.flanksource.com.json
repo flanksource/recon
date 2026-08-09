@@ -1,0 +1,22 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "configs.flanksource.com",
+  "app": "config-db",
+  "cluster": "external",
+  "source": "specs/bases/apps",
+  "profiles": [
+    "safe"
+  ],
+  "tags": [
+    "config-db",
+    "takeover-watch"
+  ],
+  "reason": "CRD API group leftover; no Ingress defines it.",
+  "notes": "Verify it does not resolve.",
+  "class": "deactivated",
+  "observed": {
+    "last_attempt": "2026-08-09T09:45:27.785Z",
+    "error": "cause=\"no address found for host\""
+  }
+}

@@ -1,0 +1,55 @@
+id: flanksource-argocd-unauth
+
+info:
+  name: Flanksource - Argo CD Exposed
+  author: flanksource
+  severity: high
+  description: |
+    The public demo environment runs Argo CD (specs/workload-non-prod-eu-01/
+    public-demo). Argo CD's API server ships with a default admin account and, in some
+    configs, anonymous access. An exposed /api/v1/applications listing or a reachable
+    login with anonymous access is a cluster-management exposure.
+  remediation: |
+    Disable anonymous access, rotate/disable the default admin, and require SSO. Do
+    not expose the Argo CD server on a public Ingress for a demo cluster.
+  reference:
+    - https://argo-cd.readthedocs.io/en/stable/operator-manual/security/
+  classification:
+    cwe-id: CWE-306
+  metadata:
+    max-request: 3
+  tags: flanksource,apps,argocd,exposure
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/api/v1/applications'
+      - '{{BaseURL}}/api/version'
+      - '{{BaseURL}}/api/v1/settings'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - '"Version"'
+          - '"items"'
+          - '"appLabelKey"'
+        condition: or
+
+      - type: word
+        part: header
+        words:
+          - application/json
+
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - '"Version":[ ]*"[^"]+"'

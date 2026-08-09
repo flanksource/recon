@@ -1,0 +1,11 @@
+# Scan output against live infrastructure — never commit.
+results/
+
+# Rendered target lists and discovery output — derived from the JSON inventory.
+.gen/
+
+# The nuclei-targets skill is a project deliverable. A global ~/.config/git/ignore
+# excludes all .claude/ dirs, so re-include just the skill (not local settings).
+!.claude/
+.claude/*
+!.claude/skills/

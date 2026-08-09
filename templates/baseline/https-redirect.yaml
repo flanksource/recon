@@ -1,0 +1,51 @@
+id: flanksource-https-redirect-baseline
+
+info:
+  name: Flanksource - Plaintext HTTP Must Redirect
+  author: flanksource
+  severity: low
+  description: |
+    Port 80 on every internet-facing host must issue a permanent redirect to https.
+    Serving content over plaintext, or redirecting to a different origin, lets a
+    network attacker strip TLS before HSTS is ever pinned.
+  remediation: |
+    ingress-nginx does this by default; a per-Ingress
+    `nginx.ingress.kubernetes.io/ssl-redirect: "false"` annotation disables it.
+  reference:
+    - https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#server-side-https-enforcement-through-redirect
+  metadata:
+    max-request: 1
+  tags: flanksource,baseline,misconfig,ssl
+
+http:
+  - method: GET
+    path:
+      - 'http://{{Hostname}}/'
+
+    matchers-condition: or
+    matchers:
+      - type: dsl
+        name: plaintext-http-serves-content
+        dsl:
+          - 'status_code == 200'
+
+      - type: dsl
+        name: redirect-not-permanent
+        dsl:
+          - 'status_code == 302 || status_code == 307'
+          - "regex('(?i)location:[ ]*https://', header)"
+        condition: and
+
+      - type: dsl
+        name: redirect-target-not-https
+        dsl:
+          - 'status_code >= 300 && status_code < 400'
+          - "regex('(?i)location:', header)"
+          - "!regex('(?i)location:[ ]*https://', header)"
+        condition: and
+
+    extractors:
+      - type: kval
+        part: header
+        kval:
+          - location

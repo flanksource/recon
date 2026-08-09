@@ -1,0 +1,63 @@
+id: flanksource-otel-collector-exposed
+
+info:
+  name: Flanksource - OpenTelemetry Collector Exposed
+  author: flanksource
+  severity: high
+  description: |
+    The ClickHouse gateway runs an otel/opentelemetry-collector-contrib with the OTLP
+    HTTP receiver on :4318 and CORS allowed_origins: ['*'] (specs/bases/clickhouse/
+    gateway.yaml). It is intended to be cluster-internal. If the OTLP receiver, the
+    zPages debug server (:55679) or the health/metrics endpoints answer from the
+    internet, anyone can inject telemetry into ClickHouse or read pipeline internals.
+  remediation: |
+    Keep OTLP receivers on internal Services only; never route them through an
+    Ingress. Restrict CORS allowed_origins to known hosts instead of '*'.
+  reference:
+    - https://opentelemetry.io/docs/collector/configuration/
+  classification:
+    cwe-id: CWE-284
+  metadata:
+    max-request: 5
+  tags: flanksource,apps,opentelemetry,clickhouse,exposure
+
+http:
+  - method: POST
+    path:
+      - '{{BaseURL}}/v1/traces'
+      - '{{BaseURL}}/v1/logs'
+    headers:
+      Content-Type: application/json
+    body: '{"resourceSpans":[]}'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+          - 202
+
+      - type: word
+        part: body
+        words:
+          - '"partialSuccess"'
+          - '{}'
+        condition: or
+
+  - method: GET
+    path:
+      - '{{BaseURL}}/debug/tracez'
+      - 'http://{{Hostname}}:55679/debug/tracez'
+      - 'http://{{Hostname}}:13133/'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        dsl:
+          - "contains(body, 'TraceZ') || contains(body, 'RunningSpans') || contains(body, 'Server available')"
+          - 'status_code == 200'
+        condition: and

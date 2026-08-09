@@ -1,0 +1,39 @@
+id: flanksource-flux-webhook-receiver
+
+info:
+  name: Flanksource - Flux Notification Receiver Exposed
+  author: flanksource
+  severity: medium
+  description: |
+    The estate is GitOps-managed by Flux v2. Flux's notification-controller can expose
+    a webhook Receiver (/hook/<token>) to trigger immediate reconciliation. If the
+    receiver endpoint is internet-reachable and the token is weak or the path is
+    guessable, an attacker can force reconciliation on demand. This detects an exposed
+    receiver surface.
+  remediation: |
+    Expose the notification-controller receiver only through an authenticated Ingress
+    with a strong random token, or keep it internal and trigger via the API.
+  reference:
+    - https://fluxcd.io/flux/components/notification/receivers/
+  metadata:
+    max-request: 2
+  tags: flanksource,apps,flux,gitops,exposure
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/hook/'
+      - '{{BaseURL}}/healthz'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        name: flux-receiver-server
+        dsl:
+          - "contains(to_lower(header), 'notification-controller') || contains(body, 'unable to read the request body') || contains(body, 'missing') && contains(to_lower(header), 'flux')"
+
+      - type: dsl
+        dsl:
+          - 'status_code == 200 || status_code == 400 || status_code == 404'

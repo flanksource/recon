@@ -1,0 +1,96 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "flanksource.com",
+  "app": "webflow-proxy",
+  "cluster": "workload-prod-eu-02",
+  "source": "specs/workload-prod-eu-02/webflow-proxy/ingress.yml",
+  "profiles": [
+    "safe"
+  ],
+  "tags": [
+    "webflow",
+    "third-party",
+    "proxy",
+    "ui",
+    "dns-apex"
+  ],
+  "notes": "nginx reverse proxy to Webflow. Origin is third-party — never fuzz.",
+  "class": "public",
+  "observed": {
+    "first_observed": "2026-08-08T20:23:03Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "scan": {
+    "last_scan": "2026-08-09T10:51:53.937Z",
+    "last_findings": 0
+  },
+  "network": {
+    "ip": "216.150.1.1",
+    "ipv4": [
+      "216.150.1.1"
+    ],
+    "resolvers": [
+      "1.0.0.1:53",
+      "1.1.1.1:53"
+    ],
+    "asn": {
+      "number": 16509,
+      "name": "amazon-02",
+      "country": "US"
+    }
+  },
+  "http": {
+    "url": "https://flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 200,
+    "title": "Kubernetes Native Health Check Platform | Mission Control",
+    "webserver": "Vercel",
+    "content_type": "text/html",
+    "response_time": "546.6325ms",
+    "failed": false
+  },
+  "tech": {
+    "names": [
+      "Docusaurus:3.10.1",
+      "Google Tag Manager",
+      "HSTS",
+      "React",
+      "Vercel",
+      "Webpack",
+      "YouTube"
+    ],
+    "cpe": [
+      {
+        "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*",
+        "product": "webp_server_go",
+        "vendor": "webp"
+      },
+      {
+        "cpe": "cpe:2.3:a:webbertakken:docusaurus_plugin_content_gists:*:*:*:*:*:*:*:*",
+        "product": "docusaurus_plugin_content_gists",
+        "vendor": "webbertakken"
+      }
+    ]
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "subject_dn": "CN=flanksource.com",
+    "subject_cn": "flanksource.com",
+    "subject_an": [
+      "flanksource.com"
+    ],
+    "issuer_dn": "CN=YR1, O=Let's Encrypt, C=US",
+    "issuer_cn": "YR1",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_before": "2026-07-24T07:44:24Z",
+    "not_after": "2026-10-22T07:44:23Z",
+    "serial": "05:1C:4C:87:12:4D:C2:AC:D7:F5:12:A9:59:6B:51:4B:F7:41",
+    "fingerprint_hash": "bac313c6e665efa692b297bfbd15b6dda2482cb558be630a39eef41337318a38"
+  }
+}

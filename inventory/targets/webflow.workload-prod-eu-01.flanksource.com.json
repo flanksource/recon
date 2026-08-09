@@ -1,0 +1,83 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "webflow.workload-prod-eu-01.flanksource.com",
+  "app": "webflow-proxy",
+  "cluster": "workload-prod-eu-02",
+  "source": "specs/workload-prod-eu-02/webflow-proxy/ingress.yml",
+  "profiles": [
+    "safe"
+  ],
+  "tags": [
+    "webflow",
+    "third-party",
+    "proxy",
+    "ui"
+  ],
+  "notes": "Direct hostname for the same proxy. Cert SAN pairs it with the apex.",
+  "class": "public",
+  "observed": {
+    "first_observed": "2026-08-08T20:23:03Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://webflow.workload-prod-eu-01.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 404,
+    "title": "404 - Page not found",
+    "content_type": "text/html",
+    "response_time": "1.191474583s",
+    "failed": false
+  },
+  "scan": {
+    "last_scan": "2026-08-08T20:23:03Z",
+    "last_findings": 5
+  },
+  "network": {
+    "ip": "34.76.46.20",
+    "ipv4": [
+      "34.76.46.20"
+    ],
+    "resolvers": [
+      "1.1.1.1:53",
+      "8.8.8.8:53"
+    ],
+    "cdn": {
+      "enabled": true,
+      "name": "google",
+      "type": "cdn"
+    },
+    "asn": {
+      "number": 396982,
+      "name": "google-cloud-platform",
+      "country": "US"
+    }
+  },
+  "tech": {
+    "names": [
+      "Cloudflare",
+      "HSTS",
+      "HTTP/3"
+    ]
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "subject_dn": "CN=webflow.workload-prod-eu-01.flanksource.com",
+    "subject_cn": "webflow.workload-prod-eu-01.flanksource.com",
+    "subject_an": [
+      "webflow.workload-prod-eu-01.flanksource.com"
+    ],
+    "issuer_dn": "CN=YR2, O=Let's Encrypt, C=US",
+    "issuer_cn": "YR2",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_before": "2026-08-02T11:38:08Z",
+    "not_after": "2026-10-31T11:38:07Z",
+    "serial": "06:00:B5:99:2A:AE:29:96:54:37:13:26:FA:BE:60:30:18:8F",
+    "fingerprint_hash": "4bf1d9f328e79ba539a20e8783308f23af699d5569700ccac89bda4795ce9fb7"
+  }
+}

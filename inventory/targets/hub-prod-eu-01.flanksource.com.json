@@ -1,0 +1,27 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "hub-prod-eu-01.flanksource.com",
+  "app": "gke-control-plane",
+  "cluster": "hub-prod-eu-01",
+  "source": "terraform/gcp/envs/flanksource-prod/hub.tfvars",
+  "profiles": [
+    "safe"
+  ],
+  "ports": [
+    443,
+    6443,
+    10250
+  ],
+  "tags": [
+    "control-plane",
+    "dns-apex",
+    "kubernetes"
+  ],
+  "notes": "Private endpoint. Must NOT answer from the internet — cloud/k8s-api-anonymous asserts this.",
+  "class": "internal",
+  "observed": {
+    "last_attempt": "2026-08-09T09:45:27.785Z",
+    "error": "cause=\"no address found for host\""
+  }
+}

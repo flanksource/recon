@@ -1,0 +1,53 @@
+id: flanksource-kratos-admin-exposed
+
+info:
+  name: Flanksource - Ory Kratos Admin API Exposed
+  author: flanksource
+  severity: critical
+  description: |
+    Ory Kratos serves a public API (:4433) and an admin API (:4434). The admin API
+    can enumerate identities, mint recovery/verification links and delete users with
+    no authentication of its own — it is meant to be cluster-internal only. Any
+    reachable /admin/identities or /identities listing is a full account-takeover
+    primitive.
+  remediation: |
+    Never expose the Kratos admin port through an Ingress. Keep it on the internal
+    Service only; front all external auth traffic through the public API + oathkeeper.
+  reference:
+    - https://www.ory.sh/docs/kratos/reference/api
+  classification:
+    cwe-id: CWE-306
+  metadata:
+    max-request: 4
+  tags: flanksource,apps,kratos,auth,exposure
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/admin/identities'
+      - '{{BaseURL}}/identities'
+      - 'https://{{Hostname}}:4434/admin/identities'
+      - 'https://{{Hostname}}:4434/identities'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - '"schema_id"'
+          - '"traits"'
+          - '"recovery_addresses"'
+        condition: or
+
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - '"identifier":[ ]*"[^"]+"'
+          - '"value":[ ]*"[^"@]+@[^"]+"'

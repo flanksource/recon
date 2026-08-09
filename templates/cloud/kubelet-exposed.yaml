@@ -1,0 +1,50 @@
+id: flanksource-kubelet-exposed
+
+info:
+  name: Flanksource - Kubelet API Exposed
+  author: flanksource
+  severity: critical
+  description: |
+    The kubelet read-only (10255) and authenticated (10250) ports must never be
+    reachable from the internet. The /pods and /runningpods endpoints leak the full
+    workload inventory, and /exec + /run on an anonymous-auth kubelet is remote code
+    execution on the node.
+  remediation: |
+    Ensure --anonymous-auth=false and --read-only-port=0 (both GKE defaults) and that
+    no LoadBalancer/firewall rule forwards 10250/10255 from the internet.
+  reference:
+    - https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet-authn-authz/
+  classification:
+    cwe-id: CWE-284
+  metadata:
+    max-request: 3
+  tags: flanksource,cloud,kubernetes,kubelet,exposure
+
+http:
+  - method: GET
+    path:
+      - 'https://{{Hostname}}:10250/pods'
+      - 'http://{{Hostname}}:10255/pods'
+      - 'http://{{Hostname}}:10255/runningpods'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - '"kind":"PodList"'
+          - '"kind": "PodList"'
+        condition: or
+
+    extractors:
+      - type: regex
+        part: body
+        group: 1
+        regex:
+          - '"namespace":[ ]*"([^"]+)"'

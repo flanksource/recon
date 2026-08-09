@@ -1,0 +1,55 @@
+id: flanksource-mission-control-unauth
+
+info:
+  name: Flanksource - Mission Control API Unauthenticated
+  author: flanksource
+  severity: high
+  description: |
+    Mission Control fronts its Postgres through PostgREST at /api/db and exposes
+    canary, config and playbook APIs. All of these require an authenticated session
+    (Kratos/OIDC). A 200 with a JSON array/object where a 401 or a 302 to the login
+    flow is expected means the auth middleware is being bypassed.
+  remediation: |
+    Ensure the ingress auth annotations / kratos oathkeeper rules cover every /api
+    path, and that PostgREST is not exposed without the pre-auth proxy.
+  reference:
+    - https://docs.flanksource.com/
+  classification:
+    cwe-id: CWE-306
+  metadata:
+    max-request: 5
+  tags: flanksource,apps,mission-control,auth,exposure
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/api/db/checks?limit=1'
+      - '{{BaseURL}}/api/db/config_items?limit=1'
+      - '{{BaseURL}}/api/canary/api/summary'
+      - '{{BaseURL}}/api/config/api/config_summary'
+      - '{{BaseURL}}/api/.ory/kratos/public/health/ready'
+
+    stop-at-first-match: false
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: header
+        words:
+          - application/json
+
+      - type: dsl
+        name: json-body-not-login-redirect
+        dsl:
+          - "starts_with(trim(body, ' \\n\\r\\t'), '[') || starts_with(trim(body, ' \\n\\r\\t'), '{')"
+          - "!contains(body, 'kratos') && !contains(body, 'login')"
+        condition: and
+
+    extractors:
+      - type: dsl
+        dsl:
+          - '"HTTP " + to_string(status_code) + " len=" + to_string(len(body))'

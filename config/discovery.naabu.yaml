@@ -1,0 +1,12 @@
+# Naabu config profile — DISCOVERY.
+#
+# A bounded CONNECT scan finds HTTP services on non-standard ports before httpx
+# collects application metadata. CDN/WAF addresses are restricted to 80 and 443.
+
+top-ports: "100"
+exclude-cdn: true
+scan-type: c
+rate: 250
+retries: 1
+timeout: 1s
+verify: true

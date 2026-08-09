@@ -1,0 +1,218 @@
+version: '3'
+
+# Nuclei scan orchestration for azure-production.
+#   task              # list tasks
+#   task scan:safe    # safe, non-intrusive scan of non-prod + public (default)
+#   task scan:full    # DAST/fuzzing scan (prod requires CONFIRM=yes)
+# Root Makefile exposes thin `make nuclei-*` wrappers.
+
+vars:
+  TS:
+    sh: date +%Y%m%d-%H%M%S
+  GROUP: '{{.GROUP | default "default"}}'
+  PROFILE: '{{.PROFILE | default "safe"}}'
+  RESULTS: results
+  # Extra excludes shared by every scan.
+  EXCLUDE: '-etags dos,fuzz,bruteforce,intrusive,azure'
+
+env:
+  # subfinder/httpx/dnsx install here via `task tools:install`.
+  PATH: '{{.HOME}}/go/bin:{{.HOME}}/.local/bin:{{.PATH}}'
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  tools:check:
+    desc: Verify required tools are installed; fail loudly with install commands.
+    silent: true
+    cmds:
+      - |
+        missing=0
+        req_hard="nuclei jq pnpm rg"
+        req_soft="subfinder httpx naabu dnsx"
+        for t in $req_hard; do
+          if ! command -v "$t" >/dev/null; then echo "MISSING (required): $t"; missing=1; fi
+        done
+        for t in $req_soft; do
+          if ! command -v "$t" >/dev/null; then echo "MISSING (discovery): $t — run 'task tools:install'"; fi
+        done
+        # scan:full pulls its DAST templates from the community checkout.
+        tpl="${NUCLEI_TEMPLATES_DIR:-$HOME/nuclei-templates}"
+        if [ ! -d "$tpl/dast" ]; then
+          echo "MISSING (scan:full): $tpl/dast — run 'task templates:update'"
+        fi
+        if [ "$missing" = 1 ]; then
+          echo
+          echo "Install nuclei:    brew install nuclei   (or: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest)"
+        echo "Install jq/pnpm/rg: brew install jq pnpm ripgrep"
+          exit 1
+        fi
+        echo "All required tools present."
+
+  tools:install:
+    desc: go install the ProjectDiscovery discovery tools into $GOPATH/bin.
+    cmds:
+      - go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+      - go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+      - go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+      - go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+
+  templates:update:
+    desc: Update the community nuclei-templates to the latest release.
+    cmds:
+      - nuclei -update-templates
+
+  templates:validate:
+    desc: Validate all custom templates and the workflow.
+    cmds:
+      - nuclei -validate -t templates/ -enable-self-contained
+
+  templates:list:
+    desc: List custom templates that would run.
+    cmds:
+      - nuclei -tl -t templates/
+
+  targets:render:
+    desc: Validate the JSON inventory and render flat per-group lists under .gen/.
+    cmds:
+      - pnpm --dir app exec tsx server/inventory-cli.ts render
+
+  inventory:validate:
+    desc: Validate the manifest and every target against the Draft 2020-12 schemas.
+    cmds:
+      - pnpm --dir app exec tsx server/inventory-cli.ts validate
+
+  targets:discover:
+    desc: Discover live hosts, update known observations, and report unclassified drift.
+    cmds:
+      - bash hack/discover-targets.sh
+
+  _scan:
+    internal: true
+    requires:
+      vars: [PROFILE, GROUP]
+    cmds:
+      - task: targets:render
+      - mkdir -p {{.RESULTS}}
+      - |
+        list=".gen/{{.GROUP}}.{{.PROFILE}}.txt"
+        [ -s "$list" ] || list=".gen/{{.GROUP}}.txt"
+        if [ ! -s "$list" ]; then
+          echo "No hosts for group '{{.GROUP}}' profile '{{.PROFILE}}' ($list empty)." >&2
+          exit 1
+        fi
+        out="{{.RESULTS}}/{{.PROFILE}}-{{.GROUP}}-{{.TS}}"
+        echo ">>> nuclei {{.PROFILE}} scan of $(wc -l <"$list" | tr -d ' ') hosts from $list"
+        nuclei -config config/{{.PROFILE}}.yaml {{.EXCLUDE}} {{.CLI_ARGS}} \
+          -l "$list" \
+          -t templates/ -enable-self-contained \
+          -jsonl -o "${out}.jsonl" \
+          -sarif-export "${out}.sarif" \
+          | tee "${out}.txt"
+        pnpm --dir app exec tsx server/inventory-cli.ts record-scan --list "$list" --result "${out}.jsonl"
+        echo ">>> results: ${out}.jsonl"
+
+  scan:safe:
+    desc: 'Safe non-intrusive scan. GROUP=non-prod|public|prod|... (default: non-prod+public).'
+    cmds:
+      - task: _scan
+        vars: { PROFILE: safe, GROUP: '{{.GROUP | default "default"}}' }
+
+  scan:full:
+    desc: 'DAST/fuzzing scan. Refuses prod/public/all unless CONFIRM=yes.'
+    cmds:
+      - |
+        group="{{.GROUP | default "non-prod"}}"
+        case "$group" in
+          *prod*|*public*|all)
+            if [ "{{.CONFIRM}}" != "yes" ]; then
+              echo "REFUSED: full/DAST scan of '$group' sends malicious payloads at production." >&2
+              echo "Re-run with CONFIRM=yes if this is authorised:  task scan:full GROUP=$group CONFIRM=yes" >&2
+              exit 1
+            fi ;;
+        esac
+      - task: _scan
+        # `-t dast/` resolves against the community nuclei-templates checkout (installed
+        # by `task templates:update`); without it `-dast` filters the custom templates
+        # down to nothing and nuclei aborts with "no templates provided for scan".
+        vars:
+          PROFILE: full
+          GROUP: '{{.GROUP | default "non-prod"}}'
+          CLI_ARGS: '-dast -t dast/'
+
+  scan:tls:
+    desc: TLS baseline only.
+    cmds:
+      - task: targets:render
+      - mkdir -p {{.RESULTS}}
+      - nuclei -config config/safe.yaml -l .gen/{{.GROUP | default "default"}}.txt
+          -t templates/baseline/tls-baseline.yaml -t ssl/
+          -jsonl -o {{.RESULTS}}/tls-{{.GROUP | default "default"}}-{{.TS}}.jsonl
+
+  scan:headers:
+    desc: Security-header + cookie + redirect baseline only.
+    cmds:
+      - task: targets:render
+      - mkdir -p {{.RESULTS}}
+      - nuclei -config config/safe.yaml -l .gen/{{.GROUP | default "default"}}.txt
+          -t templates/baseline/security-headers.yaml
+          -t templates/baseline/cookie-security.yaml
+          -t templates/baseline/https-redirect.yaml
+          -jsonl -o {{.RESULTS}}/headers-{{.GROUP | default "default"}}-{{.TS}}.jsonl
+
+  scan:takeover:
+    desc: Subdomain-takeover check across all known + deactivated hosts.
+    cmds:
+      - task: targets:render
+      - mkdir -p {{.RESULTS}}
+      - nuclei -config config/safe.yaml -l .gen/all.txt
+          -profile subdomain-takeovers
+          -jsonl -o {{.RESULTS}}/takeover-{{.TS}}.jsonl
+
+  scan:cloud:
+    desc: Cloud metadata/SSRF + public bucket checks.
+    cmds:
+      - task: targets:render
+      - mkdir -p {{.RESULTS}}
+      - nuclei -config config/safe.yaml -l .gen/{{.GROUP | default "default"}}.txt
+          -t templates/cloud/ -enable-self-contained
+          -jsonl -o {{.RESULTS}}/cloud-{{.GROUP | default "default"}}-{{.TS}}.jsonl
+
+  report:
+    desc: Summarise the latest (or a named FILE=) JSONL result into markdown.
+    cmds:
+      - bash hack/report.sh {{.FILE}}
+
+  app:install:
+    desc: Install the targets admin app dependencies (pnpm).
+    dir: app
+    cmds:
+      - pnpm install
+
+  app:dev:
+    desc: Run the inventory admin app at localhost:5280.
+    dir: app
+    cmds:
+      - pnpm dev
+
+  app:build:
+    desc: Type-check and build the admin app to app/dist.
+    dir: app
+    cmds:
+      - pnpm build
+
+  app:test:
+    desc: Run the inventory app Vitest suite.
+    dir: app
+    cmds:
+      - pnpm test
+
+  app:lint:
+    desc: Lint and type-check the inventory app and server.
+    dir: app
+    cmds:
+      - pnpm lint
+      - pnpm typecheck

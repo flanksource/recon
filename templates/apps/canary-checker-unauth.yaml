@@ -1,0 +1,45 @@
+id: flanksource-canary-checker-unauth
+
+info:
+  name: Flanksource - Canary Checker API Exposed
+  author: flanksource
+  severity: medium
+  description: |
+    canary-checker (deployed in the demo/non-prod envs and as a Mission Control
+    component) exposes a topology/canary API and Prometheus metrics. When reachable
+    unauthenticated it leaks the full internal check topology — service names,
+    endpoints and failure detail useful for reconnaissance.
+  remediation: |
+    Front the canary-checker UI/API with authentication; keep /metrics internal.
+  reference:
+    - https://canarychecker.io/
+  metadata:
+    max-request: 4
+  tags: flanksource,apps,canary-checker,exposure
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/api/summary'
+      - '{{BaseURL}}/api/topology'
+      - '{{BaseURL}}/about'
+      - '{{BaseURL}}/metrics'
+
+    stop-at-first-match: false
+
+    matchers-condition: or
+    matchers:
+      - type: dsl
+        name: canary-summary-exposed
+        dsl:
+          - "contains(content_type, 'application/json')"
+          - "contains(body, 'checks') || contains(body, 'canaries') || contains(body, 'uptime')"
+          - 'status_code == 200'
+        condition: and
+
+      - type: dsl
+        name: canary-metrics-exposed
+        dsl:
+          - "contains(body, 'canary_check') || contains(body, 'canarychecker_')"
+          - 'status_code == 200'
+        condition: and

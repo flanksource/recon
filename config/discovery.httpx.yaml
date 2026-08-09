@@ -1,0 +1,32 @@
+# HTTPx config profile — DISCOVERY.
+#
+# Collects the response metadata consumed by the target inventory while keeping
+# passive discovery bounded. Runner-owned input and JSON output flags remain in
+# hack/discover-targets.sh.
+
+status-code: true
+response-time: true
+include-response-header: true
+title: true
+tech-detect: true
+probe: true
+
+threads: 50
+rate-limit: 100
+timeout: 5
+retries: 1
+jarm: true
+web-server: true
+cpe: true
+extract-fqdn: true
+http2: true
+wordpress: true
+ip: true
+asn: true
+tls-grab: true
+cname: true
+cdn: true
+pipeline: true
+location: true
+no-fallback: true
+tls-probe: true

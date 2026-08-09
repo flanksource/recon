@@ -1,0 +1,102 @@
+id: flanksource-security-headers-baseline
+
+info:
+  name: Flanksource - HTTP Security Header Baseline
+  author: flanksource
+  severity: medium
+  description: |
+    Enforces the Flanksource baseline for internet-facing HTTP endpoints. Unlike the
+    community http-missing-security-headers template this asserts header *values*, not
+    just presence: HSTS must be at least one year and cover subdomains, CSP must exist
+    and must not be trivially permissive, and nosniff must actually be set.
+  remediation: |
+    Set the headers on the ingress-nginx ConfigMap or per-Ingress via the
+    nginx.ingress.kubernetes.io/configuration-snippet annotation. See
+    specs/bases/common/nginx/nginx.yml.
+  reference:
+    - https://owasp.org/www-project-secure-headers/
+  classification:
+    cwe-id: CWE-693
+  metadata:
+    max-request: 1
+  tags: flanksource,baseline,misconfig,headers
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}'
+
+    host-redirects: true
+    max-redirects: 3
+
+    matchers-condition: or
+    matchers:
+      - type: dsl
+        name: hsts-missing
+        dsl:
+          - "!regex('(?i)strict-transport-security', header)"
+          - 'status_code != 301 && status_code != 302 && status_code != 307 && status_code != 308'
+        condition: and
+
+      # Anything below 31536000 seconds (1 year) fails the baseline. The alternation
+      # enumerates every 8-digit value >= 31536000 plus all 9-or-more-digit values.
+      - type: dsl
+        name: hsts-max-age-below-one-year
+        dsl:
+          - "regex('(?i)strict-transport-security', header)"
+          - "!regex('(?i)max-age=(3153[6-9][0-9]{3}|315[4-9][0-9]{4}|31[6-9][0-9]{5}|3[2-9][0-9]{6}|[4-9][0-9]{7}|[0-9]{9,})', header)"
+        condition: and
+
+      - type: dsl
+        name: hsts-missing-include-subdomains
+        dsl:
+          - "regex('(?i)strict-transport-security', header)"
+          - "!regex('(?i)includesubdomains', header)"
+        condition: and
+
+      - type: dsl
+        name: csp-missing
+        dsl:
+          - "!regex('(?i)content-security-policy', header)"
+          - 'status_code != 301 && status_code != 302 && status_code != 307 && status_code != 308'
+        condition: and
+
+      - type: dsl
+        name: csp-allows-unsafe-inline-script
+        dsl:
+          - "regex('(?i)content-security-policy:[^\\r\\n]*script-src[^\\r\\n]*unsafe-inline', header)"
+
+      - type: dsl
+        name: nosniff-missing
+        dsl:
+          - "!regex('(?i)x-content-type-options:[ ]*nosniff', header)"
+          - 'status_code != 301 && status_code != 302 && status_code != 307 && status_code != 308'
+        condition: and
+
+      - type: dsl
+        name: clickjacking-protection-missing
+        dsl:
+          - "!regex('(?i)x-frame-options', header)"
+          - "!regex('(?i)content-security-policy:[^\\r\\n]*frame-ancestors', header)"
+          - 'status_code != 301 && status_code != 302 && status_code != 307 && status_code != 308'
+        condition: and
+
+      - type: dsl
+        name: referrer-policy-missing
+        dsl:
+          - "!regex('(?i)referrer-policy', header)"
+          - 'status_code != 301 && status_code != 302 && status_code != 307 && status_code != 308'
+        condition: and
+
+      - type: dsl
+        name: server-version-disclosure
+        dsl:
+          - "regex('(?i)(server|x-powered-by):[^\\r\\n]*[0-9]+[.][0-9]+', header)"
+
+    extractors:
+      - type: kval
+        part: header
+        kval:
+          - strict_transport_security
+          - content_security_policy
+          - server

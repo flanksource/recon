@@ -1,0 +1,31 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "workload-prod-eu-02.flanksource.com",
+  "app": "gke-control-plane",
+  "cluster": "workload-prod-eu-02",
+  "source": "specs/workload-prod-eu-02/config-connector/dnszone.yaml",
+  "profiles": [
+    "safe"
+  ],
+  "ports": [
+    443,
+    6443,
+    10250
+  ],
+  "tags": [
+    "control-plane",
+    "dns-apex",
+    "kubernetes"
+  ],
+  "notes": "Public DNS zone apex.",
+  "class": "internal",
+  "observed": {
+    "last_attempt": "2026-08-09T10:42:39.198Z",
+    "error": "cause=\"no address found for host\""
+  },
+  "scan": {
+    "last_scan": "2026-08-09T11:27:08.596Z",
+    "last_findings": 0
+  }
+}

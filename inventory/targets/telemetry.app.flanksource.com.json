@@ -1,0 +1,81 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "telemetry.app.flanksource.com",
+  "app": "caddy-telemetry-proxy",
+  "cluster": "workload-prod-eu-02",
+  "source": "specs/workload-prod-eu-02/telemetry/ingress.yml",
+  "profiles": [
+    "safe",
+    "full"
+  ],
+  "tags": [
+    "otel",
+    "proxy",
+    "auth",
+    "api"
+  ],
+  "notes": "Caddy injects Basic auth toward the upstream tenant API — auth-bypass surface.",
+  "class": "prod",
+  "observed": {
+    "first_observed": "2026-08-08T21:16:00Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://telemetry.app.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 302,
+    "location": "/ui",
+    "response_time": "532.599542ms",
+    "failed": false
+  },
+  "network": {
+    "ip": "34.76.46.20",
+    "ipv4": [
+      "34.76.46.20"
+    ],
+    "cname": [
+      "telemetry.workload-prod-eu-01.flanksource.com"
+    ],
+    "resolvers": [
+      "1.1.1.1:53",
+      "8.8.8.8:53"
+    ],
+    "cdn": {
+      "enabled": true,
+      "name": "google",
+      "type": "cdn"
+    },
+    "asn": {
+      "number": 396982,
+      "name": "google-cloud-platform",
+      "country": "US"
+    }
+  },
+  "tech": {
+    "names": [
+      "HSTS"
+    ]
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "subject_dn": "CN=telemetry.workload-prod-eu-01.flanksource.com",
+    "subject_cn": "telemetry.workload-prod-eu-01.flanksource.com",
+    "subject_an": [
+      "telemetry.app.flanksource.com",
+      "telemetry.workload-prod-eu-01.flanksource.com"
+    ],
+    "issuer_dn": "CN=YR1, O=Let's Encrypt, C=US",
+    "issuer_cn": "YR1",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_before": "2026-07-11T11:20:24Z",
+    "not_after": "2026-10-09T11:20:23Z",
+    "serial": "05:85:25:DD:56:81:9F:88:8F:52:FE:6C:97:86:02:DC:5E:F6",
+    "fingerprint_hash": "02aaac4f81a54e50c8e29512a3b0befc89ce3e691689bcb3a9f43aa5507df4dd"
+  }
+}

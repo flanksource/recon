@@ -1,0 +1,67 @@
+id: flanksource-cookie-security-baseline
+
+info:
+  name: Flanksource - Session Cookie Flags
+  author: flanksource
+  severity: medium
+  description: |
+    Mission Control authenticates through Ory Kratos, which sets `ory_kratos_session`
+    and CSRF cookies. Those cookies are bearer credentials for a multi-tenant SaaS
+    control plane, so every Set-Cookie on these hosts must carry Secure, HttpOnly and
+    an explicit SameSite.
+  remediation: |
+    Kratos cookie flags are set in the mission-control chart values
+    (kratos.config.session.cookie / selfservice). Do not rely on browser defaults for
+    SameSite — Safari and older Chrome differ.
+  reference:
+    - https://owasp.org/www-community/controls/SecureCookieAttribute
+  classification:
+    cwe-id: CWE-614
+  metadata:
+    max-request: 1
+  tags: flanksource,baseline,misconfig,cookies,kratos
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}'
+
+    host-redirects: true
+    max-redirects: 3
+
+    matchers-condition: or
+    matchers:
+      - type: dsl
+        name: set-cookie-missing-secure
+        dsl:
+          - "regex('(?i)set-cookie:', header)"
+          - "!regex('(?i)set-cookie:[^\\r\\n]*[; ]secure', header)"
+        condition: and
+
+      - type: dsl
+        name: set-cookie-missing-httponly
+        dsl:
+          - "regex('(?i)set-cookie:', header)"
+          - "!regex('(?i)set-cookie:[^\\r\\n]*[; ]httponly', header)"
+        condition: and
+
+      - type: dsl
+        name: set-cookie-missing-samesite
+        dsl:
+          - "regex('(?i)set-cookie:', header)"
+          - "!regex('(?i)set-cookie:[^\\r\\n]*samesite=', header)"
+        condition: and
+
+      - type: dsl
+        name: kratos-session-cookie-insecure
+        dsl:
+          - "regex('(?i)set-cookie:[ ]*ory_kratos_session', header)"
+          - "!regex('(?i)set-cookie:[ ]*ory_kratos_session[^\\r\\n]*httponly', header)"
+        condition: and
+
+    extractors:
+      - type: regex
+        part: header
+        group: 1
+        regex:
+          - '(?i)set-cookie:[ ]*([^=]+)='

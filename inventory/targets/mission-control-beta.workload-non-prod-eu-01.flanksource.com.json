@@ -1,0 +1,28 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "mission-control-beta.workload-non-prod-eu-01.flanksource.com",
+  "app": "mission-control",
+  "cluster": "workload-non-prod-eu-01",
+  "source": "specs/workload-non-prod-eu-01/mission-control/helm-release.yml",
+  "profiles": [
+    "safe",
+    "full"
+  ],
+  "tags": [
+    "mission-control",
+    "ui",
+    "api"
+  ],
+  "notes": "Chart domain value for beta.flanksource.com.",
+  "class": "non-prod",
+  "observed": {
+    "first_observed": "2026-08-08T20:23:03Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z",
+    "error": "context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+  },
+  "scan": {
+    "last_scan": "2026-08-08T20:23:03Z",
+    "last_findings": 0
+  }
+}

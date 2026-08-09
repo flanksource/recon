@@ -1,0 +1,50 @@
+id: flanksource-s3-public-bucket
+
+info:
+  name: Flanksource - S3 Bucket Publicly Listable
+  author: flanksource
+  severity: high
+  description: |
+    The public demo environment provisions AWS resources through the Crossplane AWS
+    provider (specs/workload-non-prod-eu-01/public-demo). Buckets created that way are
+    easy to leave world-readable. Checks anonymous ListBucket on the names this repo
+    can create.
+  remediation: |
+    Enable S3 Block Public Access at the account level, and set
+    `acl: private` plus a public-access-block on every Crossplane Bucket claim.
+  reference:
+    - https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html
+  classification:
+    cwe-id: CWE-284
+  metadata:
+    max-request: 3
+  tags: flanksource,cloud,aws,s3,exposure
+
+self-contained: true
+
+http:
+  - method: GET
+    path:
+      - 'https://flanksource-demo.s3.amazonaws.com/?list-type=2&max-keys=1'
+      - 'https://flanksource-sock-shop.s3.amazonaws.com/?list-type=2&max-keys=1'
+      - 'https://lastline-artifacts.s3.amazonaws.com/?list-type=2&max-keys=1'
+
+    stop-at-first-match: false
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - '<ListBucketResult'
+
+    extractors:
+      - type: regex
+        part: body
+        group: 1
+        regex:
+          - '<Key>([^<]+)</Key>'

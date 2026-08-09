@@ -1,0 +1,85 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "trust.flanksource.com",
+  "source": "discovered",
+  "profiles": [
+    "safe"
+  ],
+  "notes": "Discovered — Flanksource Trust Center",
+  "class": "non-prod",
+  "tags": [],
+  "observed": {
+    "first_observed": "2026-08-08T21:16:00Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://trust.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 200,
+    "title": "Flanksource Trust Center",
+    "webserver": "cloudflare",
+    "content_type": "text/html",
+    "response_time": "202.917458ms",
+    "failed": false
+  },
+  "tech": {
+    "names": [
+      "Cloudflare",
+      "Cloudflare Browser Insights",
+      "HSTS",
+      "HTTP/3"
+    ]
+  },
+  "scan": {
+    "last_scan": "2026-08-09T10:51:53.937Z",
+    "last_findings": 0
+  },
+  "network": {
+    "ip": "104.26.0.73",
+    "ipv4": [
+      "104.26.0.73",
+      "104.26.1.73",
+      "172.67.73.121"
+    ],
+    "ipv6": [
+      "2606:4700:20::681a:149",
+      "2606:4700:20::681a:49",
+      "2606:4700:20::ac43:4979"
+    ],
+    "resolvers": [
+      "1.0.0.1:53",
+      "1.1.1.1:53"
+    ],
+    "cdn": {
+      "enabled": true,
+      "name": "cloudflare",
+      "type": "waf"
+    },
+    "asn": {
+      "number": 13335,
+      "name": "cloudflarenet",
+      "country": "US"
+    }
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "subject_dn": "CN=trust.flanksource.com",
+    "subject_cn": "trust.flanksource.com",
+    "subject_an": [
+      "trust.flanksource.com"
+    ],
+    "issuer_dn": "CN=YE2, O=Let's Encrypt, C=US",
+    "issuer_cn": "YE2",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_before": "2026-06-20T17:39:31Z",
+    "not_after": "2026-09-18T17:39:30Z",
+    "serial": "05:3D:F6:B0:19:DA:9F:08:9F:21:8A:5B:ED:68:43:11:98:EA",
+    "fingerprint_hash": "413121416ede97a9b475eebc291ca1fff3ef4ee7dd16c9a988ed15c6236a6e60"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "tenant-controller.hub-prod-eu-01.flanksource.com",
+  "app": "tenant-controller",
+  "cluster": "hub-prod-eu-01",
+  "source": "specs/hub-prod-eu-01/specs/tenant-controller/ingress.yml",
+  "profiles": [
+    "safe",
+    "full"
+  ],
+  "tags": [
+    "tenant-controller",
+    "control-plane",
+    "api",
+    "gke-nginx"
+  ],
+  "notes": "Tenant provisioning control plane on :8080. Highest-blast-radius endpoint here.",
+  "class": "prod",
+  "observed": {
+    "first_observed": "2026-08-08T21:16:00Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://tenant-controller.hub-prod-eu-01.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 404,
+    "content_type": "application/json",
+    "response_time": "411.605125ms",
+    "failed": false
+  },
+  "network": {
+    "ip": "34.38.62.234",
+    "ipv4": [
+      "34.38.62.234"
+    ],
+    "resolvers": [
+      "1.0.0.1:53",
+      "8.8.4.4:53"
+    ],
+    "cdn": {
+      "enabled": true,
+      "name": "google",
+      "type": "cdn"
+    },
+    "asn": {
+      "number": 396982,
+      "name": "google-cloud-platform",
+      "country": "US"
+    }
+  },
+  "tech": {
+    "names": [
+      "HSTS"
+    ]
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "subject_dn": "CN=tenant-controller.hub-prod-eu-01.flanksource.com",
+    "subject_cn": "tenant-controller.hub-prod-eu-01.flanksource.com",
+    "subject_an": [
+      "tenant-controller.hub-prod-eu-01.flanksource.com"
+    ],
+    "issuer_dn": "CN=YR2, O=Let's Encrypt, C=US",
+    "issuer_cn": "YR2",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_before": "2026-07-16T09:12:40Z",
+    "not_after": "2026-10-14T09:12:39Z",
+    "serial": "05:80:96:0C:2B:FA:6E:E6:19:86:2A:5E:AB:88:07:CD:4A:F4",
+    "fingerprint_hash": "a147587d1cbd3a22991bde7867f699c88da779a0b8f673c84dc40392ca686380"
+  }
+}

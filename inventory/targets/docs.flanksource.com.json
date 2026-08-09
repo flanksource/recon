@@ -1,0 +1,90 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "docs.flanksource.com",
+  "app": "docs",
+  "cluster": "external",
+  "source": "specs/bases/apps",
+  "profiles": [
+    "safe"
+  ],
+  "tags": [
+    "docs",
+    "third-party",
+    "ui"
+  ],
+  "notes": "Static docs site, hosted outside this repo.",
+  "class": "public",
+  "observed": {
+    "first_observed": "2026-08-08T20:23:03Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://docs.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 301,
+    "title": "301 Moved Permanently",
+    "webserver": "cloudflare",
+    "content_type": "text/html",
+    "location": "https://flanksource.com/docs/",
+    "response_time": "454.133584ms",
+    "failed": false
+  },
+  "tech": {
+    "names": [
+      "Cloudflare",
+      "HSTS",
+      "HTTP/3"
+    ]
+  },
+  "scan": {
+    "last_scan": "2026-08-08T20:23:03Z",
+    "last_findings": 1
+  },
+  "network": {
+    "ip": "104.26.1.73",
+    "ipv4": [
+      "104.26.0.73",
+      "104.26.1.73",
+      "172.67.73.121"
+    ],
+    "ipv6": [
+      "2606:4700:20::681a:149",
+      "2606:4700:20::681a:49",
+      "2606:4700:20::ac43:4979"
+    ],
+    "resolvers": [
+      "8.8.8.8:53"
+    ],
+    "cdn": {
+      "enabled": true,
+      "name": "cloudflare",
+      "type": "waf"
+    },
+    "asn": {
+      "number": 13335,
+      "name": "cloudflarenet",
+      "country": "US"
+    }
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "subject_dn": "CN=docs.flanksource.com",
+    "subject_cn": "docs.flanksource.com",
+    "subject_an": [
+      "docs.flanksource.com"
+    ],
+    "issuer_dn": "CN=WE1, O=Google Trust Services, C=US",
+    "issuer_cn": "WE1",
+    "issuer_org": [
+      "Google Trust Services"
+    ],
+    "not_before": "2026-06-23T20:14:24Z",
+    "not_after": "2026-09-21T21:14:22Z",
+    "serial": "83:B0:1E:A2:8C:1B:EE:7F:0E:DB:85:03:F4:27:25:00",
+    "fingerprint_hash": "5f7a41bd8104ef45d50ae0374947557bc83b73b451ed65a00ae23ca78800baef"
+  }
+}

@@ -1,0 +1,20 @@
+# Extra template excludes for Flanksource scans, passed via -tags/-exclude in the
+# Taskfile (nuclei's own ~/Library/Application Support/nuclei/.nuclei-ignore is left
+# untouched). These are noisy or inapplicable to this GCP-only estate.
+#
+# Referenced by: task scan:safe / scan:full (as -exclude-tags / -exclude-id args).
+
+exclude-tags:
+  - dos
+  - fuzz
+  - fuzzing
+  - bruteforce
+  - brute-force
+  - intrusive
+  - azure          # estate is GCP + a little AWS; Azure templates are pure noise
+
+exclude-id:
+  # httpbin is an intentional test fixture — its open-redirect is tracked as
+  # accepted risk by templates/apps/httpbin-exposure.yaml, not by community rules.
+  - open-redirect
+  - http-generic-open-redirect

@@ -1,0 +1,63 @@
+id: flanksource-tenant-controller-unauth
+
+info:
+  name: Flanksource - Tenant Controller Unauthenticated Endpoints
+  author: flanksource
+  severity: critical
+  description: |
+    tenant-controller (docker.io/flanksource/tenant-controller) is the tenant
+    provisioning control plane, exposed on :8080 at
+    tenant-controller.hub-prod-eu-01.flanksource.com. A reachable tenant-listing
+    endpoint, exposed Go pprof, or unauthenticated Prometheus metrics on the public
+    Ingress is a direct information-disclosure / control-plane-abuse risk.
+  remediation: |
+    Put the tenant-controller Ingress behind authentication, and route /metrics and
+    /debug/pprof to the internal Service only (or disable pprof in the build).
+  reference:
+    - https://pkg.go.dev/net/http/pprof
+  classification:
+    cwe-id: CWE-306
+  metadata:
+    max-request: 6
+  tags: flanksource,apps,tenant-controller,exposure,pprof
+
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/tenants'
+      - '{{BaseURL}}/api/tenants'
+      - '{{BaseURL}}/debug/pprof/'
+      - '{{BaseURL}}/debug/pprof/goroutine?debug=1'
+      - '{{BaseURL}}/metrics'
+      - '{{BaseURL}}/healthz'
+
+    stop-at-first-match: false
+
+    matchers-condition: or
+    matchers:
+      - type: dsl
+        name: pprof-index-exposed
+        dsl:
+          - "contains(body, 'Types of profiles available') || contains(body, 'goroutine profile:')"
+          - 'status_code == 200'
+        condition: and
+
+      - type: dsl
+        name: prometheus-metrics-exposed
+        dsl:
+          - "contains(body, '# HELP') && contains(body, '# TYPE')"
+          - 'status_code == 200'
+        condition: and
+
+      - type: dsl
+        name: tenant-listing-exposed
+        dsl:
+          - "contains(content_type, 'application/json')"
+          - "contains(body, 'tenant') || contains(body, 'namespace')"
+          - 'status_code == 200'
+        condition: and
+
+    extractors:
+      - type: dsl
+        dsl:
+          - '"HTTP " + to_string(status_code) + " " + content_type'

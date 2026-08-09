@@ -1,0 +1,34 @@
+id: flanksource-baseline-workflow
+
+info:
+  name: Flanksource Baseline Workflow
+  author: flanksource
+  description: |
+    Runs the Flanksource baseline (TLS, security headers, cookie flags, https
+    redirect) against every target, then layers app-specific exposure checks. Cloud
+    metadata/SSRF and bucket templates are grouped here too. Use with the safe config:
+      nuclei -config config/safe.yaml -w templates/workflows/flanksource-baseline.yaml -l .gen/<group>.txt
+  tags: flanksource,baseline,workflow
+
+workflows:
+  - template: templates/baseline/tls-baseline.yaml
+  - template: templates/baseline/security-headers.yaml
+  - template: templates/baseline/cookie-security.yaml
+  - template: templates/baseline/https-redirect.yaml
+
+  - template: templates/cloud/gcp-metadata-ssrf.yaml
+  - template: templates/cloud/aws-imds-ssrf.yaml
+  - template: templates/cloud/gcs-public-bucket.yaml
+  - template: templates/cloud/s3-public-bucket.yaml
+  - template: templates/cloud/k8s-api-anonymous.yaml
+  - template: templates/cloud/kubelet-exposed.yaml
+
+  - template: templates/apps/mission-control-unauth.yaml
+  - template: templates/apps/kratos-admin-exposed.yaml
+  - template: templates/apps/tenant-controller-unauth.yaml
+  - template: templates/apps/otel-collector-exposed.yaml
+  - template: templates/apps/caddy-telemetry-proxy.yaml
+  - template: templates/apps/canary-checker-unauth.yaml
+  - template: templates/apps/argocd-unauth.yaml
+  - template: templates/apps/flux-webhook-receiver.yaml
+  - template: templates/apps/httpbin-exposure.yaml

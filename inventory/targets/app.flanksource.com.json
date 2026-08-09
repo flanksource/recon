@@ -1,0 +1,102 @@
+{
+  "$schema": "../target.schema.json",
+  "version": 1,
+  "host": "app.flanksource.com",
+  "app": "mission-control",
+  "cluster": "workload-prod-eu-02",
+  "source": "specs/workload-prod-eu-02/last-line/vcluster/flanksource-playwright-canary.yaml",
+  "profiles": [
+    "safe",
+    "full"
+  ],
+  "tags": [
+    "mission-control",
+    "kratos",
+    "vercel",
+    "auth",
+    "ui",
+    "api"
+  ],
+  "notes": "Production Mission Control UI + Ory Kratos auth. Ingress lives in flanksource/saas-prod.",
+  "class": "prod",
+  "observed": {
+    "first_observed": "2026-08-08T21:16:00Z",
+    "last_seen": "2026-08-09T09:45:27.785Z",
+    "last_attempt": "2026-08-09T09:45:27.785Z"
+  },
+  "http": {
+    "url": "https://app.flanksource.com",
+    "scheme": "https",
+    "port": 443,
+    "status_code": 200,
+    "webserver": "Vercel",
+    "content_type": "text/html",
+    "response_time": "483.418667ms",
+    "failed": false
+  },
+  "tech": {
+    "names": [
+      "C3.js",
+      "HSTS",
+      "Vercel"
+    ],
+    "cpe": [
+      {
+        "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*",
+        "product": "webp_server_go",
+        "vendor": "webp"
+      },
+      {
+        "cpe": "cpe:2.3:a:zeit:next.js:*:*:*:*:*:*:*:*",
+        "product": "next.js",
+        "vendor": "zeit"
+      },
+      {
+        "cpe": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*",
+        "product": "next.js",
+        "vendor": "vercel"
+      }
+    ]
+  },
+  "network": {
+    "ip": "76.76.21.98",
+    "ipv4": [
+      "66.33.60.67",
+      "76.76.21.98"
+    ],
+    "cname": [
+      "cname.vercel-dns.com"
+    ],
+    "resolvers": [
+      "1.0.0.1:53",
+      "8.8.4.4:53"
+    ],
+    "asn": {
+      "number": 16509,
+      "name": "amazon-02",
+      "country": "US"
+    }
+  },
+  "tls": {
+    "tls_version": "tls13",
+    "cipher": "TLS_AES_128_GCM_SHA256",
+    "subject_dn": "CN=app.flanksource.com",
+    "subject_cn": "app.flanksource.com",
+    "subject_an": [
+      "app.flanksource.com"
+    ],
+    "issuer_dn": "CN=YR2, O=Let's Encrypt, C=US",
+    "issuer_cn": "YR2",
+    "issuer_org": [
+      "Let's Encrypt"
+    ],
+    "not_before": "2026-08-03T16:09:07Z",
+    "not_after": "2026-11-01T16:09:06Z",
+    "serial": "05:0F:E3:4F:F8:FA:3C:20:E3:54:2D:0C:A3:EC:84:2B:CA:3D",
+    "fingerprint_hash": "88559b26f58293091f451594d2a02cee51b410f97b0b318969f92b64391899d4"
+  },
+  "scan": {
+    "last_scan": "2026-08-09T10:51:53.937Z",
+    "last_findings": 0
+  }
+}
