@@ -20,6 +20,17 @@ type JSON[T any] struct {
 // Wrap builds a column value from a pointer, preserving nil.
 func Wrap[T any](value *T) JSON[T] { return JSON[T]{V: value} }
 
+// Get returns the stored value, or the zero value when the column was NULL. Use
+// it where the wire type has no absent/present distinction to preserve — a map
+// that is documented as always present, say — and V where it does.
+func (j JSON[T]) Get() T {
+	if j.V == nil {
+		var zero T
+		return zero
+	}
+	return *j.V
+}
+
 // Value implements driver.Valuer.
 func (j JSON[T]) Value() (driver.Value, error) {
 	if j.V == nil {

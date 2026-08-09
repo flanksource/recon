@@ -8,9 +8,13 @@ import (
 	"net/url"
 	"regexp"
 
+	"github.com/flanksource/clicky"
 	"github.com/spf13/cobra"
 
 	"github.com/flanksource/recon/internal/db"
+	"github.com/flanksource/recon/internal/engines"
+	"github.com/flanksource/recon/internal/entities"
+	"github.com/flanksource/recon/internal/store"
 )
 
 // Global flags shared by every command that touches the database.
@@ -43,8 +47,73 @@ func New() *cobra.Command {
 	flags.StringVar(&root, "root", ".",
 		"working root for engine inputs and artifacts")
 
-	cmd.AddCommand(newMigrateCommand(), newDBCommand(), newEngineCommand())
+	cmd.AddCommand(newMigrateCommand(), newDBCommand(), newServeCommand())
+
+	// Entities are declared before the tree is generated and before any flag is
+	// parsed, so their subcommands exist to be parsed into. The database they
+	// need is attached later, in the PersistentPreRun below.
+	registry = &entities.Registry{Provisioner: engines.NewProvisioner(binDir)}
+	registry.Register()
+	registerEngineCommands()
+	clicky.GenerateCLI(cmd)
+
+	cmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		if !needsDatabase(cmd) {
+			return nil
+		}
+		config, err := databaseConfig(true)
+		if err != nil {
+			return err
+		}
+		handle, err := db.Open(cmd.Context(), config)
+		if err != nil {
+			return err
+		}
+		opened = handle
+		registry.SetStore(store.New(handle.Gorm))
+		return nil
+	}
+
+	cmd.PersistentPostRun = func(*cobra.Command, []string) {
+		if opened != nil {
+			_ = opened.Close()
+			opened = nil
+		}
+	}
+
 	return cmd
+}
+
+// registry and opened are process-global because the entity handlers are
+// registered once, at construction, and have to reach whatever database the
+// flags eventually name.
+var (
+	registry *entities.Registry
+	opened   *db.Handle
+)
+
+// EntityRegistry returns the registry the command tree registered, so a test
+// can serve the same entities against its own database. Valid only after New.
+func EntityRegistry() *entities.Registry { return registry }
+
+// needsDatabase reports whether this command needs a connection opened for it.
+//
+// The hand-written commands open their own — `db url` deliberately does so
+// without migrating — and `engine` does not touch the inventory at all.
+// Everything else is a generated entity command, which by definition reads a
+// table. Opening Postgres to print a help page would be a slow way to answer a
+// question that does not involve it.
+func needsDatabase(cmd *cobra.Command) bool {
+	if !cmd.Runnable() {
+		return false
+	}
+	for current := cmd; current != nil; current = current.Parent() {
+		switch current.Name() {
+		case "migrate", "db", "serve", "engine":
+			return false
+		}
+	}
+	return true
 }
 
 // databaseConfig resolves the flags into a database configuration.

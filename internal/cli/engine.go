@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
-	flanksourceContext "github.com/flanksource/commons/context"
+	"github.com/flanksource/clicky/entity"
 	"github.com/flanksource/clicky/task"
+	flanksourceContext "github.com/flanksource/commons/context"
 	"github.com/spf13/cobra"
 
 	"github.com/flanksource/recon/internal/engines"
@@ -79,59 +79,11 @@ func selectEngines(names []string) ([]engineKind, error) {
 	return selected, nil
 }
 
-func newEngineCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "engine",
-		Short: "Inspect and provision the scanning and discovery engines",
-		Long: "Engines are compiled in; their binaries are not. Each declares a versioned,\n" +
-			"checksum-verified package, and an existing copy on PATH is used rather than\n" +
-			"downloaded again.",
-	}
-	cmd.AddCommand(newEngineStatusCommand(), newEngineInstallCommand())
-	return cmd
-}
-
-func newEngineStatusCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status [engine...]",
-		Short: "Report which engine binaries are installed",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			selected, err := selectEngines(args)
-			if err != nil {
-				return err
-			}
-
-			provisioner := engines.NewProvisioner(binDir)
-			out := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(out, "ENGINE\tKIND\tBINARY\tSOURCE\tPATH")
-
-			missing := 0
-			for _, engine := range selected {
-				status := provisioner.Status(engine.Spec)
-				switch {
-				case !status.Installed:
-					missing++
-					fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n",
-						engine.Name, engine.Kind, engine.Binary, "missing", "")
-				case status.Managed:
-					fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n",
-						engine.Name, engine.Kind, engine.Binary, "managed", status.Path)
-				default:
-					fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n",
-						engine.Name, engine.Kind, engine.Binary, "path", status.Path)
-				}
-			}
-			if err := out.Flush(); err != nil {
-				return err
-			}
-
-			if missing > 0 {
-				cmd.Printf("\n%d of %d engines are not installed: run `reconctl engine install`\n",
-					missing, len(selected))
-			}
-			return nil
-		},
-	}
+// registerEngineCommands attaches the provisioning commands to the generated
+// `engine` entity command, rather than declaring a second command with the same
+// name. Installing is an action on an engine, not a resource of its own.
+func registerEngineCommands() {
+	entity.RegisterSubCommand("engine", newEngineInstallCommand())
 }
 
 func newEngineInstallCommand() *cobra.Command {

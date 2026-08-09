@@ -49,6 +49,12 @@ func ParseSeverity(value string) Severity {
 // filters and groups on, but a finding is evidence — dropping whatever did not
 // fit the schema would lose exactly the detail someone investigating needs.
 type Finding struct {
+	// ScanID and LineNo are the finding's address. They are set when it is read
+	// back from a run, not when it is parsed: a finding has no identity apart
+	// from where it appeared.
+	ScanID string `json:"scanId,omitempty"`
+	LineNo int    `json:"lineNo,omitempty"`
+
 	TemplateID  string   `json:"templateId"`
 	Name        string   `json:"name"`
 	Severity    Severity `json:"severity"`

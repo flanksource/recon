@@ -21,10 +21,15 @@ import (
 // initialised.
 const hostOrder = `host COLLATE "C" ASC`
 
-// ListTargets returns every target, ordered by host.
-func (s *Store) ListTargets(ctx context.Context) ([]api.TargetDocument, error) {
+// ListTargets returns the targets a selector matches, ordered by host.
+func (s *Store) ListTargets(ctx context.Context, opts TargetOpts) ([]api.TargetDocument, error) {
+	query, err := opts.Scope(s.DB(ctx))
+	if err != nil {
+		return nil, err
+	}
+
 	var rows []models.Target
-	if err := s.DB(ctx).Order(hostOrder).Find(&rows).Error; err != nil {
+	if err := query.Order(hostOrder).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
 
@@ -147,7 +152,7 @@ func (s *Store) TagVocabulary(ctx context.Context) ([]string, error) {
 
 // Inventory assembles the listing the UI loads on start.
 func (s *Store) Inventory(ctx context.Context) (api.Inventory, error) {
-	rows, err := s.ListTargets(ctx)
+	rows, err := s.ListTargets(ctx, TargetOpts{})
 	if err != nil {
 		return api.Inventory{}, err
 	}
