@@ -4,10 +4,12 @@ go 1.26.1
 
 require (
 	github.com/flanksource/commons-db v0.1.27
+	github.com/lib/pq v1.12.3
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/text v0.40.0
+	gorm.io/gorm v1.31.2
 )
 
 require (
@@ -131,7 +133,6 @@ require (
 	github.com/lann/builder v0.0.0-20180802200727-47ae307949d0 // indirect
 	github.com/lann/ps v0.0.0-20150810152359-62de8c46ede0 // indirect
 	github.com/liamylian/jsontime/v2 v2.0.0 // indirect
-	github.com/lib/pq v1.10.9 // indirect
 	github.com/lmittmann/tint v1.1.3 // indirect
 	github.com/lrita/cmap v0.0.0-20231108122212-cb084a67f554 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
@@ -241,7 +242,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
-	gorm.io/gorm v1.31.0 // indirect
 	k8s.io/api v0.36.1 // indirect
 	k8s.io/apiextensions-apiserver v0.36.1 // indirect
 	k8s.io/apimachinery v0.36.1 // indirect
