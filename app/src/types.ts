@@ -102,13 +102,28 @@ export type TargetSelector = {
   status?: string;
   "last-seen"?: string;
   live?: boolean;
-  filter?: string;
 };
 
 // A selector that has been resolved and stored on a scan. It is not the request
 // shape: the server parses the comma-joined query values into lists, and echoes
 // them back that way. Use `selectorLabel` to render one.
 export type StoredSelector = Record<string, string[] | string | boolean>;
+
+/** A filter selection is filter key → chosen values, which is the query string. */
+export type FilterSelection = Record<string, string[]>;
+
+// One filter control as the listing's lookup describes it. The server owns the
+// vocabulary — nothing here decides what a class or a tag can be.
+export type FilterVocabulary = {
+  key: string;
+  label: string;
+  options: string[];
+  // How many values exist behind `options`. The lookup serves a capped head
+  // set, so this is what lets the control say the rest are reachable by typing
+  // rather than implying it listed everything.
+  total: number;
+  truncated: boolean;
+};
 
 export const SEVERITIES = [
   "critical",

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, DataTable, Select, type DataTableGrouping } from "@flanksource/clicky-ui";
 import { fetchFindings, fetchScans } from "./api";
+import { selectionQuery, useEntityFilters } from "./filters";
 import {
   findingColumns,
   FindingDetail,
@@ -193,6 +194,15 @@ export function ScansView({ file }: { file?: string | null }) {
 
   const grouping = useMemo(() => buildGrouping(groupBy), [groupBy]);
 
+  // The run list owns which scan is shown, so the findings bar offers only the
+  // rest. The options come from the finding entity's own declaration, which
+  // means they describe every finding in the database rather than the page that
+  // happens to be loaded — a scan is capped at 500 findings here, and filters
+  // derived from a truncated page quietly omit whatever fell off it.
+  const { filters, selection, error: filterError } = useEntityFilters("finding", {
+    exclude: ["scan"],
+  });
+
   const loadRuns = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -219,14 +229,14 @@ export function ScansView({ file }: { file?: string | null }) {
     if (!selected) return;
     let cancelled = false;
     setBusy(true);
-    fetchFindings({ scan: selected })
+    fetchFindings({ scan: selected, ...selectionQuery(selection) })
       .then((f) => !cancelled && setFindings(f))
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setBusy(false));
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, selection]);
 
   const activeRun = useMemo(
     () => runs.find((r) => r.id === selected),
@@ -242,7 +252,9 @@ export function ScansView({ file }: { file?: string | null }) {
             Refresh
           </Button>
         </div>
-        {error && <span className="text-sm text-destructive">{error}</span>}
+        {(error ?? filterError) && (
+          <span className="text-sm text-destructive">{error ?? filterError}</span>
+        )}
         {runs.length === 0 && !busy && (
           <p className="text-sm text-muted-foreground">
             No scans yet. Run <code>task scan:safe</code>.
@@ -282,7 +294,7 @@ export function ScansView({ file }: { file?: string | null }) {
           data={findings}
           columns={findingColumns}
           getRowId={(row, i) => `${row.templateId}:${row.host}:${row.matcherName ?? i}`}
-          autoFilter
+          externalFilters={filters}
           showGlobalFilter
           globalFilterPlaceholder="Search findings, hosts, templates…"
           defaultSort={{ key: "severity" }}

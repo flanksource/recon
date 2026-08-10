@@ -123,8 +123,24 @@ func (r *Registry) registerTarget() {
 		ToolGroup("inventory").
 		ListWithContext(bind(r, (*store.Store).ListTargets)).
 		GetWithContext(bind(r, (*store.Store).GetTarget)).
+		CreateWithContext(bind(r, createTarget)).
 		UpdateWithContext(bind2(r, updateTarget)).
+		Filters(r.targetFilters()...).
 		Register()
+}
+
+// createTarget classifies a host into the inventory.
+//
+// Discovery finds hosts but never classifies them, so this is the operation
+// that turns one it found into a target. Without it the Discover dialog's "add
+// to inventory" had nothing to call: an update refuses a host that is not
+// already there, which is correct and left adding it impossible.
+func createTarget(st *store.Store, ctx context.Context, body map[string]any) (api.TargetDocument, error) {
+	host, curated, err := api.TargetFrom(body)
+	if err != nil {
+		return api.TargetDocument{}, err
+	}
+	return st.CreateTarget(ctx, host, curated)
 }
 
 // updateTarget applies an edit to the curated fields only.
@@ -146,6 +162,7 @@ func (r *Registry) registerScan() {
 		ToolGroup("scanning").
 		ListWithContext(bind(r, (*store.Store).ListScans)).
 		GetWithContext(bind(r, (*store.Store).GetScan)).
+		Filters(r.scanFilters()...).
 		Register()
 }
 
@@ -160,6 +177,7 @@ func (r *Registry) registerFinding() {
 		ToolGroup("scanning").
 		ListWithContext(bind(r, (*store.Store).ListFindings)).
 		GetWithContext(bind(r, getFinding)).
+		Filters(r.findingFilters()...).
 		Register()
 }
 
@@ -188,6 +206,7 @@ func (r *Registry) registerDiscover() {
 		ToolGroup("inventory").
 		ListWithContext(bind(r, (*store.Store).ListDiscoveries)).
 		GetWithContext(bind(r, (*store.Store).GetDiscovery)).
+		Filters(discoverFilters()...).
 		Register()
 }
 
@@ -200,6 +219,7 @@ func (r *Registry) registerProfile() {
 		CreateWithContext(bind(r, saveProfile)).
 		UpdateWithContext(bind2(r, updateProfile)).
 		DeleteWithContext(deleteProfile(r)).
+		Filters(r.profileFilters()...).
 		Register()
 }
 

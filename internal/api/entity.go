@@ -60,6 +60,17 @@ func (z Zone) GetID() string { return z.Zone }
 // GetName returns the zone name.
 func (z Zone) GetName() string { return z.Zone }
 
+// The two engine kinds. They are separate registries with separate profile
+// namespaces because they answer different questions: discovery updates the
+// inventory, a scan reports findings against it.
+const (
+	KindDiscovery = "discovery"
+	KindScan      = "scan"
+)
+
+// Kinds lists both, in the order a sweep and then a scan happen.
+func Kinds() []string { return []string{KindDiscovery, KindScan} }
+
 // EngineSpec is an engine as the API exposes it: the registry entry plus what
 // is installed on this machine. Read-only — engines are compiled in, so there
 // is nothing to create or edit.

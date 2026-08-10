@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -148,7 +150,8 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 				}
 			}
 
-			Expect(verbs).To(HaveKeyWithValue("target", []string{"list", "get", "update"}))
+			Expect(verbs).To(HaveKeyWithValue("target",
+				[]string{"list", "get", "create", "update"}))
 			Expect(verbs).To(HaveKeyWithValue("profile",
 				[]string{"list", "get", "create", "update", "delete"}))
 			Expect(verbs).To(HaveKeyWithValue("engine", []string{"list", "get"}))
@@ -190,10 +193,78 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 				To(ContainSubstring("not editable"))
 		})
 
+		// Discovery records what it sees but never classifies it, so this is how
+		// a host a sweep found joins the inventory. An update refuses a host
+		// that is not already there, which left the Discover dialog's "add to
+		// inventory" with nothing to call.
+		It("classifies a discovered host into the inventory", func() {
+			created := send(http.MethodPost, suite.URL+"/api/v1/target",
+				`{"host":"found.example.test","class":"non-prod","profiles":["safe"],"tags":["http"]}`)
+
+			var target api.TargetDocument
+			Expect(json.Unmarshal(created, &target)).To(Succeed(), string(created))
+			Expect(target.Host).To(Equal("found.example.test"))
+			Expect(target.Class).To(Equal(api.ClassNonProd))
+
+			Expect(getJSON[api.TargetDocument](
+				suite.URL + "/api/v1/target/found.example.test").Tags).To(Equal([]string{"http"}))
+		})
+
+		It("refuses to add a host that is already curated", func() {
+			// Overwriting would discard whoever classified it first, and the
+			// caller asked to add rather than to replace.
+			Expect(errorOf(send(http.MethodPost, suite.URL+"/api/v1/target",
+				`{"host":"one.example.test","class":"prod","profiles":["safe"],"tags":[]}`))).
+				To(ContainSubstring("already in the inventory"))
+		})
+
 		It("refuses to rename a target", func() {
 			Expect(errorOf(send(http.MethodPut, suite.URL+"/api/v1/target",
 				`{"id":"one.example.test","host":"two.example.test"}`))).
 				To(ContainSubstring("host is not editable"))
+		})
+	})
+
+	// A parameter the spec merely names is a text box: the filter bar can send
+	// it but cannot say what it accepts, which is how the UI ended up loading
+	// the whole inventory and narrowing it in the browser. These assert the two
+	// halves that replace that — the spec marks each parameter as a control,
+	// and the lookup says what the control offers.
+	Describe("filters", func() {
+		It("marks every selector parameter as a filter control", func() {
+			for name, meta := range parameterRoles(spec, "/api/v1/target", "get") {
+				Expect(meta).To(Equal("filter"), "parameter %s carries no control", name)
+			}
+		})
+
+		It("offers a closed vocabulary from the code", func() {
+			// A class cannot be discovered from the data: a class nobody has
+			// used yet is still one you can classify a host as.
+			Expect(lookup(suite.URL+"/api/v1/target", "")["class"].values()).
+				To(Equal([]string{"deactivated", "internal", "non-prod", "prod", "public"}))
+		})
+
+		It("offers an open vocabulary from the database", func() {
+			// Tags are whatever anyone has typed, so the only honest source is
+			// what is in the inventory now.
+			Expect(lookup(suite.URL+"/api/v1/target", "")["tags"].values()).
+				To(Equal([]string{"http"}))
+		})
+
+		It("answers a search with only the filter it asked about", func() {
+			// Narrowing server-side is what keeps a vocabulary larger than the
+			// lookup's 200-option cap reachable. Re-enumerating the other
+			// filters would also cost a query each per keystroke.
+			filters := lookup(suite.URL+"/api/v1/target", "&__lookup_filter=hosts&__lookup_q=one")
+			Expect(maps.Keys(filters)).To(ConsistOf("hosts"))
+			Expect(filters["hosts"].values()).To(Equal([]string{"one.example.test"}))
+			Expect(filters["hosts"].Total).To(Equal(1))
+		})
+
+		It("gives every listing something to narrow by", func() {
+			for _, entity := range []string{"target", "scan", "finding", "discover", "profile", "engine"} {
+				Expect(lookup(suite.URL+"/api/v1/"+entity, "")).ToNot(BeEmpty(), entity)
+			}
 		})
 	})
 
@@ -281,6 +352,55 @@ func parameters(spec map[string]any, path, method string) []string {
 		}
 	}
 	return names
+}
+
+// parameterRoles maps each declared query parameter to the control the UI is
+// told to render it as.
+func parameterRoles(spec map[string]any, path, method string) map[string]string {
+	paths, _ := spec["paths"].(map[string]any)
+	item, _ := paths[path].(map[string]any)
+	operation, _ := item[method].(map[string]any)
+	declared, _ := operation["parameters"].([]any)
+
+	roles := map[string]string{}
+	for _, parameter := range declared {
+		fields, _ := parameter.(map[string]any)
+		name, ok := fields["name"].(string)
+		if !ok {
+			continue
+		}
+		meta, _ := fields["x-clicky"].(map[string]any)
+		role, _ := meta["role"].(string)
+		roles[name] = role
+	}
+	return roles
+}
+
+// lookupFilter is one control as the lookup describes it. Options is keyed by
+// the value the filter sends, which is what makes values() the option set.
+type lookupFilter struct {
+	Label   string                     `json:"label"`
+	Multi   bool                       `json:"multi"`
+	Total   int                        `json:"total"`
+	Options map[string]json.RawMessage `json:"options"`
+}
+
+func (f lookupFilter) values() []string {
+	values := make([]string, 0, len(f.Options))
+	for value := range f.Options {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	return values
+}
+
+// lookup asks a listing what its filters offer. search is the extra query
+// string that narrows one of them, or "" for every filter's head set.
+func lookup(url, search string) map[string]lookupFilter {
+	response := getJSON[struct {
+		Filters map[string]lookupFilter `json:"filters"`
+	}](url + "?__lookup=filters" + search)
+	return response.Filters
 }
 
 func get(url string) []byte {

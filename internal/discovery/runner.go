@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/flanksource/clicky/task"
@@ -190,14 +191,15 @@ func (r *Runner) seed(ctx context.Context, opts Options) ([]string, error) {
 
 func (r *Runner) chainFor(name string) (Chain, error) {
 	switch name {
-	case "full":
-		return NewChain("full", enginediscovery.Zones, "subfinder", "naabu", "httpx", "tlsx")
-	case "targeted":
+	case ChainFull:
+		return NewChain(ChainFull, enginediscovery.Zones, "subfinder", "naabu", "httpx", "tlsx")
+	case ChainTargeted:
 		// Skips enumeration: the hosts are already known, and this is the
 		// rescan that refreshes what is recorded about them.
-		return NewChain("targeted", enginediscovery.Hosts, "naabu", "httpx", "tlsx")
+		return NewChain(ChainTargeted, enginediscovery.Hosts, "naabu", "httpx", "tlsx")
 	default:
-		return Chain{}, fmt.Errorf("unknown chain %q: expected full or targeted", name)
+		return Chain{}, fmt.Errorf("unknown chain %q: expected one of %s",
+			name, strings.Join(ChainNames(), ", "))
 	}
 }
 

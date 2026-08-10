@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InventoryView } from "./TargetsView";
 import type { Target } from "./types";
@@ -51,6 +51,11 @@ const target: Target = {
 vi.mock("./api", () => ({
   fetchTargets: vi.fn(async () => [target]),
   saveTargets: vi.fn(async () => [target]),
+  fetchFilters: vi.fn(async () => [
+    { key: "class", label: "Class", options: ["prod", "non-prod"], total: 2, truncated: false },
+    { key: "tags", label: "Tags", options: ["http"], total: 1, truncated: false },
+  ]),
+  fetchFilterOptions: vi.fn(async () => []),
   fetchZones: vi.fn(async () => []),
   fetchTargetSchema: vi.fn(async () => ({})),
   fetchProfiles: vi.fn(async () => []),
@@ -79,14 +84,7 @@ describe("InventoryView", () => {
   });
 
   it("shows discovery status, latency, ports, paths, and login methods", async () => {
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      value: vi.fn().mockReturnValue({
-        matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      }),
-    });
+    stubMatchMedia();
 
     render(<InventoryView onOpenScan={vi.fn()} onOpenTarget={vi.fn()} />);
 
@@ -102,4 +100,64 @@ describe("InventoryView", () => {
     expect(screen.getByText("/login")).toBeInTheDocument();
     expect(screen.getByText("Web login")).toBeInTheDocument();
   });
+
+  // The controls used to be written out here, which meant the browser held its
+  // own idea of what a class or a tag could be. They now come from the entity's
+  // filter declaration, so a filter the server does not offer cannot appear and
+  // one it does cannot be forgotten.
+  it("builds its filter controls from what the listing says it offers", async () => {
+    stubMatchMedia();
+    render(<InventoryView onOpenScan={vi.fn()} onOpenTarget={vi.fn()} />);
+
+    expect(await screen.findByRole("combobox", { name: /Class/ })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Tags/ })).toBeInTheDocument();
+  });
+
+  it("asks the server for the narrowed list rather than narrowing what it has", async () => {
+    stubMatchMedia();
+    const { fetchTargets } = await import("./api");
+    render(<InventoryView onOpenScan={vi.fn()} onOpenTarget={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /Class/ }));
+    // The combobox commits on mousedown, not click.
+    fireEvent.mouseDown(await screen.findByRole("option", { name: "prod" }));
+
+    await waitFor(() =>
+      expect(fetchTargets).toHaveBeenLastCalledWith({ class: "prod" }),
+    );
+  });
+
+  // Filtering, reloading and a finishing scan all refetch, and the rows they
+  // return are the database's. An edit is held separately and re-applied over
+  // them, so none of those can silently discard typing — which is what the old
+  // "don't reload while dirty" guard was working around.
+  it("keeps an unsaved edit when the list is refetched", async () => {
+    stubMatchMedia();
+    render(<InventoryView onOpenScan={vi.fn()} onOpenTarget={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: /api\.example\.com/ }));
+    fireEvent.change(screen.getByPlaceholderText("tag…"), {
+      target: { value: "reviewed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    expect(await screen.findByText("reviewed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+
+    // The refetched row carries no tags at all, so the tag is only still on
+    // screen if the edit outlived the fetch.
+    expect(await screen.findByText("reviewed")).toBeInTheDocument();
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
 });
+
+function stubMatchMedia() {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockReturnValue({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }),
+  });
+}

@@ -29,10 +29,6 @@ type TargetOpts struct {
 
 	LastSeen string `json:"lastSeen,omitempty" flag:"last-seen" help:"Only targets seen since this time (RFC3339 or a duration such as 168h)"`
 	Live     bool   `json:"live,omitempty" flag:"live" help:"Only targets that answered over HTTP the last time they were probed"`
-
-	// Filter switches a bulk action from "the ids I named" to "everything this
-	// selector matches". clicky reads it by name.
-	Filter string `json:"-" flag:"filter" help:"Apply a bulk action to everything matching the filter instead of named ids"`
 }
 
 // Empty reports whether the selector constrains anything. A scan against an

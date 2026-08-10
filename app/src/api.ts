@@ -16,8 +16,10 @@ import type {
   Target,
   TargetDocument,
   TargetSelector,
+  FilterVocabulary,
   Zone,
 } from "./types";
+import { curatedTarget } from "./types";
 
 const API = "/api/v1";
 
@@ -73,6 +75,57 @@ function json(method: string, body: unknown): RequestInit {
   };
 }
 
+// ---------------------------------------------------------------- filters
+
+// The lookup is a convention on every listing rather than a route of its own:
+// `?__lookup=filters` asks what the listing can be narrowed by instead of
+// returning rows. It is answered from the same declaration that generates the
+// query parameters, so a control can never offer a filter the server does not
+// have.
+type LookupFilter = {
+  label?: string;
+  total?: number;
+  truncated?: boolean;
+  // Keyed by the value the filter sends; the value is a rendered node the
+  // filter bar does not need, because these values are their own labels.
+  options?: Record<string, unknown>;
+};
+
+type LookupResponse = { filters?: Record<string, LookupFilter> };
+
+function lookupURL(entity: string, params: Record<string, string> = {}): string {
+  return `${API}/${entity}${query({ __lookup: "filters", ...params })}`;
+}
+
+function optionValues(filter: LookupFilter): string[] {
+  return Object.keys(filter.options ?? {});
+}
+
+export async function fetchFilters(entity: string): Promise<FilterVocabulary[]> {
+  const response = await request<LookupResponse>(lookupURL(entity));
+  return Object.entries(response.filters ?? {}).map(([key, filter]) => ({
+    key,
+    label: filter.label ?? key,
+    options: optionValues(filter),
+    total: filter.total ?? optionValues(filter).length,
+    truncated: filter.truncated ?? false,
+  }));
+}
+
+// A search is answered by the server rather than by narrowing what was already
+// loaded: the head set is capped, so the values past it exist only in the
+// database until someone types.
+export async function fetchFilterOptions(
+  entity: string,
+  key: string,
+  search: string,
+): Promise<string[]> {
+  const response = await request<LookupResponse>(
+    lookupURL(entity, { __lookup_filter: key, __lookup_q: search }),
+  );
+  return optionValues(response.filters?.[key] ?? {});
+}
+
 // ---------------------------------------------------------------- targets
 
 export function fetchTargets(selector?: TargetSelector): Promise<Target[]> {
@@ -97,23 +150,22 @@ export function saveTarget(host: string, curated: CuratedTarget): Promise<Target
   return request<Target>(`${API}/target`, json("PUT", { ...curated, id: host }));
 }
 
-export async function saveTargets(rows: TargetDocument[]): Promise<Target[]> {
+// Classifying a host a sweep found is a create, not an edit: an update refuses
+// a host that is not in the inventory, because a curated record it would have
+// to invent is exactly what nobody asked for.
+export function createTarget(host: string, curated: CuratedTarget): Promise<Target> {
+  return request<Target>(`${API}/target`, json("POST", { ...curated, host }));
+}
+
+export async function saveTargets(
+  rows: TargetDocument[],
+  isNew: (host: string) => boolean = () => false,
+): Promise<Target[]> {
   const saved: Target[] = [];
   for (const row of rows) {
+    const write = isNew(row.host) ? createTarget : saveTarget;
     try {
-      saved.push(
-        await saveTarget(row.host, {
-          class: row.class,
-          app: row.app,
-          cluster: row.cluster,
-          source: row.source,
-          profiles: row.profiles,
-          ports: row.ports,
-          tags: row.tags,
-          notes: row.notes,
-          reason: row.reason,
-        }),
-      );
+      saved.push(await write(row.host, curatedTarget(row)));
     } catch (error) {
       throw new Error(
         `saved ${saved.length} target(s); ${row.host} failed: ${(error as Error).message}`,

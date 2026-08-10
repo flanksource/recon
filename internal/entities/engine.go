@@ -25,6 +25,7 @@ func (r *Registry) registerEngine() {
 		ToolGroup("configuration").
 		ListWithContext(r.listEngines).
 		GetWithContext(r.getEngine).
+		Filters(engineFilters()...).
 		Register()
 }
 

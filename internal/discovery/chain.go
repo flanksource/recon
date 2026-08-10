@@ -14,6 +14,17 @@ import (
 	"github.com/flanksource/recon/internal/engines/discovery"
 )
 
+// The two sweeps on offer. A full sweep enumerates from the configured zones;
+// a targeted one re-probes hosts the caller already knows about.
+const (
+	ChainFull     = "full"
+	ChainTargeted = "targeted"
+)
+
+// ChainNames lists the sweeps a caller may ask for, so the filter control, the
+// flag's help and the error a bad name produces cannot fall out of step.
+func ChainNames() []string { return []string{ChainFull, ChainTargeted} }
+
 // Chain is an ordered pipeline of discovery engines. Each stage consumes what
 // the previous one emitted, which is checked when the chain is built rather
 // than discovered when it runs.

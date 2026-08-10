@@ -13,6 +13,37 @@ import (
 // them. Silently dropping `host` from an edit would look like a successful
 // rename.
 
+// TargetFrom decodes the body of a create: the host, which is the target's
+// identity and so is settable only here, plus the curated fields.
+//
+// The host arrives as `host` from a JSON body and as `id` from the entity
+// framework's flag mapping; both name the same thing and disagreeing about
+// which is authoritative would make one of the two surfaces silently create
+// nothing.
+func TargetFrom(body map[string]any) (string, Curated, error) {
+	host, _ := body["host"].(string)
+	if host == "" {
+		host, _ = body["id"].(string)
+	}
+	if host == "" {
+		return "", Curated{}, fmt.Errorf("host is required: it is the target's identity")
+	}
+
+	rest := make(map[string]any, len(body))
+	for key, value := range body {
+		if key == "host" || key == "id" {
+			continue
+		}
+		rest[key] = value
+	}
+
+	curated, err := CuratedFrom(rest)
+	if err != nil {
+		return "", Curated{}, err
+	}
+	return host, curated, nil
+}
+
 // CuratedFrom decodes an edit to a target's curated fields.
 func CuratedFrom(body map[string]any) (Curated, error) {
 	if _, present := body["host"]; present {

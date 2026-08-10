@@ -212,10 +212,10 @@ var CuratedFields = []string{
 
 // Curated is the editable projection of a target — the body of an update.
 type Curated struct {
-	Class    Class    `json:"class"`
-	App      string   `json:"app,omitempty"`
-	Cluster  string   `json:"cluster,omitempty"`
-	Source   string   `json:"source,omitempty"`
+	Class   Class  `json:"class"`
+	App     string `json:"app,omitempty"`
+	Cluster string `json:"cluster,omitempty"`
+	Source  string `json:"source,omitempty"`
 	// The list fields take either a JSON array or the comma-joined form a CLI
 	// flag produces, because one operation is served on both surfaces.
 	Profiles StringList `json:"profiles"`

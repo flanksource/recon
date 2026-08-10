@@ -75,6 +75,31 @@ func (s *Store) SaveTarget(ctx context.Context, document api.TargetDocument) err
 	return nil
 }
 
+// CreateTarget adds a host to the inventory with only its curated fields set.
+//
+// This is how a host a sweep found becomes a target: discovery records what it
+// sees but never classifies it, because a class is a judgement about what a
+// host is for. An existing host is refused rather than overwritten — a create
+// that silently replaced a curated record would discard someone's work.
+func (s *Store) CreateTarget(ctx context.Context, host string, curated api.Curated) (api.TargetDocument, error) {
+	row := models.Target{Host: host}
+	row.ApplyCurated(curated)
+
+	document := row.Document()
+	if err := validate(document); err != nil {
+		return api.TargetDocument{}, err
+	}
+
+	result := s.DB(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if result.Error != nil {
+		return api.TargetDocument{}, fmt.Errorf("create target %s: %w", host, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return api.TargetDocument{}, fmt.Errorf("target %s is already in the inventory", host)
+	}
+	return document, nil
+}
+
 // UpdateCurated replaces only the editable fields and returns the stored
 // document. Machine-owned sections are read back from the row and re-applied, so
 // an edit can never clobber an observation — the property the TypeScript store
@@ -137,17 +162,7 @@ func (s *Store) CountTargets(ctx context.Context) (int64, error) {
 // TagVocabulary is every distinct tag in use, sorted. The UI offers it for
 // filtering and bulk edits.
 func (s *Store) TagVocabulary(ctx context.Context) ([]string, error) {
-	var tags []string
-	err := s.DB(ctx).
-		Raw(`SELECT DISTINCT unnest(tags) AS tag FROM targets ORDER BY tag`).
-		Scan(&tags).Error
-	if err != nil {
-		return nil, fmt.Errorf("tag vocabulary: %w", err)
-	}
-	if tags == nil {
-		tags = []string{}
-	}
-	return tags, nil
+	return s.Vocabulary(ctx, TargetTags)
 }
 
 // Inventory assembles the listing the UI loads on start.

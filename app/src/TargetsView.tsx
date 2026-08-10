@@ -4,9 +4,15 @@ import { columns } from "./columns";
 import { BulkEditBar, type BulkEdit } from "./BulkEditBar";
 import { DiscoverDialog } from "./DiscoverDialog";
 import { ScanDialog } from "./ScanDialog";
+import { selectionQuery, useEntityFilters } from "./filters";
 import { useScanStatus } from "./useScanStatus";
 import { fetchTargets, saveTargets } from "./api";
-import { curatedTarget, type TableRow, type TargetRow } from "./types";
+import {
+  curatedTarget,
+  type TableRow,
+  type TargetRow,
+  type TargetSelector,
+} from "./types";
 
 function sameDefinition(left: TargetRow, right: TargetRow): boolean {
   return JSON.stringify(curatedTarget(left)) === JSON.stringify(curatedTarget(right));
@@ -37,8 +43,16 @@ export function InventoryView({
   onOpenTarget: (host: string) => void;
 }) {
   const routeParams = new URLSearchParams(window.location.search);
-  const [rows, setRows] = useState<TargetRow[]>([]);
-  const [original, setOriginal] = useState<TargetRow[]>([]);
+  // Two states, deliberately. `served` is what the database says; `edits` is
+  // what the user has changed and not yet saved, keyed by host. Keeping them
+  // apart is what makes a reload safe: the server's answer replaces `served`
+  // and the edits are re-applied on top, so narrowing a filter or finishing a
+  // scan can no longer throw away typing.
+  const [served, setServed] = useState<TargetRow[]>([]);
+  const [edits, setEdits] = useState<Record<string, TargetRow>>({});
+  // Hosts classified in the discover dialog exist only here until they are
+  // saved: they are not in the inventory yet, so no listing returns them.
+  const [added, setAdded] = useState<TargetRow[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
     routeParams.get("selected")?.split(",").filter(Boolean) ?? [],
   );
@@ -48,36 +62,37 @@ export function InventoryView({
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
 
-  // Merge newly classified discovered hosts into the editable inventory. Skips any
-  // host already present. Returns how many were actually added.
+  const {
+    filters,
+    selection,
+    error: filterError,
+  } = useEntityFilters("target");
+
   const addDiscovered = useCallback(
     (incoming: TargetRow[]): number => {
-      let added = 0;
-      setRows((prev) => {
-        const existing = new Set(prev.map((r) => r.host));
-        const fresh = incoming.filter((r) => !existing.has(r.host));
-        added = fresh.length;
+      let count = 0;
+      setAdded((prev) => {
+        const known = new Set([...prev.map((r) => r.host), ...served.map((r) => r.host)]);
+        const fresh = incoming.filter((r) => !known.has(r.host));
+        count = fresh.length;
         return fresh.length ? [...prev, ...fresh] : prev;
       });
-      return added;
+      return count;
     },
-    [],
+    [served],
   );
 
-  const load = useCallback(async ({ keepSelection = false } = {}) => {
+  const load = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const targets = await fetchTargets();
-      setRows(targets);
-      setOriginal(targets);
-      if (!keepSelection) setSelectedIds([]);
+      setServed(await fetchTargets(selectionQuery(selection) as TargetSelector));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [selection]);
 
   useEffect(() => {
     void load();
@@ -92,74 +107,77 @@ export function InventoryView({
     window.history.replaceState(window.history.state, "", url);
   }, [query, selectedIds]);
 
-  const dirty = useMemo(
-    () =>
-      rows.length !== original.length ||
-      rows.some((row) => {
-        const previous = original.find((target) => target.host === row.host);
-        return !previous || !sameDefinition(row, previous);
-      }),
-    [rows, original],
-  );
+  // The rows the table shows: what the server returned, with unsaved edits laid
+  // over it, plus the hosts that are not in the inventory yet.
+  const rows = useMemo<TargetRow[]>(() => {
+    const merged = served.map((row) => edits[row.host] ?? row);
+    const shown = new Set(merged.map((row) => row.host));
+    return [...merged, ...added.filter((row) => !shown.has(row.host))];
+  }, [added, edits, served]);
 
-  // A finished scan stamps the machine-owned scan section — pull it back in so
-  // the table reflects it, unless the user has edits that a reload would discard.
-  // Keep the selection: it is what the scan ran against, and the dialog's scope reads
-  // from it.
-  const { status: scan, setStatus: setScan } = useScanStatus(() => {
-    if (!dirty) void load({ keepSelection: true });
-  });
+  const dirty = Object.keys(edits).length > 0 || added.length > 0;
+
+  // A finished scan stamps the machine-owned scan section, so pull it back in.
+  // Unlike before this needs no dirty guard: an edit lives in `edits` and
+  // survives the reload.
+  const { status: scan, setStatus: setScan } = useScanStatus(() => void load());
 
   const tableRows = useMemo<TableRow[]>(
     () =>
-      rows.map((r) => {
-        const orig = original.find((o) => o.host === r.host);
-        const rowDirty = !orig || !sameDefinition(r, orig);
-        return {
-          ...r,
-          first_observed: r.observed?.first_observed,
-          last_seen: r.observed?.last_seen,
-          last_scan: r.scan?.last_scan,
-          last_status: r.http?.status_code,
-          response_time: r.http?.response_time,
-          open_ports: r.network?.open_ports?.map(String),
-          known_paths: r.http?.known_paths,
-          login_methods: r.http?.login_methods,
-          findings: r.scan?.last_findings,
-          dirty: rowDirty,
-        };
-      }),
-    [rows, original],
+      rows.map((r) => ({
+        ...r,
+        first_observed: r.observed?.first_observed,
+        last_seen: r.observed?.last_seen,
+        last_scan: r.scan?.last_scan,
+        last_status: r.http?.status_code,
+        response_time: r.http?.response_time,
+        open_ports: r.network?.open_ports?.map(String),
+        known_paths: r.http?.known_paths,
+        login_methods: r.http?.login_methods,
+        findings: r.scan?.last_findings,
+        dirty: r.host in edits || added.some((row) => row.host === r.host),
+      })),
+    [added, edits, rows],
   );
 
   const applyBulk = useCallback(
     (edit: BulkEdit) => {
       const selected = new Set(selectedIds);
-      setRows((prev) =>
-        prev.map((r) => (selected.has(r.host) ? applyEdit(r, edit) : r)),
-      );
+      const current = new Map(rows.map((row) => [row.host, row]));
+      const stored = new Map(served.map((row) => [row.host, row]));
+      setEdits((prev) => {
+        const next = { ...prev };
+        for (const host of selected) {
+          const row = current.get(host);
+          if (!row) continue;
+          const edited = applyEdit(row, edit);
+          // An edit that lands back on what the database already has is not a
+          // change, and leaving it in would keep claiming unsaved work.
+          const saved = stored.get(host);
+          if (saved && sameDefinition(edited, saved)) delete next[host];
+          else next[host] = edited;
+        }
+        return next;
+      });
     },
-    [selectedIds],
+    [rows, selectedIds, served],
   );
 
   const save = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const changed = rows.filter((row) => {
-        const previous = original.find((target) => target.host === row.host);
-        return !previous || !sameDefinition(row, previous);
-      });
-      await saveTargets(changed);
-      const targets = await fetchTargets();
-      setRows(targets);
-      setOriginal(targets);
+      const fresh = new Set(added.map((row) => row.host));
+      await saveTargets([...Object.values(edits), ...added], (host) => fresh.has(host));
+      setEdits({});
+      setAdded([]);
+      setServed(await fetchTargets(selectionQuery(selection) as TargetSelector));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [original, rows]);
+  }, [added, edits, selection]);
 
   const tagVocabulary = useMemo(() => {
     const tags = new Set<string>();
@@ -175,7 +193,7 @@ export function InventoryView({
   }, [rows, selectedIds]);
 
   const scannedCount = tableRows.filter((r) => r.last_scan).length;
-  const savedHosts = useMemo(() => original.map((r) => r.host), [original]);
+  const savedHosts = useMemo(() => served.map((r) => r.host), [served]);
 
   const scanRunning = scan?.phase === "running";
   const scanLabel = scanRunning
@@ -193,9 +211,9 @@ export function InventoryView({
           {tagVocabulary.length} tags
         </span>
         <span className="flex-1" />
-        {error && (
+        {(error ?? filterError) && (
           <span className="text-sm text-destructive" role="alert">
-            {error}
+            {error ?? filterError}
           </span>
         )}
         {dirty && (
@@ -252,7 +270,11 @@ export function InventoryView({
           getRowId={(row) => row.host}
           getRowHref={(row) => `/inventory/${encodeURIComponent(row.host)}`}
           onRowClick={(row) => onOpenTarget(row.host)}
-          autoFilter
+          // The controls come from the entity's own filter declaration and the
+          // database answers them, so these rows arrived narrowed. DataTable
+          // never applies caller-supplied filters itself, which is what lets
+          // the search box keep narrowing the result further in the browser.
+          externalFilters={filters}
           showGlobalFilter
           globalFilter={query}
           onGlobalFilterChange={setQuery}
