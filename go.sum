@@ -561,6 +561,7 @@ github.com/vadimi/go-http-ntlm v1.0.3 h1:o6n2vAtP1MlLT73jIXuQYryIcWzXyMN0SCQWZ2Q
 github.com/vadimi/go-http-ntlm v1.0.3/go.mod h1:SwhhmybQ4Yn1mC53UPmQ6MCrBX6UvJHlS1Xt89OmM9M=
 github.com/vadimi/go-http-ntlm/v2 v2.5.0 h1:sddEWZumD7GoeNkfFZyZq01pq6CB4U6L73EBw3X7vTU=
 github.com/vadimi/go-http-ntlm/v2 v2.5.0/go.mod h1:KduY1xBqaL8Q2Rh/erMvRQHKoj3VAT9GNYxe9EH+rOo=
+github.com/vadimi/go-ntlm v1.0.1/go.mod h1:hPTY60eLSKGj9oUJAB+kZiLs2Cg5eKdH60aLczM9rMg=
 github.com/vadimi/go-ntlm v1.2.1 h1:y2xZf/a5+BJlYNJIIulP1q8F438H9bU7aGcYE53vghQ=
 github.com/vadimi/go-ntlm v1.2.1/go.mod h1:hPTY60eLSKGj9oUJAB+kZiLs2Cg5eKdH60aLczM9rMg=
 github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
