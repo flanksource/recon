@@ -70,6 +70,7 @@ type Run struct {
 	Output *Output
 
 	invocation *engines.Invocation
+	managed    *managedScan
 	cancel     context.CancelFunc
 
 	// done closes when the run reaches a terminal phase. Wait blocks on it.
@@ -236,7 +237,7 @@ func (r *Runtime) resolveConfig(ctx context.Context, spec engines.Spec, request 
 		config[key] = value
 	}
 
-	if err := spec.Sections.Validate(config); err != nil {
+	if err := spec.ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("scan configuration: %w", err)
 	}
 	return config, nil
@@ -286,29 +287,26 @@ func (r *Runtime) launch(
 	}
 
 	out := filepath.Join(dir, "findings.jsonl")
-	group := task.StartGroup[any](name,
-		task.WithKind("scan"), task.WithConcurrency(1),
-		task.WithLabels(map[string]string{"engine": spec.Name, "profile": request.Profile}))
-
-	// The group exists for supervision and for /api/tasks visibility. The status
-	// the UI reads is derived from Run, never from the task snapshot: a task
-	// knows nothing about findings or severities.
-	_ = group
-
 	output := NewOutput(progressOf(engine))
 	invocation := &engines.Invocation{
 		Bin:     bin,
 		Args:    engine.Args(engines.Run{Bin: bin, WorkDir: dir, Config: config, In: in, Out: out}),
 		WorkDir: dir,
-		Stdout:  streamWriter{output: output, stream: StreamStdout, notify: r.publish, runtime: r},
-		Stderr:  streamWriter{output: output, stream: StreamStderr, notify: r.publish, runtime: r},
 	}
 
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	managed := startManagedScan(name, spec.Name, request.Profile, func() error {
+		cancel()
+		return invocation.Cancel()
+	})
+	bindManagedScan(managed, invocation)
+	invocation.Stdout = streamWriter{output: output, stream: StreamStdout, task: managed.Task(), runtime: r}
+	invocation.Stderr = streamWriter{output: output, stream: StreamStderr, task: managed.Task(), runtime: r}
 	run := &Run{
 		Scan:       row.Document(0, nil, request.Selector.Describe()),
 		Output:     output,
 		invocation: invocation,
+		managed:    managed,
 		cancel:     cancel,
 		done:       make(chan struct{}),
 	}
@@ -318,78 +316,6 @@ func (r *Runtime) launch(
 
 	go r.supervise(runCtx, run, engine, row, out)
 	return run.Scan, nil
-}
-
-// supervise waits for the engine, then records what it found.
-func (r *Runtime) supervise(
-	ctx context.Context,
-	run *Run,
-	engine enginescan.Engine,
-	row models.Scan,
-	resultPath string,
-) {
-	defer close(run.done)
-	defer run.cancel()
-	defer run.invocation.Cleanup()
-
-	// A wall-clock bound rather than the process timeout, so an overrunning scan
-	// ends as cancelled rather than failed — it was stopped, not broken.
-	timer := time.AfterFunc(maxDuration, func() {
-		run.Output.Append(StreamSystem,
-			fmt.Sprintf("[!] scan exceeded %s and was cancelled\n", maxDuration))
-		r.Cancel()
-	})
-	defer timer.Stop()
-
-	result := run.invocation.Run(ctx)
-	run.Output.Flush()
-
-	findings, parseErr := r.collect(engine, resultPath)
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	finished := time.Now()
-	run.Scan.FinishedAt = finished.Format("2006-01-02T15:04:05")
-	run.Scan.ExitCode = &result.ExitCode
-	run.Scan.Findings = len(findings)
-	run.Scan.Severities = api.SeverityCounts(findings)
-	run.Scan.Hosts = hostsOf(findings)
-	run.Scan.Stats = run.Output.Snapshot().Stats
-
-	switch {
-	case ctx.Err() != nil:
-		run.Scan.Phase = api.PhaseCancelled
-	case result.ExitCode != 0:
-		run.Scan.Phase = api.PhaseFailed
-		run.Scan.Error = errorText(result.Err, result.ExitCode)
-	case parseErr != nil:
-		// The engine succeeded, so its findings are real; the damage is in the
-		// output file and must be reported rather than hidden.
-		run.Scan.Phase = api.PhaseDone
-		run.Scan.Error = parseErr.Error()
-	default:
-		run.Scan.Phase = api.PhaseDone
-	}
-
-	row.Phase = string(run.Scan.Phase)
-	row.FinishedAt = &finished
-	row.ExitCode = &result.ExitCode
-	row.Command = result.Command
-	row.Severities = models.Wrap(&run.Scan.Severities)
-	row.Stats = models.Wrap(run.Scan.Stats)
-	if run.Scan.Error != "" {
-		row.Error = &run.Scan.Error
-	}
-
-	persist := context.WithoutCancel(ctx)
-	if err := r.Store.SaveFindings(persist, row.ID, findings); err != nil {
-		run.Scan.Error = err.Error()
-	}
-	if err := r.Store.UpdateScan(persist, row); err != nil {
-		run.Scan.Error = err.Error()
-	}
-	r.publish()
 }
 
 // collect reads the findings the engine wrote.
@@ -448,6 +374,7 @@ func (r *Runtime) Cancel() error {
 	if run == nil || run.Scan.Phase.Terminal() {
 		return fmt.Errorf("no scan is running")
 	}
+	run.managed.controller.stopping.Store(true)
 	run.cancel()
 	return run.invocation.Cancel()
 }
@@ -456,12 +383,13 @@ func (r *Runtime) Cancel() error {
 type streamWriter struct {
 	output  *Output
 	stream  Stream
-	notify  func()
+	task    *task.Task
 	runtime *Runtime
 }
 
 func (w streamWriter) Write(p []byte) (int, error) {
 	w.output.Append(w.stream, string(p))
+	updateTaskProgress(w.task, w.output.Snapshot().Stats)
 	// Take the lock to publish: the snapshot has to be consistent with whatever
 	// the supervising goroutine is writing.
 	w.runtime.mu.Lock()

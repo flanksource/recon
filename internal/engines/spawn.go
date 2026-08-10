@@ -27,9 +27,6 @@ type Invocation struct {
 	// starts and removed by Cleanup.
 	WorkDir string
 
-	// Task carries cancellation and reports progress.
-	Task *task.Task
-
 	// Stdout and Stderr receive the process output as it arrives. Either may be
 	// nil.
 	Stdout, Stderr io.Writer
@@ -89,9 +86,6 @@ func (i *Invocation) Run(ctx context.Context) Result {
 		WithCwd(i.WorkDir).
 		WithProcessGroup()
 
-	if i.Task != nil {
-		process = process.WithTask(i.Task)
-	}
 	if i.Stdout != nil || i.Stderr != nil {
 		process = process.Stream(i.Stdout, i.Stderr)
 	}
@@ -120,6 +114,32 @@ func (i *Invocation) Run(ctx context.Context) Result {
 		result.Err = outcome.Error
 	}
 	return result
+}
+
+// OutputSnapshot returns the process output captured alongside any live stream.
+func (i *Invocation) OutputSnapshot() task.OutputSnapshot {
+	i.mu.Lock()
+	process := i.process
+	i.mu.Unlock()
+	if process == nil {
+		return task.OutputSnapshot{}
+	}
+	return task.OutputSnapshot{Stdout: process.GetStdout(), Stderr: process.GetStderr()}
+}
+
+// TaskDetails projects the process metadata understood by Clicky's task UI.
+func (i *Invocation) TaskDetails() exec.ExecTaskDetails {
+	i.mu.Lock()
+	process := i.process
+	i.mu.Unlock()
+	if process == nil {
+		return exec.ExecTaskDetails{Command: i.Bin, Args: append([]string(nil), i.Args...), Status: "pending", ExitCode: -1}
+	}
+	result := process.Result()
+	return exec.ExecTaskDetails{
+		Command: result.Command, Args: append([]string(nil), result.Args...), PID: result.PID,
+		Status: result.Status, ExitCode: result.ExitCode, Started: result.Started, Duration: result.Duration,
+	}
 }
 
 // Cancel kills the engine and everything it started.

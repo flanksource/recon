@@ -95,7 +95,7 @@ gone=$(comm -13 .gen/discovered-hosts.txt .gen/known-hosts.txt || true)
 echo
 echo "=== DRIFT REPORT ==="
 if [ -n "$new" ]; then
-  echo "NEW hosts discovered, not in inventory (classify with the nuclei-targets skill):"
+  echo "NEW hosts discovered, not in inventory (classify with the reconctl skill):"
   echo "$new" | sed 's/^/  + /'
 fi
 if [ -n "$gone" ]; then

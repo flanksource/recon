@@ -38,7 +38,15 @@ const nucleiEngine: Engine = {
   binary: "nuclei",
   installed: true,
   managed: true,
-  sections: [],
+  sections: [
+    {
+      id: "scan",
+      title: "Scan",
+      properties: {
+        dast: { type: "boolean", title: "DAST" },
+      },
+    },
+  ],
 };
 
 const safeProfile: Profile = {
@@ -150,6 +158,56 @@ describe("ScanDialog", () => {
         }),
       ),
     );
+  });
+
+  it("offers every stored profile for a manual run regardless of target assignments", async () => {
+    const fetchMock = mockFetch({
+      "/api/v1/engine": [nucleiEngine],
+      "/api/v1/profile": [safeProfile, intrusiveProfile],
+      "/api/v1/scan": createdScan,
+    });
+
+    render(
+      <ScanDialog
+        open
+        onClose={vi.fn()}
+        rows={rows}
+        savedHosts={rows.map((row) => row.host)}
+        selectedHosts={["api.example.com"]}
+        status={null}
+        onStatus={vi.fn()}
+        editableProfile
+      />,
+    );
+
+    const profile = await screen.findByRole("combobox", { name: "Profile" });
+    expect(screen.getByRole("option", { name: "safe" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "full" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/profile?kind=scan&engine=nuclei",
+      undefined,
+    );
+
+    fireEvent.change(profile, { target: { value: "full" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan 1 host" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/scan",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            host: ["api.example.com"],
+            engine: "nuclei",
+            profile: "full",
+            "discovery-profile": "default",
+            confirm: false,
+            wait: false,
+          }),
+        }),
+      ),
+    );
+    expect(rows[0].profiles).toEqual(["safe"]);
   });
 
   it("requires confirmation for an intrusive scan of a prod or public host", async () => {

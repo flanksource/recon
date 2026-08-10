@@ -104,11 +104,6 @@ table "targets" {
   check "targets_host_format" {
     expr = "(host ~ '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' OR host ~ '^[0-9a-f:]+$') AND host !~ '[.][.]'"
   }
-  // text + check rather than a Postgres enum: Atlas drops and recreates an enum
-  // type whenever its values change, cascading through every column using it.
-  check "targets_class_enum" {
-    expr = "class IN ('public', 'prod', 'non-prod', 'internal', 'unclassified', 'deactivated')"
-  }
   // The allOf if/then pair from the JSON Schema, in its SQL form.
   check "targets_reason_iff_deactivated" {
     expr = "(class = 'deactivated') = (reason IS NOT NULL)"
@@ -116,8 +111,8 @@ table "targets" {
   // cardinality(), not array_length(): array_length('{}', 1) is NULL rather
   // than 0, and a CHECK passes on NULL, so the obvious spelling silently
   // accepts the empty array the schema's minItems forbids.
-  check "targets_profiles_known" {
-    expr = "profiles <@ ARRAY['safe', 'full']::text[] AND cardinality(profiles) >= 1"
+  check "targets_profiles_nonempty" {
+    expr = "cardinality(profiles) >= 1"
   }
   // A CHECK cannot contain a subquery, so bound the array with quantifiers.
   check "targets_ports_bounded" {

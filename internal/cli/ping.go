@@ -22,14 +22,17 @@ const (
 
 // PingResult is the result of probing one URL.
 type PingResult struct {
-	Up           bool          `json:"up"`
-	URL          string        `json:"url"`
-	IP           string        `json:"ip,omitempty"`
-	TLSCN        string        `json:"tls_cn,omitempty"`
-	ResponseCode int           `json:"response_code,omitempty"`
-	ResponseTime time.Duration `json:"response_time"`
-	ResponseSize int64         `json:"response_size,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	Up            bool          `json:"up"`
+	URL           string        `json:"url"`
+	FinalURL      string        `json:"final_url,omitempty"`
+	IP            string        `json:"ip,omitempty"`
+	TLSCN         string        `json:"tls_cn,omitempty"`
+	ResponseCode  int           `json:"response_code,omitempty"`
+	ContentType   string        `json:"content_type,omitempty"`
+	ContentLength *int64        `json:"content_length,omitempty"`
+	ResponseTime  time.Duration `json:"response_time"`
+	ResponseSize  int64         `json:"response_size,omitempty"`
+	Error         string        `json:"error,omitempty"`
 }
 
 var _ api.TableProvider = PingResult{}
@@ -38,9 +41,12 @@ func (PingResult) Columns() []api.ColumnDef {
 	return []api.ColumnDef{
 		api.Column("up").Label("Up").Build(),
 		api.Column("url").Label("URL").Build(),
+		api.Column("final_url").Label("Final URL").Build(),
 		api.Column("ip").Label("IP").Build(),
 		api.Column("tls_cn").Label("TLS CN").Build(),
 		api.Column("response_code").Label("Response Code").Build(),
+		api.Column("content_type").Label("Content Type").Build(),
+		api.Column("content_length").Label("Content Length").Build(),
 		api.Column("response_time").Label("Response Time").Build(),
 		api.Column("response_size").Label("Response Size").Build(),
 		api.Column("error").Label("Error").Build(),
@@ -51,11 +57,18 @@ func (r PingResult) Row() map[string]any {
 	row := map[string]any{
 		"up":            r.Up,
 		"url":           r.URL,
+		"final_url":     r.FinalURL,
 		"ip":            r.IP,
 		"tls_cn":        r.TLSCN,
 		"response_code": r.ResponseCode,
+		"content_type":  r.ContentType,
 		"response_time": clicky.Human(r.ResponseTime),
 		"error":         r.Error,
+	}
+	if r.ContentLength != nil {
+		row["content_length"] = api.HumanizeBytes(*r.ContentLength)
+	} else {
+		row["content_length"] = nil
 	}
 	if r.ResponseCode > 0 {
 		row["response_size"] = api.HumanizeBytes(r.ResponseSize)
@@ -193,7 +206,7 @@ func probeTargets(ctx context.Context, targets []string, options pingOptions) ([
 				Timeout:         time.Duration(options.Timeout),
 				FollowRedirects: options.FollowRedirects,
 			})
-		}, task.WithTaskTimeout(time.Duration(options.Timeout))))
+		}, task.WithTaskTimeout(time.Duration(options.Timeout)), task.WithRetryConfig(task.RetryConfig{})))
 	}
 	group.WaitFor()
 

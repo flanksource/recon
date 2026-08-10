@@ -5,6 +5,7 @@ import { BulkEditBar, type BulkEdit } from "./BulkEditBar";
 import { DiscoverDialog } from "./DiscoverDialog";
 import { ScanDialog } from "./ScanDialog";
 import { selectionQuery, useEntityFilters } from "./filters";
+import { boundedScanPercent } from "./scanProgress";
 import { useScanStatus } from "./useScanStatus";
 import { fetchTargets, saveTargets } from "./api";
 import {
@@ -180,7 +181,7 @@ export function InventoryView({
 
   const scanRunning = scan?.phase === "running";
   const scanLabel = scanRunning
-    ? `Scanning ${scan?.stats?.percent ?? 0}%`
+    ? `Scanning ${boundedScanPercent(scan?.stats?.percent)}%`
     : selectedIds.length
       ? `Scan ${selectedIds.length} selected`
       : "Scan now";

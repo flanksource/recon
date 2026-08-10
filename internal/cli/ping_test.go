@@ -4,9 +4,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -32,35 +34,45 @@ var _ = Describe("reconctl ping", Ordered, func() {
 	})
 
 	It("provides its own table schema and typed row", func() {
+		contentLength := int64(1024)
 		result := PingResult{
-			Up:           true,
-			URL:          "https://example.test/health",
-			IP:           "192.0.2.10",
-			TLSCN:        "example.test",
-			ResponseCode: http.StatusNoContent,
-			ResponseTime: 1500 * time.Millisecond,
-			ResponseSize: 2048,
+			Up:            true,
+			URL:           "https://example.test/health",
+			FinalURL:      "https://example.test/ready",
+			IP:            "192.0.2.10",
+			TLSCN:         "example.test",
+			ResponseCode:  http.StatusNoContent,
+			ContentType:   "application/json",
+			ContentLength: &contentLength,
+			ResponseTime:  1500 * time.Millisecond,
+			ResponseSize:  2048,
 		}
 
 		Expect(result.Columns()).To(Equal([]api.ColumnDef{
 			api.Column("up").Label("Up").Build(),
 			api.Column("url").Label("URL").Build(),
+			api.Column("final_url").Label("Final URL").Build(),
 			api.Column("ip").Label("IP").Build(),
 			api.Column("tls_cn").Label("TLS CN").Build(),
 			api.Column("response_code").Label("Response Code").Build(),
+			api.Column("content_type").Label("Content Type").Build(),
+			api.Column("content_length").Label("Content Length").Build(),
 			api.Column("response_time").Label("Response Time").Build(),
 			api.Column("response_size").Label("Response Size").Build(),
 			api.Column("error").Label("Error").Build(),
 		}))
 		Expect(result.Row()).To(Equal(map[string]any{
-			"up":            true,
-			"url":           "https://example.test/health",
-			"ip":            "192.0.2.10",
-			"tls_cn":        "example.test",
-			"response_code": http.StatusNoContent,
-			"response_time": clicky.Human(1500 * time.Millisecond),
-			"response_size": api.HumanizeBytes(2048),
-			"error":         "",
+			"up":             true,
+			"url":            "https://example.test/health",
+			"final_url":      "https://example.test/ready",
+			"ip":             "192.0.2.10",
+			"tls_cn":         "example.test",
+			"response_code":  http.StatusNoContent,
+			"content_type":   "application/json",
+			"content_length": api.HumanizeBytes(contentLength),
+			"response_time":  clicky.Human(1500 * time.Millisecond),
+			"response_size":  api.HumanizeBytes(2048),
+			"error":          "",
 		}))
 	})
 
@@ -190,6 +202,29 @@ var _ = Describe("reconctl ping", Ordered, func() {
 		Expect(results[2].ResponseSize).To(Equal(int64(len("healthy"))))
 	})
 
+	It("reports response metadata and the final redirected URL", func(ctx SpecContext) {
+		body := []byte(`{"status":"healthy"}`)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/redirect" {
+				http.Redirect(w, r, "/final", http.StatusFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+		}))
+		DeferCleanup(server.Close)
+
+		results, err := runPing(ctx, testPingOptions(server.URL+"/redirect"))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(results).To(HaveLen(1))
+		Expect(results[0].FinalURL).To(Equal(server.URL + "/final"))
+		Expect(results[0].ContentType).To(Equal("application/json; charset=utf-8"))
+		Expect(results[0].ContentLength).To(HaveValue(Equal(int64(len(body)))))
+		Expect(results[0].ResponseSize).To(Equal(int64(len(body))))
+	})
+
 	It("does not follow redirects when disabled", func(ctx SpecContext) {
 		var finalRequests atomic.Int32
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +310,35 @@ var _ = Describe("reconctl ping", Ordered, func() {
 		Expect(err).To(MatchError("1 of 1 probes failed"))
 		Expect(results[0].Error).To(ContainSubstring("deadline exceeded"))
 		Expect(time.Since(started)).To(BeNumerically("<", time.Second))
+	})
+
+	It("attempts each target only once when the connection fails", func(ctx SpecContext) {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		Expect(err).ToNot(HaveOccurred())
+		var attempts atomic.Int32
+		acceptDone := make(chan struct{})
+		go func() {
+			defer close(acceptDone)
+			for {
+				connection, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				attempts.Add(1)
+				_ = connection.Close()
+			}
+		}()
+		DeferCleanup(func() {
+			Expect(listener.Close()).To(Succeed())
+			Eventually(acceptDone).Should(BeClosed())
+		})
+
+		options := testPingOptions("http://" + listener.Addr().String() + "/connection")
+		options.Timeout = duration.Duration(1500 * time.Millisecond)
+		results, err := runPing(ctx, options)
+		Expect(err).To(MatchError("1 of 1 probes failed"))
+		Expect(results).To(HaveLen(1))
+		Expect(attempts.Load()).To(Equal(int32(1)))
 	})
 
 	It("extracts the TLS common name and socket IP", func() {

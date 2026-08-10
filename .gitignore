@@ -17,8 +17,12 @@
 # Embedded Postgres data directory — holds the live inventory.
 /.data/
 
-# The nuclei-targets skill is a project deliverable. A global ~/.config/git/ignore
-# excludes all .claude/ dirs, so re-include just the skill (not local settings).
-!.claude/
-.claude/*
-!.claude/skills/
+# The repository skill moved to .agents; keep any legacy Claude state local.
+/.claude/
+
+# Repository skills are project deliverables. A global ~/.config/git/ignore
+# excludes all .agents/ dirs, so re-include skills without local agent state.
+!.agents/
+.agents/*
+!.agents/skills/
+.claude

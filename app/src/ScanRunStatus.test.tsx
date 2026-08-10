@@ -82,6 +82,47 @@ describe("ScanRunStatus", () => {
     expect(fetchFindingsMock).not.toHaveBeenCalled();
   });
 
+  it("renders Nuclei's zero-total percentage overflow as unknown progress", () => {
+    fetchFindingsMock.mockResolvedValue([]);
+    const status: ScanStatus = {
+      phase: "failed",
+      profile: "safe",
+      hosts: [],
+      id: "overflow-scan",
+      name: "nuclei-safe-overflow",
+      engine: "nuclei",
+      selector: {},
+      selectorLabel: "host app.example.test",
+      endpointCount: 1,
+      startedAt: "2026-08-10T12:45:19.000Z",
+      stats: {
+        requests: 0,
+        total: 0,
+        percent: 9223372036854776000,
+        rps: 0,
+        matched: 0,
+        errors: 0,
+        hosts: 1,
+        templates: 0,
+        duration: "0:00:01",
+      },
+      findings: 0,
+      severities: emptySeverities(),
+      running: false,
+      log: "",
+      output: [],
+    };
+    render(
+      <ScanRunStatus
+        status={status}
+        logRef={createRef<HTMLDivElement>()}
+      />,
+    );
+
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.queryByText(/922337203685477/)).not.toBeInTheDocument();
+  });
+
   it("fetches and renders findings once the scan reaches a terminal phase", async () => {
     const findings: Finding[] = [
       {

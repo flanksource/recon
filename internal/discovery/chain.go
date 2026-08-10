@@ -117,8 +117,8 @@ type RunOptions struct {
 	// targeted one.
 	Input []string
 
-	// Task carries cancellation and progress.
-	Task *task.Task
+	// Tasks owns the ordered engine-stage tasks for this discovery run.
+	Tasks task.TypedGroup[Stage]
 
 	// ID names the run's scratch directory.
 	ID string
@@ -136,6 +136,9 @@ func (c Chain) Run(ctx context.Context, opts RunOptions) ([]Stage, error) {
 	if len(opts.Input) == 0 {
 		return nil, fmt.Errorf("chain %s: nothing to start from", c.Name)
 	}
+	if opts.Tasks.Group == nil {
+		return nil, fmt.Errorf("chain %s: no task group", c.Name)
+	}
 
 	input := append([]string(nil), opts.Input...)
 	var stages []Stage
@@ -143,14 +146,19 @@ func (c Chain) Run(ctx context.Context, opts RunOptions) ([]Stage, error) {
 	for index, engine := range c.Engines {
 		spec := engine.Spec()
 
-		if len(input) == 0 {
-			// Not an error: an earlier stage legitimately found nothing. Record
-			// the stage so the run shows where the chain stopped.
-			stages = append(stages, Stage{Engine: engine})
-			continue
-		}
-
-		stage, err := c.runStage(ctx, engine, input, opts)
+		stageInput := append([]string(nil), input...)
+		stage, err := runDiscoveryTask(ctx, opts.Tasks, "run "+spec.Name, func(ctx context.Context, t *task.Task) (Stage, error) {
+			if len(stageInput) == 0 {
+				t.Infof("skipped because the previous stage returned no input")
+				return Stage{Engine: engine}, nil
+			}
+			t.SetDescription(fmt.Sprintf("%d input(s)", len(stageInput)))
+			result, err := c.runStage(ctx, t, engine, stageInput, opts)
+			if err == nil {
+				t.Infof("produced %d host(s)", len(result.Hosts))
+			}
+			return result, err
+		})
 		if err != nil {
 			return stages, fmt.Errorf("chain %s: %s: %w", c.Name, spec.Name, err)
 		}
@@ -201,7 +209,7 @@ func distinctValues(values []string) []string {
 	return result
 }
 
-func (c Chain) runStage(ctx context.Context, engine discovery.Engine, input []string, opts RunOptions) (Stage, error) {
+func (c Chain) runStage(ctx context.Context, t *task.Task, engine discovery.Engine, input []string, opts RunOptions) (Stage, error) {
 	spec := engine.Spec()
 	stage := Stage{Engine: engine}
 
@@ -229,7 +237,7 @@ func (c Chain) runStage(ctx context.Context, engine discovery.Engine, input []st
 	}
 
 	run := engines.Run{
-		Task: opts.Task, Bin: bin, WorkDir: dir, Config: config,
+		Bin: bin, WorkDir: dir, Config: config,
 		In: in, Out: filepath.Join(dir, "output.jsonl"),
 	}
 
@@ -237,8 +245,10 @@ func (c Chain) runStage(ctx context.Context, engine discovery.Engine, input []st
 	// process output directly rather than a file written afterwards.
 	reader, writer := newPipe()
 	invocation := &engines.Invocation{
-		Bin: bin, Args: engine.Args(run), WorkDir: dir, Task: opts.Task, Stdout: writer,
+		Bin: bin, Args: engine.Args(run), WorkDir: dir, Stdout: writer,
 	}
+	t.SetOutputProvider(invocation.OutputSnapshot)
+	t.SetDetailsProvider(func() any { return invocation.TaskDetails() })
 	defer invocation.Cleanup()
 
 	parsed := make(chan error, 1)

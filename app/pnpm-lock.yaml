@@ -11,6 +11,9 @@ importers:
       '@flanksource/clicky-ui':
         specifier: ^0.3.18
         version: 0.3.18(@types/react@19.2.18)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(tailwindcss@4.3.3)
+      '@tanstack/react-query':
+        specifier: ^5.101.4
+        version: 5.101.4(react@19.2.8)
       ajv:
         specifier: ^8.17.1
         version: 8.20.0

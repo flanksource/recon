@@ -1,9 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TaskManagerButton } from "@flanksource/clicky-ui";
 import { useBrowserRouter } from "@flanksource/clicky-ui/rpc";
 import { InventoryView } from "./TargetsView";
 import { ScansView } from "./ScansView";
 import { ProfilesView } from "./ProfilesView";
 import { TargetView } from "./TargetView";
+import { TasksView } from "./TasksView";
 
 const TABS = [
   { path: "/inventory", label: "Inventory" },
@@ -12,14 +15,29 @@ const TABS = [
 ];
 
 export function App() {
+  const [queryClient] = useState(() => new QueryClient());
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppContent />
+    </QueryClientProvider>
+  );
+}
+
+function AppContent() {
   const router = useBrowserRouter();
   useEffect(() => {
     if (router.pathname === "/") router.navigate("/inventory", { replace: true });
   }, [router]);
 
   const targetMatch = router.pathname.match(/^\/inventory\/([^/]+)$/);
+  const taskMatch = router.pathname.match(/^\/tasks(?:\/([^/]+))?$/);
   const activePath = targetMatch ? "/inventory" : router.pathname;
-  const content = targetMatch ? (
+  const content = taskMatch ? (
+    <TasksView
+      selectedId={taskMatch[1] ? decodeURIComponent(taskMatch[1]) : undefined}
+      onSelectRun={(id) => router.navigate(id ? `/tasks/${encodeURIComponent(id)}` : "/tasks")}
+    />
+  ) : targetMatch ? (
     <TargetView host={decodeURIComponent(targetMatch[1])} onBack={() => router.navigate("/inventory")} />
   ) : router.pathname === "/inventory" ? (
     <InventoryView
@@ -54,6 +72,13 @@ export function App() {
             }`,
           }),
         )}
+        <div className="ml-auto pb-2">
+          <TaskManagerButton
+            basePath="/api/v1"
+            tasksHref="/tasks"
+            onNavigate={(href) => router.navigate(href)}
+          />
+        </div>
       </nav>
       <div className="min-h-0 flex-1">{content}</div>
     </div>

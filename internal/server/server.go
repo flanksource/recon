@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/flanksource/clicky/rpc"
+	"github.com/flanksource/clicky/task"
 	"github.com/spf13/cobra"
 
 	"github.com/flanksource/recon/internal/discovery"
@@ -60,6 +61,7 @@ func Handler(config Config) http.Handler {
 	}
 
 	mux := http.NewServeMux()
+	task.RegisterHandlers(mux, "/api/v1")
 
 	if config.Scans != nil {
 		config.Scans.Store = config.Store

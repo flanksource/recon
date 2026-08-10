@@ -11,6 +11,14 @@ import (
 	"github.com/flanksource/recon/internal/schema"
 )
 
+var _ = Describe("the migration bundle", func() {
+	It("loads every declarative and SQL migration", func(ctx SpecContext) {
+		fingerprint, err := schema.NewProvisioner().Fingerprint(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(fingerprint).ToNot(BeEmpty())
+	})
+})
+
 // These specs need a real Postgres: the checks, the array quantifiers and the
 // expression indexes are all server-side behaviour that no unit test can stand
 // in for. dbtest resolves an embedded cluster (or COMMONS_DB_URL) and clones a
@@ -60,36 +68,69 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
 	})
 
-	It("upgrades the legacy discovery chain constraint", func() {
-		_, err := db.SQL().Exec(`ALTER TABLE discoveries DROP CONSTRAINT discoveries_chain_enum`)
+	It("does not constrain application vocabularies", func() {
+		rows, err := db.SQL().Query(`
+			SELECT conname
+			FROM pg_constraint
+			WHERE conname IN (
+				'targets_class_enum',
+				'targets_profiles_known',
+				'discoveries_chain_enum',
+				'engine_profiles_kind_enum',
+				'scans_phase_enum',
+				'findings_severity_enum'
+			)
+			ORDER BY conname`)
 		Expect(err).ToNot(HaveOccurred())
-		_, err = db.SQL().Exec(`
+		defer rows.Close()
+
+		var constraints []string
+		for rows.Next() {
+			var name string
+			Expect(rows.Scan(&name)).To(Succeed())
+			constraints = append(constraints, name)
+		}
+		Expect(rows.Err()).ToNot(HaveOccurred())
+		Expect(constraints).To(BeEmpty())
+	})
+
+	It("removes legacy application vocabulary constraints", func() {
+		_, err := db.SQL().Exec(`
+			ALTER TABLE targets ADD CONSTRAINT targets_class_enum
+				CHECK (class IN ('public', 'prod', 'non-prod', 'internal', 'unclassified', 'deactivated'));
+			ALTER TABLE targets ADD CONSTRAINT targets_profiles_known
+				CHECK (profiles <@ ARRAY['safe', 'full']::text[]);
 			ALTER TABLE discoveries ADD CONSTRAINT discoveries_chain_enum
-			CHECK (chain IN ('full', 'targeted'))`)
+				CHECK (chain IN ('full', 'targeted', 'explicit'));
+			ALTER TABLE engine_profiles ADD CONSTRAINT engine_profiles_kind_enum
+				CHECK (kind IN ('discovery', 'scan'));
+			ALTER TABLE scans ADD CONSTRAINT scans_phase_enum
+				CHECK (phase IN ('idle', 'running', 'done', 'failed', 'cancelled'));
+			ALTER TABLE findings ADD CONSTRAINT findings_severity_enum
+				CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info', 'unknown'))`)
 		Expect(err).ToNot(HaveOccurred())
 		_, err = db.SQL().Exec(`
 			DELETE FROM schema_migration_scripts
-			WHERE scope = $1 AND path = '011_discoveries_explicit_chain.sql'`, schema.Name)
+			WHERE scope = $1 AND path = '012_drop_enum_constraints.sql'`, schema.Name)
 		Expect(err).ToNot(HaveOccurred())
 
 		handle, err := recondb.Open(GinkgoT().Context(), recondb.Config{URL: db.DSN()})
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() { Expect(handle.Close()).To(Succeed()) })
 
-		var definition string
+		var remaining int
 		Expect(db.SQL().QueryRow(`
-			SELECT pg_get_constraintdef(oid)
+			SELECT count(*)
 			FROM pg_constraint
-			WHERE conrelid = 'discoveries'::regclass
-			  AND conname = 'discoveries_chain_enum'`).Scan(&definition)).To(Succeed())
-		Expect(definition).To(ContainSubstring("'explicit'::text"))
-
-		_, err = db.SQL().Exec(`
-			INSERT INTO discoveries (chain, profile, input, ran_at)
-			VALUES ('explicit', 'default', '{}'::jsonb, now())`)
-		Expect(err).ToNot(HaveOccurred())
-		_, err = db.SQL().Exec(`DELETE FROM discoveries WHERE chain = 'explicit'`)
-		Expect(err).ToNot(HaveOccurred())
+			WHERE conname IN (
+				'targets_class_enum',
+				'targets_profiles_known',
+				'discoveries_chain_enum',
+				'engine_profiles_kind_enum',
+				'scans_phase_enum',
+				'findings_severity_enum'
+			)`).Scan(&remaining)).To(Succeed())
+		Expect(remaining).To(Equal(0))
 	})
 
 	It("provides generate_ulid from the pre-phase script", func() {
@@ -125,8 +166,8 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			Expect(insert("2001:db8::10", "unclassified")).To(Succeed())
 		})
 
-		It("rejects an unknown class", func() {
-			Expect(insert("a.example.test", "staging")).To(MatchError(ContainSubstring("targets_class_enum")))
+		It("accepts a class outside the application vocabulary", func() {
+			Expect(insert("a.example.test", "staging")).To(Succeed())
 		})
 
 		It("rejects an uppercase host", func() {
@@ -154,18 +195,18 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 				To(MatchError(ContainSubstring("targets_reason_iff_deactivated")))
 		})
 
-		It("rejects an unknown profile", func() {
+		It("accepts a profile outside the application vocabulary", func() {
 			_, err := db.SQL().Exec(
 				`INSERT INTO targets (host, class, profiles, tags)
 				 VALUES ('a.example.test', 'non-prod', ARRAY['aggressive']::text[], '{}'::text[])`)
-			Expect(err).To(MatchError(ContainSubstring("targets_profiles_known")))
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("rejects an empty profiles array", func() {
 			_, err := db.SQL().Exec(
 				`INSERT INTO targets (host, class, profiles, tags)
 				 VALUES ('a.example.test', 'non-prod', '{}'::text[], '{}'::text[])`)
-			Expect(err).To(MatchError(ContainSubstring("targets_profiles_known")))
+			Expect(err).To(MatchError(ContainSubstring("targets_profiles_nonempty")))
 		})
 
 		DescribeTable("bounds curated ports",

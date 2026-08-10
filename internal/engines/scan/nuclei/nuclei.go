@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/flanksource/recon/internal/api"
@@ -29,14 +30,15 @@ var excludedTags = []string{"dos", "fuzz", "bruteforce", "intrusive"}
 // Spec describes nuclei.
 func (Engine) Spec() engines.Spec {
 	return engines.Spec{
-		Name:        "nuclei",
-		Binary:      "nuclei",
-		Title:       "Nuclei",
-		Description: "Template-driven vulnerability scanner.",
-		DocsURL:     "https://github.com/projectdiscovery/nuclei",
-		Install:     engines.ProjectDiscovery("nuclei"),
-		Version:     ">=3.11.1",
-		Sections:    catalog,
+		Name:            "nuclei",
+		Binary:          "nuclei",
+		Title:           "Nuclei",
+		Description:     "Template-driven vulnerability scanner.",
+		DocsURL:         "https://github.com/projectdiscovery/nuclei",
+		Install:         engines.ProjectDiscovery("nuclei"),
+		Version:         ">=3.11.1",
+		Sections:        catalog,
+		ValidateOptions: validateConfig,
 		Defaults: engines.DefaultProfile{
 			Name: "safe",
 			Comment: "Non-intrusive baseline, safe to run against production.\n" +
@@ -53,6 +55,15 @@ func (Engine) Spec() engines.Spec {
 			},
 		},
 	}
+}
+
+func validateConfig(config map[string]any) error {
+	automatic, _ := config["automatic-scan"].(bool)
+	dast, _ := config["dast"].(bool)
+	if automatic && dast {
+		return fmt.Errorf("automatic-scan cannot be combined with dast: DAST excludes the technology-detection templates automatic-scan requires")
+	}
+	return nil
 }
 
 // Risk judges a configuration. DAST fuzzes live endpoints with attack payloads,
@@ -198,7 +209,7 @@ func (Engine) Progress(line string) (api.ScanStats, bool) {
 		return api.ScanStats{}, false
 	}
 
-	return api.ScanStats{
+	progress := api.ScanStats{
 		Requests:  engines.ParseFloat(decoded.Requests),
 		Total:     engines.ParseFloat(decoded.Total),
 		Percent:   engines.ParseFloat(decoded.Percent),
@@ -208,7 +219,11 @@ func (Engine) Progress(line string) (api.ScanStats, bool) {
 		Hosts:     engines.ParseFloat(decoded.Hosts),
 		Templates: engines.ParseFloat(decoded.Templates),
 		Duration:  decoded.Duration,
-	}, true
+	}
+	if progress.Total <= 0 || progress.Percent < 0 || progress.Percent > 100 || math.IsNaN(progress.Percent) || math.IsInf(progress.Percent, 0) {
+		progress.Percent = 0
+	}
+	return progress, true
 }
 
 func firstNonEmpty(values ...string) string {

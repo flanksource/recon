@@ -175,3 +175,25 @@ var _ = Describe("parsing damaged output", func() {
 		Expect(err).To(MatchError(os.ErrClosed))
 	})
 })
+
+var _ = Describe("Nuclei progress", func() {
+	It("discards the zero-total percentage overflow sentinel", func() {
+		stats, ok := nuclei.Engine{}.Progress(`{"duration":"0:00:01","errors":"0","hosts":"1","matched":"0","percent":"9223372036854775808","requests":"0","rps":"0","templates":"0","total":"0"}`)
+
+		Expect(ok).To(BeTrue())
+		Expect(stats).To(Equal(api.ScanStats{
+			Hosts: 1, Duration: "0:00:01",
+		}))
+	})
+})
+
+var _ = Describe("Nuclei configuration", func() {
+	It("rejects automatic technology selection when DAST removes its detection templates", func() {
+		err := nuclei.Engine{}.Spec().ValidateConfig(map[string]any{
+			"automatic-scan": true,
+			"dast":           true,
+		})
+
+		Expect(err).To(MatchError(ContainSubstring("automatic-scan cannot be combined with dast")))
+	})
+})

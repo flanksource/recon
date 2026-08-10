@@ -55,10 +55,6 @@ table "discoveries" {
     columns = [column.id]
   }
 
-  check "discoveries_chain_enum" {
-    expr = "chain IN ('full', 'targeted', 'explicit')"
-  }
-
   index "discoveries_ran_at_idx" {
     columns = [column.ran_at]
   }

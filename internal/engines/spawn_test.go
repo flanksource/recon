@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flanksource/clicky/task"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -80,6 +81,30 @@ var _ = Describe("running an engine", func() {
 		}
 		Expect(invocation.Run(context.Background()).ExitCode).To(Equal(0))
 		Expect(out.String()).To(ContainSubstring("hello"))
+	})
+
+	It("projects captured output and process details for task snapshots", func() {
+		invocation := &engines.Invocation{
+			Bin: "/bin/sh", Args: []string{"-c", "echo output; echo problem >&2"},
+			WorkDir: GinkgoT().TempDir(),
+		}
+		Expect(invocation.Run(context.Background()).ExitCode).To(Equal(0))
+
+		Expect(invocation.OutputSnapshot()).To(Equal(task.OutputSnapshot{
+			Stdout: "output\n", Stderr: "problem\n",
+		}))
+		details := invocation.TaskDetails()
+		Expect(struct {
+			Command  string
+			Args     []string
+			Status   string
+			ExitCode int
+		}{details.Command, details.Args, details.Status, details.ExitCode}).To(Equal(struct {
+			Command  string
+			Args     []string
+			Status   string
+			ExitCode int
+		}{"/bin/sh", []string{"-c", "echo output; echo problem >&2"}, "success", 0}))
 	})
 
 	// naabu forks raw-socket workers and nuclei spawns helpers. A cancel that

@@ -2,8 +2,6 @@ package engines
 
 import (
 	"fmt"
-
-	"github.com/flanksource/clicky/task"
 )
 
 // Run is everything one engine invocation needs. It stays deliberately small:
@@ -11,9 +9,6 @@ import (
 // not every engine's, and putting them here would make tlsx or katana implement
 // fields that mean nothing to them.
 type Run struct {
-	// Task reports progress and carries cancellation.
-	Task *task.Task
-
 	// Bin is the resolved absolute path to the engine binary.
 	Bin string
 

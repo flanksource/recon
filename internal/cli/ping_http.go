@@ -28,7 +28,11 @@ func probeURL(ctx context.Context, target string, options pingProbeOptions) (Pin
 	}}
 	ctx = httptrace.WithClientTrace(ctx, trace)
 
-	client, err := commonshttp.NewClient().Timeout(options.Timeout).TLSConfig(commonshttp.TLSConfig{
+	client, err := commonshttp.NewClient().Timeout(options.Timeout).Retry(0, 0, 0).ConnectTimeout(options.Timeout)
+	if err != nil {
+		return failedPing(result, started, fmt.Errorf("configure HTTP client: %w", err))
+	}
+	client, err = client.TLSConfig(commonshttp.TLSConfig{
 		HandshakeTimeout: options.Timeout,
 	})
 	if err != nil {
@@ -44,6 +48,13 @@ func probeURL(ctx context.Context, target string, options pingProbeOptions) (Pin
 
 	result.ResponseCode = response.StatusCode
 	result.TLSCN = tlsCommonName(response.TLS)
+	result.ContentType = response.Header.Get("Content-Type")
+	if length := response.ContentLength; length >= 0 {
+		result.ContentLength = &length
+	}
+	if finalURL := response.Response.Request.URL.String(); finalURL != target {
+		result.FinalURL = finalURL
+	}
 	result.ResponseSize, err = io.Copy(io.Discard, response.Body)
 	closeErr := response.Body.Close()
 	if err != nil {

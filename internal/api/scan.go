@@ -109,7 +109,7 @@ type Discover struct {
 	DurationMs int    `json:"durationMs"`
 	Failed     bool   `json:"failed"`
 	Error      string `json:"error,omitempty"`
-	Log        string `json:"log,omitempty"`
+	Log        string `json:"log"`
 
 	Hosts []DiscoveredHost `json:"hosts"`
 }

@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
+	"github.com/flanksource/clicky"
+	"github.com/flanksource/clicky/task"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -129,11 +132,13 @@ var _ = Describe("running a discovery chain", func() {
 	ctx := context.Background()
 
 	run := func(chain discovery.Chain, input []string) ([]discovery.Stage, error) {
+		tasks := clicky.StartGroup[discovery.Stage]("discover test", task.WithKind("discovery"), task.WithConcurrency(1))
 		return chain.Run(ctx, discovery.RunOptions{
 			Root:        GinkgoT().TempDir(),
 			Provisioner: newProvisioner(),
 			Input:       input,
 			ID:          "test",
+			Tasks:       tasks,
 		})
 	}
 
@@ -157,6 +162,62 @@ var _ = Describe("running a discovery chain", func() {
 		Expect(stages[0].Hosts).To(Equal([]string{"a.example.test", "b.example.test"}))
 		Expect(stages[1].Hosts).To(Equal([]string{"port-a.example.test", "port-b.example.test"}))
 		Expect(secondInput).ToNot(BeEmpty(), "the second stage was given an input list")
+	})
+
+	It("registers every ordered engine stage as a Clicky child task", func() {
+		tasks := clicky.StartGroup[discovery.Stage]("discover full", task.WithKind("discovery"), task.WithConcurrency(1))
+		chain := discovery.Chain{Name: "two", Engines: []enginediscovery.Engine{
+			fakeEngine{name: "first", accepts: enginediscovery.Zones, emits: enginediscovery.Hosts, script: "echo a.example.test"},
+			fakeEngine{name: "second", accepts: enginediscovery.Hosts, emits: enginediscovery.Observations, script: "cat {{in}}"},
+		}}
+
+		stages, err := chain.Run(ctx, discovery.RunOptions{
+			Root: GinkgoT().TempDir(), Provisioner: newProvisioner(), Input: []string{"example.test"}, ID: "tasks", Tasks: tasks,
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(stages).To(HaveLen(2))
+
+		snapshots := task.SnapshotByID(tasks.ID())
+		Expect(snapshots).To(HaveLen(3))
+		Expect([]string{snapshots[1].Name, snapshots[2].Name}).To(Equal([]string{"run first", "run second"}))
+		Expect([]string{snapshots[1].Status, snapshots[2].Status}).To(Equal([]string{
+			string(task.StatusSuccess), string(task.StatusSuccess),
+		}))
+		Expect(snapshots[1].Details).ToNot(BeNil())
+		Expect(snapshots[1].Controls).To(BeEmpty())
+	})
+
+	It("stops the exact running engine through its Clicky task control", func() {
+		tasks := clicky.StartGroup[discovery.Stage]("discover controlled", task.WithKind("discovery"), task.WithConcurrency(1))
+		chain := discovery.Chain{Name: "controlled", Engines: []enginediscovery.Engine{
+			fakeEngine{name: "slow", accepts: enginediscovery.Zones, emits: enginediscovery.Hosts, script: "echo started; sleep 30"},
+		}}
+		root := GinkgoT().TempDir()
+		provisioner := newProvisioner()
+		finished := make(chan error, 1)
+		go func() {
+			_, err := chain.Run(ctx, discovery.RunOptions{
+				Root: root, Provisioner: provisioner, Input: []string{"example.test"}, ID: "controlled", Tasks: tasks,
+			})
+			finished <- err
+		}()
+
+		var child task.TaskSnapshot
+		Eventually(func() bool {
+			snapshots := task.SnapshotByID(tasks.ID())
+			if len(snapshots) != 2 || !strings.Contains(snapshots[1].Stdout, "started") {
+				return false
+			}
+			child = snapshots[1]
+			return child.Status == string(task.StatusRunning)
+		}, 10*time.Second, 20*time.Millisecond).Should(BeTrue())
+		Expect(child.Controls).To(Equal([]task.ControlAction{task.ControlStop}))
+
+		Expect(task.ControlTask(context.Background(), tasks.ID(), child.ID, task.ControlStop)).To(Succeed())
+		Eventually(finished, 10*time.Second).Should(Receive(HaveOccurred()))
+		Eventually(func() string {
+			return task.SnapshotByID(tasks.ID())[1].Status
+		}).Should(Equal(string(task.StatusCancelled)))
 	})
 
 	It("does not let an observing stage narrow what the next one sees", func() {
@@ -279,6 +340,7 @@ var _ = Describe("running a discovery chain", func() {
 			Root:        GinkgoT().TempDir(),
 			Provisioner: newProvisioner(),
 			Input:       []string{"example.test"},
+			Tasks:       clicky.StartGroup[discovery.Stage]("discover unconfigured"),
 			Profiles: func(string) (map[string]any, error) {
 				return nil, fmt.Errorf("no profile stored")
 			},

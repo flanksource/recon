@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import { AnsiHtml, Button, ProgressBar } from "@flanksource/clicky-ui";
 import { fetchFindings } from "./api";
+import { boundedScanPercent } from "./scanProgress";
 import { severityBadge, SEVERITY_RANK } from "./scanColumns";
 import {
   SEVERITIES,
@@ -152,7 +153,8 @@ export function ScanRunStatus({
   onOpenScan?: (file: string) => void;
 }) {
   const discovery = status.profile === "discovery";
-  const percent = status.phase === "done" ? 100 : (status.stats?.percent ?? 0);
+  const percent =
+    status.phase === "done" ? 100 : boundedScanPercent(status.stats?.percent);
   const resultId = status.id;
   const title = discovery
     ? "Discovery rescan"

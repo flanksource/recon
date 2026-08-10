@@ -112,6 +112,8 @@ export function ScanDialog({
   useEffect(() => {
     if (!open || discoveryOnly || !engineName) return;
     let cancelled = false;
+    // Manual runs use the complete stored catalog. Target profile assignments
+    // are scheduling policy and must not narrow this one-off choice.
     fetchProfiles({ kind: "scan", engine: engineName })
       .then((list) => {
         if (cancelled) return;
@@ -339,7 +341,7 @@ export function ScanDialog({
                 )}
               </label>
               <label className="flex flex-col gap-1 text-xs">
-                {editableProfile ? "Profile defaults" : "Profile"}
+                Profile
                 {profiles.length > 1 ? (
                   <Select
                     className="w-52"

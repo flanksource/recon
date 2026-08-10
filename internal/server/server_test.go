@@ -299,6 +299,12 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 				To(ContainSubstring("unsupported option: nonsense"))
 		})
 
+		It("rejects mutually exclusive Nuclei execution modes", func() {
+			Expect(errorOf(send(http.MethodPost, suite.URL+"/api/v1/profile",
+				`{"kind":"scan","engine":"nuclei","name":"bad-modes","config":{"automatic-scan":true,"dast":true}}`))).
+				To(ContainSubstring("automatic-scan cannot be combined with dast"))
+		})
+
 		It("rejects an unknown engine", func() {
 			Expect(errorOf(send(http.MethodPost, suite.URL+"/api/v1/profile",
 				`{"kind":"scan","engine":"nmap","name":"x","config":{}}`))).

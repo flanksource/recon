@@ -45,6 +45,10 @@ type Spec struct {
 	// Defaults is the profile created for this engine on a blank database. With
 	// no import step, this is where a working configuration comes from.
 	Defaults DefaultProfile
+
+	// ValidateOptions applies engine-specific constraints that the field catalog
+	// cannot express, such as mutually exclusive flags.
+	ValidateOptions func(map[string]any) error
 }
 
 // DefaultProfile is the profile seeded for an engine when none exists.
@@ -53,6 +57,17 @@ type DefaultProfile struct {
 	Comment string
 	Config  map[string]any
 	Paths   []string
+}
+
+// ValidateConfig checks both the option catalog and engine-specific constraints.
+func (s Spec) ValidateConfig(config map[string]any) error {
+	if err := s.Sections.Validate(config); err != nil {
+		return err
+	}
+	if s.ValidateOptions != nil {
+		return s.ValidateOptions(config)
+	}
+	return nil
 }
 
 // Validate checks a spec at registration time. These are programming errors: a
@@ -76,7 +91,7 @@ func (s Spec) Validate() error {
 	}
 
 	if s.Defaults.Name != "" {
-		if err := s.Sections.Validate(s.Defaults.Config); err != nil {
+		if err := s.ValidateConfig(s.Defaults.Config); err != nil {
 			return fmt.Errorf("engine %s: default profile %q: %w", s.Name, s.Defaults.Name, err)
 		}
 	}

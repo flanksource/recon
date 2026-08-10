@@ -49,8 +49,6 @@ type Options struct {
 	Domains  []string
 	CIDRs    []string
 	Input    map[string]any
-
-	Task *task.Task
 }
 
 // Run executes a sweep, merges the observations, and records what was seen.
@@ -102,7 +100,8 @@ func (r *Runner) run(ctx context.Context, opts Options) (api.Discover, error) {
 		return api.Discover{}, err
 	}
 
-	stages, runErr := r.runStages(ctx, row.ID, mode, opts, profiles)
+	tasks := newDiscoveryTaskGroup(row.ID, mode, opts.Profile)
+	stages, runErr := r.runStages(ctx, row.ID, mode, opts, profiles, tasks)
 
 	// A stage failing does not discard what earlier stages found: those hosts
 	// are real, and dropping them would make a partial sweep look like an empty
@@ -140,31 +139,45 @@ func (r *Runner) run(ctx context.Context, opts Options) (api.Discover, error) {
 	return sweep, mergeErr
 }
 
-func (r *Runner) runStages(ctx context.Context, id, mode string, opts Options, profiles map[string]map[string]any) ([]Stage, error) {
+func (r *Runner) runStages(
+	ctx context.Context,
+	id, mode string,
+	opts Options,
+	profiles map[string]map[string]any,
+	tasks task.TypedGroup[Stage],
+) ([]Stage, error) {
 	run := func(chain Chain, input []string) ([]Stage, error) {
 		return chain.Run(ctx, RunOptions{
 			Root:        r.Root,
 			Provisioner: r.Provisioner,
 			Profiles:    profileLookup(profiles),
 			Input:       input,
-			Task:        opts.Task,
 			ID:          id,
+			Tasks:       tasks,
 		})
 	}
 
-	if mode != ChainExplicit {
-		input, err := r.seed(ctx, mode, opts.Hosts)
-		if err != nil {
-			return nil, err
+	prepared, err := runDiscoveryTask(ctx, tasks, "prepare discovery", func(ctx context.Context, t *task.Task) (Stage, error) {
+		t.SetDescription("resolve discovery input")
+		if mode != ChainExplicit {
+			input, err := r.seed(ctx, mode, opts.Hosts)
+			return Stage{Hosts: input}, err
 		}
+		return Stage{Hosts: distinctStrings(append(append(append([]string{}, opts.Hosts...), opts.Domains...), opts.CIDRs...))}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if mode != ChainExplicit {
 		chain, err := r.chainFor(mode)
 		if err != nil {
 			return nil, err
 		}
-		return run(chain, input)
+		return run(chain, prepared.Hosts)
 	}
 
-	probeInput := append(append(append([]string{}, opts.Hosts...), opts.Domains...), opts.CIDRs...)
+	probeInput := prepared.Hosts
 	var stages []Stage
 	if len(opts.Domains) > 0 {
 		enumerate, err := NewChain(ChainExplicit, enginediscovery.Zones, "subfinder")

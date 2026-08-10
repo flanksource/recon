@@ -78,7 +78,7 @@ func (s *Store) SaveProfile(ctx context.Context, profile api.Profile) (api.Profi
 	if profile.Name == "" {
 		return api.Profile{}, fmt.Errorf("profile name is required")
 	}
-	if err := spec.Sections.Validate(profile.Config); err != nil {
+	if err := spec.ValidateConfig(profile.Config); err != nil {
 		return api.Profile{}, fmt.Errorf("profile %s: %w", profile.ID(), err)
 	}
 

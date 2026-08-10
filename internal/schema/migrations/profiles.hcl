@@ -55,9 +55,6 @@ table "engine_profiles" {
     columns = [column.kind, column.engine, column.name]
   }
 
-  check "engine_profiles_kind_enum" {
-    expr = "kind IN ('discovery', 'scan')"
-  }
   // Mirrors the rule the TypeScript profile store enforced, so a profile name is
   // always safe to use as a filename fragment.
   check "engine_profiles_name_format" {

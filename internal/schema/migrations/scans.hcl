@@ -95,10 +95,6 @@ table "scans" {
     columns = [column.name]
   }
 
-  check "scans_phase_enum" {
-    expr = "phase IN ('idle', 'running', 'done', 'failed', 'cancelled')"
-  }
-
   index "scans_started_at_idx" {
     columns = [column.started_at]
   }
@@ -196,13 +192,6 @@ table "findings" {
 
   primary_key {
     columns = [column.id]
-  }
-
-  // Unknown severities are coerced on the way in rather than rejected: an engine
-  // is free to invent one, and dropping the finding would be worse than
-  // recording it as unknown.
-  check "findings_severity_enum" {
-    expr = "severity IN ('critical', 'high', 'medium', 'low', 'info', 'unknown')"
   }
 
   foreign_key "findings_scan_id_fkey" {
