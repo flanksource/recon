@@ -3,10 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
-	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/flanksource/recon/internal/api"
@@ -15,7 +13,7 @@ import (
 
 // DiscoverOpts selects discovery sweeps.
 type DiscoverOpts struct {
-	Chain []string `json:"chain,omitempty" flag:"chain" help:"Only sweeps of these chains (full, targeted)"`
+	Chain []string `json:"chain,omitempty" flag:"chain" help:"Only sweeps of these chains (full, targeted, explicit)"`
 	Since string   `json:"since,omitempty" flag:"since" help:"Only sweeps since this time (RFC3339 or a duration such as 24h)"`
 	Limit int      `json:"limit,omitempty" flag:"limit" help:"Most recent N sweeps" default:"50"`
 }
@@ -47,13 +45,7 @@ func (s *Store) ListDiscoveries(ctx context.Context, opts DiscoverOpts) ([]api.D
 
 	sweeps := make([]api.Discover, 0, len(rows))
 	for _, row := range rows {
-		unknown, err := s.unknownCount(ctx, row.ID)
-		if err != nil {
-			return nil, err
-		}
-		sweep := row.Document(nil)
-		sweep.Unknown = unknown
-		sweeps = append(sweeps, sweep)
+		sweeps = append(sweeps, row.Document(nil))
 	}
 	return sweeps, nil
 }
@@ -85,69 +77,21 @@ func (s *Store) FinishDiscovery(ctx context.Context, row models.Discovery) error
 }
 
 // SaveDiscoveryHosts records what each engine saw.
-//
-// Unknown hosts are stamped in the same transaction: a host discovery keeps
-// seeing but nobody has classified is the backlog, and first_seen has to
-// survive later sweeps or "how long has this been exposed" has no answer.
 func (s *Store) SaveDiscoveryHosts(ctx context.Context, rows []models.DiscoveryHost) error {
 	if len(rows) == 0 {
 		return nil
 	}
 
-	return s.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		err := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "discovery_id"}, {Name: "host"}, {Name: "engine"},
-			},
-			DoUpdates: clause.AssignmentColumns([]string{"live", "probe"}),
-		}).CreateInBatches(rows, 500).Error
-		if err != nil {
-			return fmt.Errorf("save discovery hosts: %w", err)
-		}
-
-		seen := map[string]bool{}
-		hosts := make([]string, 0, len(rows))
-		for _, row := range rows {
-			if !seen[row.Host] {
-				seen[row.Host] = true
-				hosts = append(hosts, row.Host)
-			}
-		}
-
-		var known []string
-		if err := tx.Model(&models.Target{}).
-			Where("host = ANY(?)", stringArray(hosts)).Pluck("host", &known).Error; err != nil {
-			return fmt.Errorf("known hosts: %w", err)
-		}
-		inInventory := map[string]bool{}
-		for _, host := range known {
-			inInventory[host] = true
-		}
-
-		now := time.Now()
-		var unknown []models.UnknownHost
-		for _, host := range hosts {
-			if inInventory[host] {
-				continue
-			}
-			unknown = append(unknown, models.UnknownHost{
-				Host: host, FirstSeen: now, LastSeen: now,
-			})
-		}
-		if len(unknown) == 0 {
-			return nil
-		}
-
-		err = tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "host"}},
-			// first_seen is deliberately not updated.
-			DoUpdates: clause.AssignmentColumns([]string{"last_seen"}),
-		}).CreateInBatches(unknown, 500).Error
-		if err != nil {
-			return fmt.Errorf("save unknown hosts: %w", err)
-		}
-		return nil
-	})
+	err := s.DB(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "discovery_id"}, {Name: "host"}, {Name: "engine"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{"live", "probe"}),
+	}).CreateInBatches(rows, 500).Error
+	if err != nil {
+		return fmt.Errorf("save discovery hosts: %w", err)
+	}
+	return nil
 }
 
 // GetDiscovery returns one sweep with the hosts it saw.
@@ -190,10 +134,6 @@ func (s *Store) LatestDiscovery(ctx context.Context) (*api.Discover, error) {
 
 // DiscoveredHosts returns what one sweep saw, collapsing the per-engine rows
 // into one entry per host.
-//
-// Known is recomputed against the current inventory on every read rather than
-// stored: a host becomes known the moment someone adds it, and a stored flag
-// would keep insisting it is new.
 func (s *Store) DiscoveredHosts(ctx context.Context, discoveryID string) ([]api.DiscoveredHost, error) {
 	var rows []models.DiscoveryHost
 	err := s.DB(ctx).Where("discovery_id = ?", discoveryID).Order("host, engine").Find(&rows).Error
@@ -204,21 +144,12 @@ func (s *Store) DiscoveredHosts(ctx context.Context, discoveryID string) ([]api.
 		return []api.DiscoveredHost{}, nil
 	}
 
-	names := make([]string, 0, len(rows))
-	for _, row := range rows {
-		names = append(names, row.Host)
-	}
-	known, err := s.knownHosts(ctx, names)
-	if err != nil {
-		return nil, err
-	}
-
 	byHost := map[string]*api.DiscoveredHost{}
 	var order []string
 	for _, row := range rows {
 		entry, seen := byHost[row.Host]
 		if !seen {
-			entry = &api.DiscoveredHost{Host: row.Host, Known: known[row.Host]}
+			entry = &api.DiscoveredHost{Host: row.Host}
 			byHost[row.Host] = entry
 			order = append(order, row.Host)
 		}
@@ -230,75 +161,5 @@ func (s *Store) DiscoveredHosts(ctx context.Context, discoveryID string) ([]api.
 	for _, host := range order {
 		hosts = append(hosts, *byHost[host])
 	}
-	return hosts, nil
-}
-
-// knownHosts reports which of these hosts are already in the inventory.
-func (s *Store) knownHosts(ctx context.Context, hosts []string) (map[string]bool, error) {
-	if len(hosts) == 0 {
-		return map[string]bool{}, nil
-	}
-
-	var found []string
-	err := s.DB(ctx).Model(&models.Target{}).
-		Where("host = ANY(?)", stringArray(hosts)).Pluck("host", &found).Error
-	if err != nil {
-		return nil, fmt.Errorf("known hosts: %w", err)
-	}
-
-	known := make(map[string]bool, len(found))
-	for _, host := range found {
-		known[host] = true
-	}
-	return known, nil
-}
-
-func (s *Store) unknownCount(ctx context.Context, discoveryID string) (int, error) {
-	var hosts []string
-	err := s.DB(ctx).Model(&models.DiscoveryHost{}).
-		Where("discovery_id = ?", discoveryID).Distinct().Pluck("host", &hosts).Error
-	if err != nil {
-		return 0, fmt.Errorf("unknown count for %s: %w", discoveryID, err)
-	}
-
-	known, err := s.knownHosts(ctx, hosts)
-	if err != nil {
-		return 0, err
-	}
-
-	unknown := 0
-	for _, host := range hosts {
-		if !known[host] {
-			unknown++
-		}
-	}
-	return unknown, nil
-}
-
-// UnknownHosts returns every host discovery has seen that is still absent from
-// the inventory, oldest first — the backlog worth triaging.
-func (s *Store) UnknownHosts(ctx context.Context) ([]api.DiscoveredHost, error) {
-	var rows []models.UnknownHost
-	if err := s.DB(ctx).Order("first_seen").Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("unknown hosts: %w", err)
-	}
-
-	names := make([]string, 0, len(rows))
-	for _, row := range rows {
-		names = append(names, row.Host)
-	}
-	known, err := s.knownHosts(ctx, names)
-	if err != nil {
-		return nil, err
-	}
-
-	hosts := make([]api.DiscoveredHost, 0, len(rows))
-	for _, row := range rows {
-		if known[row.Host] {
-			continue // added since it was last seen
-		}
-		hosts = append(hosts, api.DiscoveredHost{Host: row.Host, Engines: []string{}})
-	}
-	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Host < hosts[j].Host })
 	return hosts, nil
 }

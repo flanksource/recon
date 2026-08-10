@@ -184,6 +184,29 @@ var _ = Describe("the target store", Ordered, Label("db"), func() {
 		})
 	})
 
+	Describe("auto-inventory from discovery", func() {
+		It("creates a safe unclassified target", func() {
+			created, err := st.EnsureDiscoveredTarget(ctx, "192.0.2.10")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(created.Curated()).To(Equal(api.Curated{
+				Class: api.ClassUnclassified, Source: "discovery",
+				Profiles: []string{"safe"}, Tags: []string{},
+			}))
+		})
+
+		It("preserves an existing target's curated fields", func() {
+			original := api.TargetDocument{
+				Host: "curated.example.test", Class: api.ClassProd, Source: "inventory",
+				Profiles: []string{"full"}, Tags: []string{"critical"},
+			}
+			Expect(st.SaveTarget(ctx, original)).To(Succeed())
+
+			stored, err := st.EnsureDiscoveredTarget(ctx, original.Host)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(stored.Curated()).To(Equal(original.Curated()))
+		})
+	})
+
 	Describe("the inventory listing", func() {
 		It("sorts hosts by byte order and collects the tag vocabulary", func() {
 			for _, document := range []api.TargetDocument{

@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InventoryView } from "./TargetsView";
 import type { Target } from "./types";
@@ -52,8 +58,20 @@ vi.mock("./api", () => ({
   fetchTargets: vi.fn(async () => [target]),
   saveTargets: vi.fn(async () => [target]),
   fetchFilters: vi.fn(async () => [
-    { key: "class", label: "Class", options: ["prod", "non-prod"], total: 2, truncated: false },
-    { key: "tags", label: "Tags", options: ["http"], total: 1, truncated: false },
+    {
+      key: "class",
+      label: "Class",
+      options: ["prod", "non-prod"],
+      total: 2,
+      truncated: false,
+    },
+    {
+      key: "tags",
+      label: "Tags",
+      options: ["http"],
+      total: 1,
+      truncated: false,
+    },
   ]),
   fetchFilterOptions: vi.fn(async () => []),
   fetchZones: vi.fn(async () => []),
@@ -66,9 +84,12 @@ vi.mock("./api", () => ({
     id: "discover-1",
     _id: "discover-1",
     chain: "",
-    startedAt: "",
+    profile: "default",
+    input: {},
+    ranAt: "",
+    durationMs: 0,
+    failed: false,
     hosts: [],
-    newCount: 0,
     log: "",
   })),
   startScan: vi.fn(async () => idleScan),
@@ -79,7 +100,6 @@ vi.mock("./api", () => ({
 describe("InventoryView", () => {
   afterEach(() => {
     cleanup();
-    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -90,10 +110,18 @@ describe("InventoryView", () => {
 
     expect(await screen.findByText("api.example.com")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Status" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Response" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open ports" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Known paths" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Login methods" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Response" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open ports" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Known paths" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Login methods" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("200")).toBeInTheDocument();
     expect(screen.getByText("125ms")).toBeInTheDocument();
     expect(screen.getByText("8443")).toBeInTheDocument();
@@ -109,7 +137,9 @@ describe("InventoryView", () => {
     stubMatchMedia();
     render(<InventoryView onOpenScan={vi.fn()} onOpenTarget={vi.fn()} />);
 
-    expect(await screen.findByRole("combobox", { name: /Class/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("combobox", { name: /Class/ }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /Tags/ })).toBeInTheDocument();
   });
 
@@ -135,7 +165,9 @@ describe("InventoryView", () => {
     stubMatchMedia();
     render(<InventoryView onOpenScan={vi.fn()} onOpenTarget={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("checkbox", { name: /api\.example\.com/ }));
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: /api\.example\.com/ }),
+    );
     fireEvent.change(screen.getByPlaceholderText("tag…"), {
       target: { value: "reviewed" },
     });

@@ -1,10 +1,11 @@
 version: '3'
 
-# Nuclei scan orchestration for azure-production.
+# reconctl development and Nuclei scan orchestration.
 #   task              # list tasks
+#   task build        # build .bin/reconctl
+#   task install      # install reconctl to the Go bin directory
 #   task scan:safe    # safe, non-intrusive scan of non-prod + public (default)
 #   task scan:full    # DAST/fuzzing scan (prod requires CONFIRM=yes)
-# Root Makefile exposes thin `make nuclei-*` wrappers.
 
 vars:
   TS:
@@ -24,6 +25,17 @@ tasks:
     cmds:
       - task --list
     silent: true
+
+  build:
+    desc: Build reconctl to .bin/reconctl.
+    cmds:
+      - mkdir -p .bin
+      - go build -o .bin/reconctl ./cmd/reconctl
+
+  install:
+    desc: Install reconctl to GOBIN, or GOPATH/bin when GOBIN is unset.
+    cmds:
+      - go install ./cmd/reconctl
 
   tools:check:
     desc: Verify required tools are installed; fail loudly with install commands.

@@ -11,7 +11,17 @@ table "discoveries" {
   column "chain" {
     null    = false
     type    = text
-    comment = "full | targeted"
+    comment = "full | targeted | explicit"
+  }
+  column "profile" {
+    null    = false
+    type    = text
+    default = "default"
+  }
+  column "input" {
+    null    = false
+    type    = jsonb
+    default = sql("'{}'::jsonb")
   }
   column "ran_at" {
     null = false
@@ -46,7 +56,7 @@ table "discoveries" {
   }
 
   check "discoveries_chain_enum" {
-    expr = "chain IN ('full', 'targeted')"
+    expr = "chain IN ('full', 'targeted', 'explicit')"
   }
 
   index "discoveries_ran_at_idx" {
@@ -56,10 +66,9 @@ table "discoveries" {
 
 // One row per host a run observed.
 //
-// There is deliberately no is_known column. The TypeScript cache recomputed that
-// against the current inventory on every read, so a host classified after the
-// run stopped showing as unknown. Storing it would freeze the answer at run
-// time; it is a LEFT JOIN against targets instead.
+// There is deliberately no is_known column. Discovery now inventories every
+// observed host, so whether it still needs classification is represented by the
+// target's unclassified class rather than duplicated run-local state.
 table "discovery_hosts" {
   schema = schema.public
 
@@ -72,7 +81,7 @@ table "discovery_hosts" {
     type = text
   }
   column "engine" {
-    null    = true
+    null    = false
     type    = text
     comment = "which engine produced the observation"
   }
@@ -88,7 +97,7 @@ table "discovery_hosts" {
   }
 
   primary_key {
-    columns = [column.discovery_id, column.host]
+    columns = [column.discovery_id, column.host, column.engine]
   }
 
   foreign_key "discovery_hosts_discovery_id_fkey" {
@@ -100,39 +109,5 @@ table "discovery_hosts" {
 
   index "discovery_hosts_host_idx" {
     columns = [column.host]
-  }
-}
-
-// Hosts seen in the wild that nobody has classified yet. Deliberately outside
-// `targets`: adding a host to the inventory is a human decision, and an
-// unclassified host must never be swept up by a class-based selector.
-table "discovery_unknown_hosts" {
-  schema = schema.public
-
-  column "host" {
-    null = false
-    type = text
-  }
-  column "first_seen" {
-    null    = false
-    type    = timestamptz
-    default = sql("now()")
-  }
-  column "last_seen" {
-    null    = false
-    type    = timestamptz
-    default = sql("now()")
-  }
-  column "probe" {
-    null = true
-    type = jsonb
-  }
-
-  primary_key {
-    columns = [column.host]
-  }
-
-  index "discovery_unknown_hosts_last_seen_idx" {
-    columns = [column.last_seen]
   }
 }

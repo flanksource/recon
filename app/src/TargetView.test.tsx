@@ -88,9 +88,12 @@ const discoverResult = {
   _id: "sweep-1",
   id: "sweep-1",
   chain: "targeted",
-  startedAt: "2026-08-09T08:00:00.000Z",
+  profile: "default",
+  input: { hosts: ["api.example.com"] },
+  ranAt: "2026-08-09T08:00:00",
+  durationMs: 10,
+  failed: false,
   hosts: [],
-  newCount: 0,
   log: "",
 };
 
@@ -233,10 +236,12 @@ describe("TargetView", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Rescan discovery" }),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rescan 1 host" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Rescan 1 host" }),
+    );
 
     await waitFor(() =>
-      expect(api.runDiscovery).toHaveBeenCalledWith({ hosts: target.host }),
+      expect(api.runDiscovery).toHaveBeenCalledWith({ host: [target.host] }),
     );
     expect(api.startScan).not.toHaveBeenCalled();
   });
@@ -259,9 +264,7 @@ describe("TargetView", () => {
     expect(
       await screen.findByRole("button", { name: "Scan 1 host" }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Rescan 1 host" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rescan 1 host" })).toBeNull();
 
     // The target is prod, but `safe` is not intrusive and the server would run
     // it without complaint, so the dialog does not ask for confirmation either.

@@ -72,7 +72,11 @@ func (s *Store) ListScans(ctx context.Context, opts ScanOpts) ([]api.Scan, error
 		if err != nil {
 			return nil, err
 		}
-		scans = append(scans, row.Document(counts, hosts, selectorLabel(row)))
+		label, err := selectorLabel(row)
+		if err != nil {
+			return nil, err
+		}
+		scans = append(scans, row.Document(counts, hosts, label))
 	}
 	return scans, nil
 }
@@ -91,7 +95,11 @@ func (s *Store) GetScan(ctx context.Context, id string) (api.Scan, error) {
 	if err != nil {
 		return api.Scan{}, err
 	}
-	return row.Document(counts, hosts, selectorLabel(row)), nil
+	label, err := selectorLabel(row)
+	if err != nil {
+		return api.Scan{}, err
+	}
+	return row.Document(counts, hosts, label), nil
 }
 
 // scanRow resolves a run by id or by name, because a name is what the results
@@ -131,8 +139,12 @@ func (s *Store) scanHosts(ctx context.Context, scanID string) ([]string, error) 
 // selectorLabel renders the stored selector back into the phrase the UI shows.
 // It is derived rather than stored so that a change to how selectors read does
 // not need a migration.
-func selectorLabel(row models.Scan) string {
-	return TargetOptsFrom(row.Selector.Get()).Describe()
+func selectorLabel(row models.Scan) (string, error) {
+	opts, err := TargetOptsFrom(row.Selector.Get())
+	if err != nil {
+		return "", fmt.Errorf("scan %s selector: %w", row.ID, err)
+	}
+	return opts.Describe(), nil
 }
 
 // CreateScan records a run before it starts, so a crashed process still leaves

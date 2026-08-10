@@ -19,11 +19,12 @@ import (
 const (
 	ChainFull     = "full"
 	ChainTargeted = "targeted"
+	ChainExplicit = "explicit"
 )
 
 // ChainNames lists the sweeps a caller may ask for, so the filter control, the
 // flag's help and the error a bad name produces cannot fall out of step.
-func ChainNames() []string { return []string{ChainFull, ChainTargeted} }
+func ChainNames() []string { return []string{ChainFull, ChainTargeted, ChainExplicit} }
 
 // Chain is an ordered pipeline of discovery engines. Each stage consumes what
 // the previous one emitted, which is checked when the chain is built rather
@@ -139,7 +140,7 @@ func (c Chain) Run(ctx context.Context, opts RunOptions) ([]Stage, error) {
 	input := append([]string(nil), opts.Input...)
 	var stages []Stage
 
-	for _, engine := range c.Engines {
+	for index, engine := range c.Engines {
 		spec := engine.Spec()
 
 		if len(input) == 0 {
@@ -158,11 +159,46 @@ func (c Chain) Run(ctx context.Context, opts RunOptions) ([]Stage, error) {
 		// The next stage is fed by what this one emitted. An engine that emits
 		// observations does not extend the host list — it describes hosts that
 		// are already known — so the input carries through unchanged.
-		if engine.Emits() != discovery.Observations {
-			input = stage.Hosts
+		if index < len(c.Engines)-1 && engine.Emits() != discovery.Observations {
+			input, err = stageOutput(stage)
+			if err != nil {
+				return stages, fmt.Errorf("chain %s: %s output: %w", c.Name, spec.Name, err)
+			}
 		}
 	}
 	return stages, nil
+}
+
+func stageOutput(stage Stage) ([]string, error) {
+	if stage.Engine.Emits() != discovery.Endpoints {
+		return stage.Hosts, nil
+	}
+
+	values := make([]string, 0, len(stage.Records))
+	for _, record := range stage.Records {
+		value, _ := record.Fields["endpoint"].(string)
+		if value == "" {
+			value, _ = record.Fields["url"].(string)
+		}
+		if value == "" {
+			return nil, fmt.Errorf("endpoint record for %s has neither endpoint nor url", record.Host)
+		}
+		values = append(values, value)
+	}
+	return distinctValues(values), nil
+}
+
+func distinctValues(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	result := make([]string, 0, len(seen))
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (c Chain) runStage(ctx context.Context, engine discovery.Engine, input []string, opts RunOptions) (Stage, error) {

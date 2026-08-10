@@ -10,6 +10,7 @@ const CLASS_STYLES: Record<TargetClass, string> = {
   prod: "bg-red-500/15 text-red-600 dark:text-red-300",
   "non-prod": "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
   internal: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
+  unclassified: "bg-violet-500/15 text-violet-600 dark:text-violet-300",
   deactivated: "bg-neutral-500/15 text-neutral-500 dark:text-neutral-400",
 };
 

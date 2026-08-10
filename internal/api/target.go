@@ -19,23 +19,24 @@ const (
 type Class string
 
 const (
-	ClassPublic      Class = "public"
-	ClassProd        Class = "prod"
-	ClassNonProd     Class = "non-prod"
-	ClassInternal    Class = "internal"
-	ClassDeactivated Class = "deactivated"
+	ClassPublic       Class = "public"
+	ClassProd         Class = "prod"
+	ClassNonProd      Class = "non-prod"
+	ClassInternal     Class = "internal"
+	ClassUnclassified Class = "unclassified"
+	ClassDeactivated  Class = "deactivated"
 )
 
 // Classes lists every valid class in schema order.
 func Classes() []Class {
-	return []Class{ClassPublic, ClassProd, ClassNonProd, ClassInternal, ClassDeactivated}
+	return []Class{ClassPublic, ClassProd, ClassNonProd, ClassInternal, ClassUnclassified, ClassDeactivated}
 }
 
 // Risky reports whether scanning this class with an intrusive profile requires
 // explicit confirmation. An unknown class — a host absent from the inventory —
 // is risky, which is why the caller passes "" for one.
 func (c Class) Risky() bool {
-	return c == ClassProd || c == ClassPublic || c == ""
+	return c == ClassProd || c == ClassPublic || c == ClassUnclassified || c == ""
 }
 
 // TargetDocument is one host as the API returns it.

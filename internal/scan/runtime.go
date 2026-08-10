@@ -253,12 +253,16 @@ func (r *Runtime) launch(
 	spec := engine.Spec()
 	started := time.Now()
 	name := fmt.Sprintf("%s-%s-%s", spec.Name, request.Profile, started.Format("20060102-150405"))
+	selector, err := selectorMap(request.Selector)
+	if err != nil {
+		return api.Scan{}, err
+	}
 
 	row, err := r.Store.CreateScan(ctx, models.Scan{
 		Name:          name,
 		Engine:        spec.Name,
 		Profile:       request.Profile,
-		Selector:      models.Wrap(selectorMap(request.Selector)),
+		Selector:      models.Wrap(selector),
 		EndpointCount: len(endpoints),
 		Phase:         string(api.PhaseRunning),
 		StartedAt:     started,
@@ -475,9 +479,12 @@ func progressOf(engine enginescan.Engine) enginescan.Progress {
 	return parser
 }
 
-func selectorMap(opts store.TargetOpts) *map[string]any {
-	stored := opts.Map()
-	return &stored
+func selectorMap(opts store.TargetOpts) (*map[string]any, error) {
+	stored, err := opts.Map()
+	if err != nil {
+		return nil, err
+	}
+	return &stored, nil
 }
 
 func hostsOf(findings []api.Finding) []string {

@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"github.com/flanksource/clicky"
+	"github.com/flanksource/clicky/entity"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines"
@@ -83,7 +84,6 @@ func (r *Registry) Register() {
 	r.registerProfile()
 	r.registerEngine()
 	r.registerZone()
-	r.registerActions()
 }
 
 // registerZone exposes the zones discovery enumerates. They are configured, not
@@ -129,12 +129,8 @@ func (r *Registry) registerTarget() {
 		Register()
 }
 
-// createTarget classifies a host into the inventory.
-//
-// Discovery finds hosts but never classifies them, so this is the operation
-// that turns one it found into a target. Without it the Discover dialog's "add
-// to inventory" had nothing to call: an update refuses a host that is not
-// already there, which is correct and left adding it impossible.
+// createTarget adds a curated target directly. Discovery-created targets enter
+// the same inventory as unclassified records and can be updated in place.
 func createTarget(st *store.Store, ctx context.Context, body map[string]any) (api.TargetDocument, error) {
 	host, curated, err := api.TargetFrom(body)
 	if err != nil {
@@ -157,13 +153,17 @@ func updateTarget(st *store.Store, ctx context.Context, host string, body map[st
 }
 
 func (r *Registry) registerScan() {
-	clicky.NewEntity[api.Scan, store.ScanOpts, api.Scan]("scan").
+	builder := clicky.NewEntity[api.Scan, store.ScanOpts, api.Scan]("scan").
 		Aliases("scans").
 		ToolGroup("scanning").
 		ListWithContext(bind(r, (*store.Store).ListScans)).
 		GetWithContext(bind(r, (*store.Store).GetScan)).
-		Filters(r.scanFilters()...).
-		Register()
+		Filters(r.scanFilters()...)
+	if r.Runtimes.Scans != nil && r.Runtimes.Discovery != nil {
+		builder.WithPrimaryAction(entity.PrimaryActionWithContext(scanRunOpts{}, r.scanSelection).
+			WithShort("Discover targets, then scan their endpoints"))
+	}
+	builder.Register()
 }
 
 func (r *Registry) registerFinding() {
@@ -201,13 +201,17 @@ func getFinding(st *store.Store, ctx context.Context, id string) (api.Finding, e
 }
 
 func (r *Registry) registerDiscover() {
-	clicky.NewEntity[api.Discover, store.DiscoverOpts, api.Discover]("discover").
+	builder := clicky.NewEntity[api.Discover, store.DiscoverOpts, api.Discover]("discover").
 		Aliases("discoveries").
 		ToolGroup("inventory").
 		ListWithContext(bind(r, (*store.Store).ListDiscoveries)).
 		GetWithContext(bind(r, (*store.Store).GetDiscovery)).
-		Filters(discoverFilters()...).
-		Register()
+		Filters(discoverFilters()...)
+	if r.Runtimes.Discovery != nil {
+		builder.WithPrimaryAction(entity.PrimaryActionWithContext(discoverRunOpts{}, r.discoverSelection).
+			WithShort("Discover domains, networks, hosts or selected inventory targets"))
+	}
+	builder.Register()
 }
 
 func (r *Registry) registerProfile() {

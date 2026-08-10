@@ -35,7 +35,14 @@ func (s *Store) ListTargets(ctx context.Context, opts TargetOpts) ([]api.TargetD
 
 	documents := make([]api.TargetDocument, 0, len(rows))
 	for _, row := range rows {
-		documents = append(documents, row.Document())
+		document := row.Document()
+		matches, err := opts.MatchesTags(document.Tags)
+		if err != nil {
+			return nil, err
+		}
+		if matches {
+			documents = append(documents, document)
+		}
 	}
 	return documents, nil
 }
@@ -98,6 +105,23 @@ func (s *Store) CreateTarget(ctx context.Context, host string, curated api.Curat
 		return api.TargetDocument{}, fmt.Errorf("target %s is already in the inventory", host)
 	}
 	return document, nil
+}
+
+// EnsureDiscoveredTarget creates the conservative inventory record used for a
+// newly observed identity, and returns an existing record unchanged.
+func (s *Store) EnsureDiscoveredTarget(ctx context.Context, host string) (api.TargetDocument, error) {
+	row := models.Target{Host: host}
+	row.ApplyCurated(api.Curated{
+		Class: api.ClassUnclassified, Source: "discovery",
+		Profiles: []string{"safe"}, Tags: []string{},
+	})
+	if err := validate(row.Document()); err != nil {
+		return api.TargetDocument{}, err
+	}
+	if err := s.DB(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+		return api.TargetDocument{}, fmt.Errorf("ensure discovered target %s: %w", host, err)
+	}
+	return s.GetTarget(ctx, host)
 }
 
 // UpdateCurated replaces only the editable fields and returns the stored

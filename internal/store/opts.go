@@ -9,6 +9,7 @@ import (
 
 	"github.com/lib/pq"
 	"gorm.io/gorm"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/flanksource/recon/internal/api"
 )
@@ -20,7 +21,8 @@ import (
 //
 // Every list-valued field means "any of", matching how the filter chips read.
 type TargetOpts struct {
-	Class    []string `json:"class,omitempty" flag:"class" help:"Only these classes (public, prod, non-prod, internal, deactivated)"`
+	Selector string   `json:"selector,omitempty" flag:"selector" help:"Kubernetes label selector over target tags"`
+	Class    []string `json:"class,omitempty" flag:"class" help:"Only these classes (public, prod, non-prod, internal, unclassified, deactivated)"`
 	Tags     []string `json:"tags,omitempty" flag:"tags" help:"Only targets carrying any of these tags"`
 	Profiles []string `json:"profiles,omitempty" flag:"profiles" help:"Only targets assigned any of these scan profiles"`
 	Hosts    []string `json:"hosts,omitempty" flag:"hosts" help:"Only these exact hosts"`
@@ -35,7 +37,7 @@ type TargetOpts struct {
 // empty selector targets the whole inventory, which is worth saying out loud
 // before it runs.
 func (o TargetOpts) Empty() bool {
-	return len(o.Class) == 0 && len(o.Tags) == 0 && len(o.Profiles) == 0 &&
+	return o.Selector == "" && len(o.Class) == 0 && len(o.Tags) == 0 && len(o.Profiles) == 0 &&
 		len(o.Hosts) == 0 && len(o.Ports) == 0 && len(o.Status) == 0 &&
 		o.LastSeen == "" && !o.Live
 }
@@ -53,6 +55,9 @@ func (o TargetOpts) Describe() string {
 		}
 	}
 	add("class", o.Class)
+	if o.Selector != "" {
+		parts = append(parts, "selector "+o.Selector)
+	}
 	add("tags", o.Tags)
 	add("profiles", o.Profiles)
 	add("hosts", o.Hosts)
@@ -74,6 +79,9 @@ func (o TargetOpts) Describe() string {
 // Validate rejects a selector that cannot mean anything, rather than silently
 // returning nothing and letting the caller conclude the inventory is empty.
 func (o TargetOpts) Validate() error {
+	if _, err := labels.Parse(o.Selector); err != nil {
+		return fmt.Errorf("invalid selector %q: %w", o.Selector, err)
+	}
 	valid := map[string]bool{}
 	for _, class := range api.Classes() {
 		valid[string(class)] = true
@@ -122,9 +130,9 @@ func parseSince(value string) (time.Time, error) {
 	return parsed, nil
 }
 
-// Scope pushes the selector into SQL. Doing this in the database rather than in
-// Go is what lets a selector name a handful of hosts out of a large inventory
-// without reading all of it, and every predicate here has an index behind it.
+// Scope pushes the indexed target fields into SQL. The Kubernetes tag selector
+// is evaluated against the packed text[] tag representation after rows are
+// loaded; every other predicate here has an index behind it.
 func (o TargetOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 	if err := o.Validate(); err != nil {
 		return nil, err
@@ -176,35 +184,65 @@ func (o TargetOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 	return db, nil
 }
 
+// MatchesTags applies Selector to one target's tag set. Bare tags become label
+// keys with an empty value; key=value tags become ordinary Kubernetes labels.
+func (o TargetOpts) MatchesTags(tags []string) (bool, error) {
+	selector, err := labels.Parse(o.Selector)
+	if err != nil {
+		return false, fmt.Errorf("invalid selector %q: %w", o.Selector, err)
+	}
+	if o.Selector == "" {
+		return true, nil
+	}
+	set := labels.Set{}
+	for _, tag := range tags {
+		key, value, found := strings.Cut(tag, "=")
+		if !found {
+			key, value = tag, ""
+		}
+		if key == "" {
+			return false, fmt.Errorf("invalid empty tag key in %q", tag)
+		}
+		if existing, exists := set[key]; exists && existing != value {
+			return false, fmt.Errorf("conflicting values for tag %q", key)
+		}
+		set[key] = value
+	}
+	return selector.Matches(set), nil
+}
+
 // stringArray is the pq wrapper every ANY(?) predicate needs.
 func stringArray(values []string) pq.StringArray { return pq.StringArray(values) }
 
 // Map renders the selector for storage on a scan row. Going through JSON rather
 // than reflection keeps it identical to what the API accepts, so a stored
 // selector can be replayed.
-func (o TargetOpts) Map() map[string]any {
+func (o TargetOpts) Map() (map[string]any, error) {
 	encoded, err := json.Marshal(o)
 	if err != nil {
-		return map[string]any{}
+		return nil, fmt.Errorf("encode target selector: %w", err)
 	}
 	var out map[string]any
 	if err := json.Unmarshal(encoded, &out); err != nil {
-		return map[string]any{}
+		return nil, fmt.Errorf("project target selector: %w", err)
 	}
-	return out
+	return out, nil
 }
 
 // TargetOptsFrom rebuilds a selector from what was stored on a scan row.
-func TargetOptsFrom(stored map[string]any) TargetOpts {
+func TargetOptsFrom(stored map[string]any) (TargetOpts, error) {
 	encoded, err := json.Marshal(stored)
 	if err != nil {
-		return TargetOpts{}
+		return TargetOpts{}, fmt.Errorf("encode stored target selector: %w", err)
 	}
 	var opts TargetOpts
 	if err := json.Unmarshal(encoded, &opts); err != nil {
-		return TargetOpts{}
+		return TargetOpts{}, fmt.Errorf("decode stored target selector: %w", err)
 	}
-	return opts
+	if err := opts.Validate(); err != nil {
+		return TargetOpts{}, fmt.Errorf("validate stored target selector: %w", err)
+	}
+	return opts, nil
 }
 
 func int64s(values []int) []int64 {

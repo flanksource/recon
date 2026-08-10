@@ -1,6 +1,6 @@
 // Package cli wires the command tree. Most commands are generated from the
 // registered clicky entities; the handful defined here are the ones that have no
-// entity behind them — serving, the database itself, and engine provisioning.
+// entity behind them — serving, probing, the database itself, and engine provisioning.
 package cli
 
 import (
@@ -38,6 +38,7 @@ func New() *cobra.Command {
 			"exposes the same operations as REST with an OpenAPI description.",
 		SilenceUsage: true,
 	}
+	clicky.BindAllFlagsToCommand(cmd)
 
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&databaseURL, "db-url", "",
@@ -57,6 +58,8 @@ func New() *cobra.Command {
 		clicky.MarkLocalOnly(local)
 		cmd.AddCommand(local)
 	}
+	ping := addPingCommand(cmd)
+	clicky.MarkLocalOnly(ping)
 
 	// Entities are declared before the tree is generated and before any flag is
 	// parsed, so their subcommands exist to be parsed into. The database they
@@ -73,10 +76,11 @@ func New() *cobra.Command {
 	clicky.GenerateCLI(cmd)
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		clicky.Flags.UseFlags()
 		if !needsDatabase(cmd) {
 			return nil
 		}
-		config, err := databaseConfig(true)
+		config, err := databaseConfig(databaseOptions{})
 		if err != nil {
 			return err
 		}
@@ -133,15 +137,19 @@ func needsDatabase(cmd *cobra.Command) bool {
 	}
 	for current := cmd; current != nil; current = current.Parent() {
 		switch current.Name() {
-		case "migrate", "db", "serve", "engine":
+		case "migrate", "db", "serve", "engine", "ping":
 			return false
 		}
 	}
 	return true
 }
 
+type databaseOptions struct {
+	SkipMigrate bool
+}
+
 // databaseConfig resolves the flags into a database configuration.
-func databaseConfig(migrate bool) (db.Config, error) {
+func databaseConfig(options databaseOptions) (db.Config, error) {
 	directory := dataDir
 	if directory == "" {
 		resolved, err := db.DefaultDataDir()
@@ -150,12 +158,12 @@ func databaseConfig(migrate bool) (db.Config, error) {
 		}
 		directory = resolved
 	}
-	return db.Config{URL: databaseURL, DataDir: directory, Migrate: migrate}, nil
+	return db.Config{URL: databaseURL, DataDir: directory, SkipMigrate: options.SkipMigrate}, nil
 }
 
 // withDatabase opens the database, runs fn, and always closes.
-func withDatabase(ctx context.Context, migrate bool, fn func(*db.Handle) error) error {
-	config, err := databaseConfig(migrate)
+func withDatabase(ctx context.Context, options databaseOptions, fn func(*db.Handle) error) error {
+	config, err := databaseConfig(options)
 	if err != nil {
 		return err
 	}
@@ -176,7 +184,7 @@ func newMigrateCommand() *cobra.Command {
 			"automatically on serve.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withDatabase(cmd.Context(), true, func(handle *db.Handle) error {
+			return withDatabase(cmd.Context(), databaseOptions{}, func(handle *db.Handle) error {
 				cmd.Printf("schema applied to %s\n", redact(handle.DSN))
 				return nil
 			})
@@ -201,7 +209,7 @@ func newDBCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// No migration: this is for pointing psql at the database, including
 			// one this build must not modify.
-			return withDatabase(cmd.Context(), false, func(handle *db.Handle) error {
+			return withDatabase(cmd.Context(), databaseOptions{SkipMigrate: true}, func(handle *db.Handle) error {
 				cmd.Println(handle.DSN)
 				return nil
 			})

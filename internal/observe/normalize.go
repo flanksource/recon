@@ -25,6 +25,13 @@ import (
 // persisted across the inventory.
 const FailedProbeError = "httpx probe failed"
 
+// EndpointObservation is the addressing reported by a successful port probe.
+type EndpointObservation struct {
+	Host  string
+	IP    string
+	Ports []int
+}
+
 // ObservationHost derives the host a record is about. `input` wins because it is
 // what the probe was asked to look at; the URL is only consulted as a fallback.
 func ObservationHost(record map[string]any) (string, error) {
@@ -94,6 +101,58 @@ func Apply(target api.TargetDocument, record map[string]any, timestamp string) (
 	target.Tech = present(api.Tech{Names: jsStrings(record["tech"]), CPE: normalizeCPE(record["cpe"])})
 	target.TLS = normalizeTLS(record["tls"])
 	return target, nil
+}
+
+// ApplyEndpoints updates network liveness without clearing HTTP, TLS or
+// technology details collected by richer probes.
+func ApplyEndpoints(target api.TargetDocument, observation EndpointObservation, timestamp string) (api.TargetDocument, error) {
+	if timestamp == "" {
+		return api.TargetDocument{}, fmt.Errorf("endpoint observation timestamp is required")
+	}
+	if observation.Host != target.Host {
+		return api.TargetDocument{}, fmt.Errorf("endpoint host %s does not match %s", observation.Host, target.Host)
+	}
+
+	network := api.Network{}
+	if target.Network != nil {
+		network = *target.Network
+	}
+	if observation.IP != "" {
+		network.IP = observation.IP
+	}
+	ports, err := normalizedPorts(observation.Ports)
+	if err != nil {
+		return api.TargetDocument{}, err
+	}
+	network.OpenPorts = ports
+	target.Network = present(network)
+
+	firstObserved := timestamp
+	if target.Observed != nil && target.Observed.FirstObserved != "" {
+		firstObserved = target.Observed.FirstObserved
+	}
+	target.Observed = &api.Observed{
+		FirstObserved: firstObserved,
+		LastSeen:      timestamp,
+		LastAttempt:   timestamp,
+	}
+	return target, nil
+}
+
+func normalizedPorts(values []int) ([]int, error) {
+	seen := make(map[int]struct{}, len(values))
+	for _, value := range values {
+		if value < 1 || value > 65535 {
+			return nil, fmt.Errorf("endpoint port %d is outside 1-65535", value)
+		}
+		seen[value] = struct{}{}
+	}
+	ports := make([]int, 0, len(seen))
+	for value := range seen {
+		ports = append(ports, value)
+	}
+	sort.Ints(ports)
+	return ports, nil
 }
 
 func normalizeNetwork(record map[string]any) *api.Network {

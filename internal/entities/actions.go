@@ -6,10 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/flanksource/clicky"
-	"github.com/flanksource/clicky/entity"
-	"github.com/spf13/cobra"
-
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/discovery"
 	"github.com/flanksource/recon/internal/scan"
@@ -28,9 +24,10 @@ type Runtimes struct {
 // profile stays what it is, and the effective configuration is recorded on the
 // run.
 type scanFlags struct {
-	Engine  string `flag:"engine" help:"Scan engine to run" default:"nuclei"`
-	Profile string `flag:"profile" help:"Stored profile for that engine" default:"safe"`
-	Confirm bool   `flag:"confirm" help:"Acknowledge an intrusive scan of production, public or unclassified hosts"`
+	Engine           string `flag:"engine" help:"Scan engine to run" default:"nuclei"`
+	Profile          string `flag:"profile" help:"Stored scan profile for that engine" default:"safe"`
+	DiscoveryProfile string `flag:"discovery-profile" help:"Stored profile used by every discovery engine before scanning" default:"default"`
+	Confirm          bool   `flag:"confirm" help:"Acknowledge an intrusive scan of production, public or unclassified hosts"`
 	// Wait is on by default so a CLI run reports what it found. Over HTTP the
 	// caller passes wait=false and watches /api/scan/events instead, because a
 	// scan can take longer than any sensible request timeout.
@@ -39,60 +36,77 @@ type scanFlags struct {
 
 func (scanFlags) ClickyActionFlags() {}
 
-// discoverFlags choose which sweep to run.
+// discoverFlags choose the shared profile name for every participating engine.
 type discoverFlags struct {
-	Chain string `flag:"chain" help:"full enumerates from the configured zones; targeted re-probes known hosts" default:"targeted"`
+	Profile string `flag:"profile" help:"Stored profile used by every discovery engine" default:"default"`
 }
 
 func (discoverFlags) ClickyActionFlags() {}
 
-// registerActions adds the operations that do something rather than return
-// something. They hang off the target entity because both are driven by a
-// selector: "scan what this filter matches" is the whole point.
-func (r *Registry) registerActions() {
-	if r.Runtimes.Scans != nil {
-		clicky.RegisterSubCommandFn("target", func(parent *cobra.Command) {
-			command := entity.AddNamedCommandWithContext(
-				"scan", parent, scanSelectorOpts{}, r.scanSelection)
-			command.Short = "Scan every target the selector matches"
-			command.Long = "Resolves the selector to endpoints and points one scan engine at them.\n" +
-				"An intrusive profile against production, public or unclassified hosts is\n" +
-				"refused unless --confirm is given."
-		})
-	}
-	if r.Runtimes.Discovery != nil {
-		clicky.RegisterSubCommandFn("target", func(parent *cobra.Command) {
-			command := entity.AddNamedCommandWithContext(
-				"discover", parent, discoverSelectorOpts{}, r.discoverSelection)
-			command.Short = "Re-probe every target the selector matches"
-			command.Long = "A targeted sweep refreshes what is recorded about hosts already in the\n" +
-				"inventory. --chain full instead enumerates from the configured zones."
-		})
-	}
-}
-
-// scanSelectorOpts is the target selector plus the run-only choices, so
-// `reconctl target scan --class non-prod --engine nuclei` is one command.
-type scanSelectorOpts struct {
-	store.TargetOpts
+type scanRunOpts struct {
+	runTarget
 	scanFlags
 }
 
-// discoverSelectorOpts is the selector plus the chain choice.
-type discoverSelectorOpts struct {
-	store.TargetOpts
+func (scanRunOpts) ClickyActionFlags() {}
+
+type discoverRunOpts struct {
+	runTarget
 	discoverFlags
 }
 
+func (discoverRunOpts) ClickyActionFlags() {}
+
 // scanSelection starts a scan against everything the selector matches.
-func (r *Registry) scanSelection(ctx context.Context, opts scanSelectorOpts) (api.Scan, error) {
+func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Scan, error) {
 	if r.Runtimes.Scans == nil {
 		return api.Scan{}, fmt.Errorf("this build cannot start scans")
 	}
+	if r.Runtimes.Discovery == nil {
+		return api.Scan{}, fmt.Errorf("this build cannot run discovery before scanning")
+	}
+
+	target, err := opts.resolve()
+	if err != nil {
+		return api.Scan{}, err
+	}
+
+	discoveryOpts := discovery.Options{Profile: opts.DiscoveryProfile}
+	scanSelector := target.Inventory
+	if target.explicit() {
+		discoveryOpts.Explicit = true
+		discoveryOpts.Hosts = target.Hosts
+		discoveryOpts.Domains = target.Domains
+		discoveryOpts.CIDRs = target.CIDRs
+	} else {
+		discoveryOpts.Hosts, err = r.inventoryHosts(ctx, target.Inventory)
+		if err != nil {
+			return api.Scan{}, err
+		}
+		if len(discoveryOpts.Hosts) == 0 {
+			return api.Scan{}, fmt.Errorf("no targets match %s: nothing to discover or scan", target.Inventory.Describe())
+		}
+		discoveryOpts.Input, err = target.Inventory.Map()
+		if err != nil {
+			return api.Scan{}, err
+		}
+	}
+
+	sweep, err := r.Runtimes.Discovery.Run(ctx, discoveryOpts)
+	if err != nil {
+		return api.Scan{}, fmt.Errorf("pre-scan discovery: %w", err)
+	}
+	if target.explicit() {
+		scanSelector, err = scanSelectorFromDiscovery(discoveredHostNames(sweep.Hosts))
+		if err != nil {
+			return api.Scan{}, err
+		}
+	}
+
 	started, err := r.Runtimes.Scans.Start(ctx, scan.Request{
 		Engine:    opts.Engine,
 		Profile:   opts.Profile,
-		Selector:  opts.TargetOpts,
+		Selector:  scanSelector,
 		Confirmed: opts.Confirm,
 	})
 	if err != nil || !opts.Wait {
@@ -104,30 +118,67 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanSelectorOpts) (ap
 }
 
 // discoverSelection re-probes everything the selector matches.
-func (r *Registry) discoverSelection(ctx context.Context, opts discoverSelectorOpts) (api.Discover, error) {
+func (r *Registry) discoverSelection(ctx context.Context, opts discoverRunOpts) (api.Discover, error) {
 	if r.Runtimes.Discovery == nil {
 		return api.Discover{}, fmt.Errorf("this build cannot run discovery")
 	}
 
-	options := discovery.Options{Chain: opts.Chain}
-	if opts.Chain == "targeted" {
-		st, err := r.store()
+	target, err := opts.resolve()
+	if err != nil {
+		return api.Discover{}, err
+	}
+	options := discovery.Options{Profile: opts.Profile}
+	if target.explicit() {
+		options.Explicit = true
+		options.Hosts = target.Hosts
+		options.Domains = target.Domains
+		options.CIDRs = target.CIDRs
+	} else if !target.Inventory.Empty() {
+		options.Hosts, err = r.inventoryHosts(ctx, target.Inventory)
 		if err != nil {
 			return api.Discover{}, err
-		}
-		targets, err := st.ListTargets(ctx, opts.TargetOpts)
-		if err != nil {
-			return api.Discover{}, err
-		}
-		for _, target := range targets {
-			options.Hosts = append(options.Hosts, target.Host)
 		}
 		if len(options.Hosts) == 0 {
-			return api.Discover{}, fmt.Errorf(
-				"no targets match %s: nothing to re-probe", opts.TargetOpts.Describe())
+			return api.Discover{}, fmt.Errorf("no targets match %s: nothing to re-probe", target.Inventory.Describe())
+		}
+		options.Input, err = target.Inventory.Map()
+		if err != nil {
+			return api.Discover{}, err
 		}
 	}
 	return r.Runtimes.Discovery.Run(ctx, options)
+}
+
+func (r *Registry) inventoryHosts(ctx context.Context, opts store.TargetOpts) ([]string, error) {
+	st, err := r.store()
+	if err != nil {
+		return nil, err
+	}
+	targets, err := st.ListTargets(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	hosts := make([]string, 0, len(targets))
+	for _, target := range targets {
+		hosts = append(hosts, target.Host)
+	}
+	return hosts, nil
+}
+
+func discoveredHostNames(hosts []api.DiscoveredHost) []string {
+	names := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		names = append(names, host.Host)
+	}
+	return uniqueStrings(names)
+}
+
+func scanSelectorFromDiscovery(hosts []string) (store.TargetOpts, error) {
+	hosts = uniqueStrings(hosts)
+	if len(hosts) == 0 {
+		return store.TargetOpts{}, fmt.Errorf("explicit discovery found no targets to scan")
+	}
+	return store.TargetOpts{Hosts: hosts}, nil
 }
 
 // Preview resolves a selector to the endpoints a scan would contact, without

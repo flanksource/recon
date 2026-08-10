@@ -185,6 +185,51 @@ var _ = Describe("a record that reports failure", func() {
 	})
 })
 
+var _ = Describe("an endpoint observation", func() {
+	It("updates network liveness without discarding richer observations", func() {
+		target := api.TargetDocument{
+			Host: "app.example.test", Class: api.ClassProd, Profiles: []string{"safe"}, Tags: []string{},
+			Observed: &api.Observed{
+				FirstObserved: "2026-01-15T09:30:00.000Z",
+				LastSeen:      "2026-01-15T09:30:00.000Z",
+				LastAttempt:   "2026-01-15T09:30:00.000Z",
+				Error:         "timeout",
+			},
+			Network: &api.Network{CNAME: []string{"edge.example.test"}, OpenPorts: []int{80}},
+			HTTP:    &api.HTTP{URL: "https://app.example.test", StatusCode: 200},
+			Tech:    &api.Tech{Names: []string{"nginx"}},
+			TLS:     &api.TLS{Cipher: ptr("TLS_AES_128_GCM_SHA256")},
+		}
+
+		updated, err := observe.ApplyEndpoints(
+			target,
+			observe.EndpointObservation{Host: target.Host, IP: "192.0.2.10", Ports: []int{8443, 443, 443}},
+			"2026-08-10T00:00:00.000Z",
+		)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(updated.Observed).To(Equal(&api.Observed{
+			FirstObserved: "2026-01-15T09:30:00.000Z",
+			LastSeen:      "2026-08-10T00:00:00.000Z",
+			LastAttempt:   "2026-08-10T00:00:00.000Z",
+		}))
+		Expect(updated.Network).To(Equal(&api.Network{
+			IP: "192.0.2.10", CNAME: []string{"edge.example.test"}, OpenPorts: []int{443, 8443},
+		}))
+		Expect(updated.HTTP).To(Equal(target.HTTP))
+		Expect(updated.Tech).To(Equal(target.Tech))
+		Expect(updated.TLS).To(Equal(target.TLS))
+	})
+
+	It("rejects a finding for another host", func() {
+		_, err := observe.ApplyEndpoints(
+			api.TargetDocument{Host: "app.example.test"},
+			observe.EndpointObservation{Host: "other.example.test", Ports: []int{443}},
+			"2026-08-10T00:00:00.000Z",
+		)
+		Expect(err).To(MatchError("endpoint host other.example.test does not match app.example.test"))
+	})
+})
+
 var _ = Describe("CPE normalization", func() {
 	cpes := func(entries ...any) []api.CPE {
 		tech := apply("example.test", map[string]any{"input": "example.test", "cpe": entries}).Tech

@@ -102,12 +102,12 @@ table "targets" {
   // defence: the JSON Schema runs first, but nothing outside this database can
   // be trusted to have run it.
   check "targets_host_format" {
-    expr = "host ~ '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' AND host !~ '[.][.]'"
+    expr = "(host ~ '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' OR host ~ '^[0-9a-f:]+$') AND host !~ '[.][.]'"
   }
   // text + check rather than a Postgres enum: Atlas drops and recreates an enum
   // type whenever its values change, cascading through every column using it.
   check "targets_class_enum" {
-    expr = "class IN ('public', 'prod', 'non-prod', 'internal', 'deactivated')"
+    expr = "class IN ('public', 'prod', 'non-prod', 'internal', 'unclassified', 'deactivated')"
   }
   // The allOf if/then pair from the JSON Schema, in its SQL form.
   check "targets_reason_iff_deactivated" {

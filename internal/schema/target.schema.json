@@ -8,10 +8,16 @@
   "properties": {
     "$schema": { "const": "../target.schema.json", "readOnly": true },
     "version": { "const": 1, "readOnly": true },
-    "host": { "$ref": "#/$defs/hostname", "readOnly": true },
+    "host": {
+      "anyOf": [
+        { "$ref": "#/$defs/hostname" },
+        { "$ref": "#/$defs/ip" }
+      ],
+      "readOnly": true
+    },
     "class": {
       "type": "string",
-      "enum": ["public", "prod", "non-prod", "internal", "deactivated"]
+      "enum": ["public", "prod", "non-prod", "internal", "unclassified", "deactivated"]
     },
     "app": { "$ref": "#/$defs/nonEmptyString" },
     "cluster": { "$ref": "#/$defs/nonEmptyString" },

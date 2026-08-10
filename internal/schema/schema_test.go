@@ -64,6 +64,18 @@ var _ = Describe("target schema", func() {
 		Expect(schema.ValidateInventory("inventory.json", manifest)).To(Succeed())
 	})
 
+	DescribeTable("accepts discovered target identities",
+		func(host string) {
+			document := base()
+			document["host"] = host
+			document["class"] = "unclassified"
+			Expect(schema.ValidateTarget("t.json", document)).To(Succeed())
+		},
+		Entry("a DNS name", "new.example.test"),
+		Entry("an IPv4 address", "192.0.2.10"),
+		Entry("an IPv6 address", "2001:db8::10"),
+	)
+
 	// The conditional rule is the one piece of the schema a naive Go validator
 	// gets wrong, and both directions are load-bearing: the UI relies on it to
 	// force a reason when deactivating and to clear it when reactivating.

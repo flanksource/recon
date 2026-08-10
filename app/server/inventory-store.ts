@@ -198,7 +198,7 @@ export function createInventoryStore(options: InventoryStoreOptions = {}) {
       writeFileSync(resolve(outputDir, `${name}.txt`), hosts.length ? `${hosts.join("\n")}\n` : "", "utf8");
       counts[name] = hosts.length;
     };
-    for (const targetClass of ["public", "prod", "non-prod", "internal", "deactivated"]) {
+    for (const targetClass of ["public", "prod", "non-prod", "internal", "unclassified", "deactivated"]) {
       const classRows = rows.filter((target) => target.class === targetClass);
       writeList(targetClass, classRows);
       for (const profile of ["safe", "full"]) {

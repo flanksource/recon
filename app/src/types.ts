@@ -8,6 +8,7 @@ export const CLASS_ORDER = [
   "prod",
   "non-prod",
   "internal",
+  "unclassified",
   "deactivated",
 ] as const;
 export type TargetClass = (typeof CLASS_ORDER)[number];
@@ -76,6 +77,13 @@ export type TargetDocument = {
 export type Target = TargetDocument & Identified;
 export type TargetRow = TargetDocument;
 
+export type Inventory = {
+  version: number;
+  zones: string[];
+  rows: TargetRow[];
+  tagVocabulary: string[];
+};
+
 export type CuratedTarget = Pick<
   TargetDocument,
   | "class"
@@ -94,6 +102,7 @@ export type CuratedTarget = Pick<
 // query string and the scan. Every value is a comma-joined list because that is
 // how the CLI's repeated flags arrive over HTTP.
 export type TargetSelector = {
+  selector?: string;
   class?: string;
   tags?: string;
   profiles?: string;
@@ -275,26 +284,19 @@ export type Zone = Identified & { zone: string };
 
 export type DiscoveredHost = {
   host: string;
-  engine?: string;
-  status?: number;
-  responseTime?: string;
-  openPorts?: number[];
-  knownPaths?: string[];
-  loginMethods?: string[];
-  title?: string;
-  tech?: string[];
+  engines: string[];
   live: boolean;
-  isKnown: boolean;
-  [key: string]: unknown;
 };
 
 export type Discover = Identified & {
   id: string;
   chain: string;
-  startedAt: string;
-  finishedAt?: string;
+  profile: string;
+  input: Record<string, unknown>;
+  ranAt: string;
+  durationMs: number;
+  failed: boolean;
   hosts: DiscoveredHost[];
-  newCount: number;
   error?: string;
   log: string;
 };
@@ -343,7 +345,9 @@ export function curatedTarget(target: TargetDocument): CuratedTarget {
 
 // A profile's address, computed rather than read off the payload so it is the
 // same value whether the profile came from a list or from a single get.
-export function profileId(profile: Pick<Profile, "kind" | "engine" | "name">): string {
+export function profileId(
+  profile: Pick<Profile, "kind" | "engine" | "name">,
+): string {
   return `${profile.kind}:${profile.engine}:${profile.name}`;
 }
 

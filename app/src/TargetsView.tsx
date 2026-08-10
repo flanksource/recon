@@ -15,7 +15,9 @@ import {
 } from "./types";
 
 function sameDefinition(left: TargetRow, right: TargetRow): boolean {
-  return JSON.stringify(curatedTarget(left)) === JSON.stringify(curatedTarget(right));
+  return (
+    JSON.stringify(curatedTarget(left)) === JSON.stringify(curatedTarget(right))
+  );
 }
 
 function applyEdit(row: TargetRow, edit: BulkEdit): TargetRow {
@@ -27,7 +29,8 @@ function applyEdit(row: TargetRow, edit: BulkEdit): TargetRow {
     case "remove-tag":
       return { ...row, tags: row.tags.filter((t) => t !== edit.tag) };
     case "set-class":
-      if (edit.value === "deactivated") return { ...row, class: edit.value, reason: edit.reason };
+      if (edit.value === "deactivated")
+        return { ...row, class: edit.value, reason: edit.reason };
       const { reason: _reason, ...active } = row;
       return { ...active, class: edit.value };
     case "set-profiles":
@@ -50,11 +53,8 @@ export function InventoryView({
   // scan can no longer throw away typing.
   const [served, setServed] = useState<TargetRow[]>([]);
   const [edits, setEdits] = useState<Record<string, TargetRow>>({});
-  // Hosts classified in the discover dialog exist only here until they are
-  // saved: they are not in the inventory yet, so no listing returns them.
-  const [added, setAdded] = useState<TargetRow[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
-    routeParams.get("selected")?.split(",").filter(Boolean) ?? [],
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    () => routeParams.get("selected")?.split(",").filter(Boolean) ?? [],
   );
   const [query, setQuery] = useState(() => routeParams.get("q") ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -62,31 +62,15 @@ export function InventoryView({
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
 
-  const {
-    filters,
-    selection,
-    error: filterError,
-  } = useEntityFilters("target");
-
-  const addDiscovered = useCallback(
-    (incoming: TargetRow[]): number => {
-      let count = 0;
-      setAdded((prev) => {
-        const known = new Set([...prev.map((r) => r.host), ...served.map((r) => r.host)]);
-        const fresh = incoming.filter((r) => !known.has(r.host));
-        count = fresh.length;
-        return fresh.length ? [...prev, ...fresh] : prev;
-      });
-      return count;
-    },
-    [served],
-  );
+  const { filters, selection, error: filterError } = useEntityFilters("target");
 
   const load = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      setServed(await fetchTargets(selectionQuery(selection) as TargetSelector));
+      setServed(
+        await fetchTargets(selectionQuery(selection) as TargetSelector),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -102,20 +86,19 @@ export function InventoryView({
     const url = new URL(window.location.href);
     if (query) url.searchParams.set("q", query);
     else url.searchParams.delete("q");
-    if (selectedIds.length > 0) url.searchParams.set("selected", selectedIds.join(","));
+    if (selectedIds.length > 0)
+      url.searchParams.set("selected", selectedIds.join(","));
     else url.searchParams.delete("selected");
     window.history.replaceState(window.history.state, "", url);
   }, [query, selectedIds]);
 
   // The rows the table shows: what the server returned, with unsaved edits laid
-  // over it, plus the hosts that are not in the inventory yet.
+  // over it. Discovery inserts new unclassified targets directly in the store.
   const rows = useMemo<TargetRow[]>(() => {
-    const merged = served.map((row) => edits[row.host] ?? row);
-    const shown = new Set(merged.map((row) => row.host));
-    return [...merged, ...added.filter((row) => !shown.has(row.host))];
-  }, [added, edits, served]);
+    return served.map((row) => edits[row.host] ?? row);
+  }, [edits, served]);
 
-  const dirty = Object.keys(edits).length > 0 || added.length > 0;
+  const dirty = Object.keys(edits).length > 0;
 
   // A finished scan stamps the machine-owned scan section, so pull it back in.
   // Unlike before this needs no dirty guard: an edit lives in `edits` and
@@ -135,9 +118,9 @@ export function InventoryView({
         known_paths: r.http?.known_paths,
         login_methods: r.http?.login_methods,
         findings: r.scan?.last_findings,
-        dirty: r.host in edits || added.some((row) => row.host === r.host),
+        dirty: r.host in edits,
       })),
-    [added, edits, rows],
+    [edits, rows],
   );
 
   const applyBulk = useCallback(
@@ -167,17 +150,17 @@ export function InventoryView({
     setBusy(true);
     setError(null);
     try {
-      const fresh = new Set(added.map((row) => row.host));
-      await saveTargets([...Object.values(edits), ...added], (host) => fresh.has(host));
+      await saveTargets(Object.values(edits));
       setEdits({});
-      setAdded([]);
-      setServed(await fetchTargets(selectionQuery(selection) as TargetSelector));
+      setServed(
+        await fetchTargets(selectionQuery(selection) as TargetSelector),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [added, edits, selection]);
+  }, [edits, selection]);
 
   const tagVocabulary = useMemo(() => {
     const tags = new Set<string>();
@@ -221,8 +204,13 @@ export function InventoryView({
             Unsaved changes
           </span>
         )}
-        <Button variant="outline" size="sm" onClick={() => setDiscoverOpen(true)} disabled={busy}>
-          Discover subdomains
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDiscoverOpen(true)}
+          disabled={busy}
+        >
+          Discover targets
         </Button>
         <Button
           variant={scanRunning ? "default" : "outline"}
@@ -232,10 +220,20 @@ export function InventoryView({
         >
           {scanLabel}
         </Button>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={busy}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void load()}
+          disabled={busy}
+        >
           Reload
         </Button>
-        <Button size="sm" onClick={() => void save()} disabled={busy || !dirty} loading={busy}>
+        <Button
+          size="sm"
+          onClick={() => void save()}
+          disabled={busy || !dirty}
+          loading={busy}
+        >
           Save inventory
         </Button>
       </header>
@@ -243,8 +241,7 @@ export function InventoryView({
       <DiscoverDialog
         open={discoverOpen}
         onClose={() => setDiscoverOpen(false)}
-        tagVocabulary={tagVocabulary}
-        onAdd={addDiscovered}
+        onDiscovered={() => void load()}
       />
 
       {scanOpen && (

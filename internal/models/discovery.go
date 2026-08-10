@@ -10,8 +10,10 @@ import (
 
 // Discovery is one row of the discoveries table — one sweep.
 type Discovery struct {
-	ID    string `gorm:"column:id;primaryKey;default:generate_ulid()"`
-	Chain string `gorm:"column:chain"`
+	ID      string               `gorm:"column:id;primaryKey;default:generate_ulid()"`
+	Chain   string               `gorm:"column:chain"`
+	Profile string               `gorm:"column:profile"`
+	Input   JSON[map[string]any] `gorm:"column:input;type:jsonb"`
 
 	RanAt      time.Time `gorm:"column:ran_at"`
 	Log        *string   `gorm:"column:log"`
@@ -28,26 +30,25 @@ func (Discovery) TableName() string { return "discoveries" }
 // Document projects the row onto the wire type. Hosts are loaded separately so
 // the runs list does not have to carry them.
 func (d Discovery) Document(hosts []api.DiscoveredHost) api.Discover {
-	unknown := 0
-	for _, host := range hosts {
-		if !host.Known {
-			unknown++
-		}
-	}
 	if hosts == nil {
 		hosts = []api.DiscoveredHost{}
+	}
+	input := d.Input.Get()
+	if input == nil {
+		input = map[string]any{}
 	}
 
 	return api.Discover{
 		ID:         d.ID,
 		Chain:      d.Chain,
+		Profile:    d.Profile,
+		Input:      input,
 		RanAt:      d.RanAt.In(time.Local).Format("2006-01-02T15:04:05"),
 		DurationMs: d.DurationMs,
 		Failed:     d.Failed,
 		Error:      deref(d.Error),
 		Log:        deref(d.Log),
 		Hosts:      hosts,
-		Unknown:    unknown,
 	}
 }
 
@@ -63,18 +64,6 @@ type DiscoveryHost struct {
 
 // TableName is explicit; see Target.TableName.
 func (DiscoveryHost) TableName() string { return "discovery_hosts" }
-
-// UnknownHost is a host seen by discovery that is not in the inventory.
-type UnknownHost struct {
-	Host      string    `gorm:"column:host;primaryKey"`
-	FirstSeen time.Time `gorm:"column:first_seen"`
-	LastSeen  time.Time `gorm:"column:last_seen"`
-
-	Probe JSON[map[string]any] `gorm:"column:probe;type:jsonb"`
-}
-
-// TableName is explicit; see Target.TableName.
-func (UnknownHost) TableName() string { return "discovery_unknown_hosts" }
 
 // EngineProfile is one row of the engine_profiles table.
 type EngineProfile struct {

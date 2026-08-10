@@ -24,6 +24,7 @@ type fakeEngine struct {
 	emits    enginediscovery.Kind
 	script   string
 	captured *string
+	parse    func(string) enginediscovery.Record
 }
 
 func (f fakeEngine) Spec() engines.Spec {
@@ -44,12 +45,15 @@ func (f fakeEngine) Args(run engines.Run) []string {
 
 func (f fakeEngine) Parse(r io.Reader, emit func(enginediscovery.Record) error) error {
 	return engines.ScanLines(r, func(line string) error {
-		host := strings.TrimSpace(line)
-		if host == "" {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			return nil
 		}
+		if f.parse != nil {
+			return emit(f.parse(line))
+		}
 		return emit(enginediscovery.Record{
-			Host: host, Fields: map[string]any{"input": host, "source": f.name},
+			Host: line, Fields: map[string]any{"input": line, "source": f.name},
 		})
 	})
 }
@@ -178,6 +182,30 @@ var _ = Describe("running a discovery chain", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(stages[2].Hosts).To(Equal([]string{"a.example.test", "b.example.test"}),
 			"the observing stage in the middle must not have narrowed the input")
+	})
+
+	It("feeds endpoint values rather than bare hosts to endpoint consumers", func() {
+		chain := discovery.Chain{Name: "ports", Engines: []enginediscovery.Engine{
+			fakeEngine{
+				name: "ports", accepts: enginediscovery.Hosts, emits: enginediscovery.Endpoints,
+				script: "echo app.example.test:8443",
+				parse: func(line string) enginediscovery.Record {
+					return enginediscovery.Record{
+						Host:   "app.example.test",
+						Fields: map[string]any{"endpoint": line, "port": 8443},
+					}
+				},
+			},
+			fakeEngine{
+				name: "probe", accepts: enginediscovery.Endpoints, emits: enginediscovery.Observations,
+				script: "cat {{in}}",
+			},
+		}}
+
+		stages, err := run(chain, []string{"app.example.test"})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(stages).To(HaveLen(2))
+		Expect(stages[1].Hosts).To(Equal([]string{"app.example.test:8443"}))
 	})
 
 	It("treats exit code 3 as success, because it means differences were found", func() {

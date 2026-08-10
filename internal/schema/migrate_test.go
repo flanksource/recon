@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	recondb "github.com/flanksource/recon/internal/db"
 	"github.com/flanksource/recon/internal/schema"
 )
 
@@ -45,7 +46,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(rows.Err()).ToNot(HaveOccurred())
 
 		Expect(tables).To(ConsistOf(
-			"discoveries", "discovery_hosts", "discovery_unknown_hosts",
+			"discoveries", "discovery_hosts",
 			"engine_profiles", "findings", "scans", "targets", "zones",
 		))
 	})
@@ -57,6 +58,38 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 	It("is idempotent", func() {
 		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
 		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+	})
+
+	It("upgrades the legacy discovery chain constraint", func() {
+		_, err := db.SQL().Exec(`ALTER TABLE discoveries DROP CONSTRAINT discoveries_chain_enum`)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = db.SQL().Exec(`
+			ALTER TABLE discoveries ADD CONSTRAINT discoveries_chain_enum
+			CHECK (chain IN ('full', 'targeted'))`)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = db.SQL().Exec(`
+			DELETE FROM schema_migration_scripts
+			WHERE scope = $1 AND path = '011_discoveries_explicit_chain.sql'`, schema.Name)
+		Expect(err).ToNot(HaveOccurred())
+
+		handle, err := recondb.Open(GinkgoT().Context(), recondb.Config{URL: db.DSN()})
+		Expect(err).ToNot(HaveOccurred())
+		DeferCleanup(func() { Expect(handle.Close()).To(Succeed()) })
+
+		var definition string
+		Expect(db.SQL().QueryRow(`
+			SELECT pg_get_constraintdef(oid)
+			FROM pg_constraint
+			WHERE conrelid = 'discoveries'::regclass
+			  AND conname = 'discoveries_chain_enum'`).Scan(&definition)).To(Succeed())
+		Expect(definition).To(ContainSubstring("'explicit'::text"))
+
+		_, err = db.SQL().Exec(`
+			INSERT INTO discoveries (chain, profile, input, ran_at)
+			VALUES ('explicit', 'default', '{}'::jsonb, now())`)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = db.SQL().Exec(`DELETE FROM discoveries WHERE chain = 'explicit'`)
+		Expect(err).ToNot(HaveOccurred())
 	})
 
 	It("provides generate_ulid from the pre-phase script", func() {
@@ -85,6 +118,11 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 
 		It("accepts a well-formed target", func() {
 			Expect(insert("a.example.test", "non-prod")).To(Succeed())
+		})
+
+		It("accepts unclassified IP targets created by discovery", func() {
+			Expect(insert("192.0.2.10", "unclassified")).To(Succeed())
+			Expect(insert("2001:db8::10", "unclassified")).To(Succeed())
 		})
 
 		It("rejects an unknown class", func() {

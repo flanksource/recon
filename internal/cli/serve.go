@@ -29,7 +29,7 @@ func newServeCommand() *cobra.Command {
 			"declaration.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withDatabase(cmd.Context(), true, func(handle *db.Handle) error {
+			return withDatabase(cmd.Context(), databaseOptions{}, func(handle *db.Handle) error {
 				st := store.New(handle.Gorm)
 
 				seeded, err := st.SeedDefaultProfiles(cmd.Context())

@@ -114,7 +114,7 @@ describe("ScanDialog", () => {
     const fetchMock = mockFetch({
       "/api/v1/engine": [nucleiEngine],
       "/api/v1/profile": [safeProfile],
-      "/api/v1/target/scan": createdScan,
+      "/api/v1/scan": createdScan,
     });
     const onStatus = vi.fn();
 
@@ -136,13 +136,14 @@ describe("ScanDialog", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/v1/target/scan",
+        "/api/v1/scan",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            hosts: "api.example.com",
+            host: ["api.example.com"],
             engine: "nuclei",
             profile: "safe",
+            "discovery-profile": "default",
             confirm: false,
             wait: false,
           }),
@@ -155,7 +156,7 @@ describe("ScanDialog", () => {
     const fetchMock = mockFetch({
       "/api/v1/engine": [nucleiEngine],
       "/api/v1/profile": [intrusiveProfile],
-      "/api/v1/target/scan": createdScan,
+      "/api/v1/scan": createdScan,
     });
 
     render(
@@ -181,13 +182,14 @@ describe("ScanDialog", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/v1/target/scan",
+        "/api/v1/scan",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            hosts: "docs.example.com",
+            host: ["docs.example.com"],
             engine: "nuclei",
             profile: "full",
+            "discovery-profile": "default",
             confirm: true,
             wait: false,
           }),
@@ -202,7 +204,7 @@ describe("ScanDialog", () => {
     mockFetch({
       "/api/v1/engine": [nucleiEngine],
       "/api/v1/profile": [safeProfile],
-      "/api/v1/target/scan": createdScan,
+      "/api/v1/scan": createdScan,
     });
 
     render(
@@ -222,10 +224,19 @@ describe("ScanDialog", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
-  it("requires new targets to be saved before a discovery rescan", () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(
-      new Error("unexpected fetch"),
-    );
+  it("allows discovery to auto-inventory an unsaved explicit host", async () => {
+    const result: Discover = {
+      id: "discover-new",
+      chain: "explicit",
+      profile: "default",
+      input: { hosts: ["api.example.com"] },
+      ranAt: "2026-08-10T09:00:00",
+      durationMs: 10,
+      failed: false,
+      hosts: [],
+      log: "",
+    };
+    const fetchMock = mockFetch({ "/api/v1/discover": result });
 
     render(
       <ScanDialog
@@ -240,28 +251,33 @@ describe("ScanDialog", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("button", { name: "Rescan 1 host" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText(
-        "Save 1 new target before rescanning discovery observations.",
+    fireEvent.click(screen.getByRole("button", { name: "Rescan 1 host" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/discover",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ host: ["api.example.com"] }),
+        }),
       ),
-    ).toBeInTheDocument();
+    );
   });
 
   it("rescans saved hosts via discovery instead of a scan engine", async () => {
     const result: Discover = {
       _id: "discover-1",
       id: "discover-1",
-      chain: "naabu,httpx",
-      startedAt: "2026-08-09T08:00:00.000Z",
+      chain: "targeted",
+      profile: "default",
+      input: { hosts: ["api.example.com"] },
+      ranAt: "2026-08-09T08:00:00",
+      durationMs: 10,
+      failed: false,
       hosts: [],
-      newCount: 0,
       log: ">>> rescanning 1 host\n",
     };
     const fetchMock = mockFetch({
-      "/api/v1/target/discover": result,
+      "/api/v1/discover": result,
     });
 
     render(
@@ -281,10 +297,10 @@ describe("ScanDialog", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/v1/target/discover",
+        "/api/v1/discover",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ hosts: "api.example.com" }),
+          body: JSON.stringify({ host: ["api.example.com"] }),
         }),
       ),
     );

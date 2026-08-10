@@ -32,9 +32,9 @@ type Config struct {
 	// accident.
 	DataDir string
 
-	// Migrate applies the declarative schema after connecting. On by default;
-	// turn it off only to inspect a database you must not modify.
-	Migrate bool
+	// SkipMigrate leaves the connected database unchanged. Schema migration is
+	// the default so every process starts against the schema embedded in its binary.
+	SkipMigrate bool
 
 	// Logger receives the embedded server's diagnostic output. Defaults to
 	// stderr — never stdout, which carries structured command output.
@@ -94,7 +94,7 @@ func Open(ctx context.Context, config Config) (*Handle, error) {
 	}
 	handle.DSN = dsn
 
-	if config.Migrate {
+	if !config.SkipMigrate {
 		if err := schema.Apply(ctx, dsn); err != nil {
 			_ = handle.Close()
 			return nil, err

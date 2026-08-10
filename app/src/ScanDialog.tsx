@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AnsiHtml,
   Button,
   Modal,
   SegmentedControl,
@@ -15,6 +14,7 @@ import {
   startScan,
 } from "./api";
 import { sameConfig, ScanProfileConfig } from "./ScanProfileConfig";
+import { DiscoveryRunSummary } from "./DiscoveryRunSummary";
 import { ScanRunStatus } from "./ScanRunStatus";
 import type { Discover, Engine, Profile, ScanStatus, TargetRow } from "./types";
 
@@ -22,7 +22,7 @@ import type { Discover, Engine, Profile, ScanStatus, TargetRow } from "./types";
 // gate the server enforces. A host not yet written to the inventory is
 // treated the same way: the server cannot verify its class, so an unsaved
 // "non-prod" is not proof of anything.
-const CONFIRM_CLASSES = new Set(["prod", "public"]);
+const CONFIRM_CLASSES = new Set(["prod", "public", "unclassified"]);
 const DEFAULT_ENGINE = "nuclei";
 const DEFAULT_PROFILE = "safe";
 
@@ -44,41 +44,6 @@ type Props = {
   /** Lets this run's profile configuration be tweaked before starting. */
   editableProfile?: boolean;
 };
-
-function DiscoveryRunSummary({
-  result,
-  running,
-}: {
-  result: Discover | null;
-  running: boolean;
-}) {
-  if (running && !result) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-border p-6 text-sm text-muted-foreground">
-        Probing selected hosts…
-      </div>
-    );
-  }
-  if (!result) return null;
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-md border border-border p-3">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span className="font-medium">
-          {result.hosts.length} host{result.hosts.length === 1 ? "" : "s"} probed
-        </span>
-        <span className="text-muted-foreground">
-          {result.newCount} new observation{result.newCount === 1 ? "" : "s"}
-        </span>
-        {result.error && <span className="text-destructive">{result.error}</span>}
-      </div>
-      <AnsiHtml
-        as="pre"
-        text={result.log}
-        className="min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all rounded-md bg-muted/30 p-2 font-mono text-xs"
-      />
-    </div>
-  );
-}
 
 export function ScanDialog({
   open,
@@ -134,8 +99,8 @@ export function ScanDialog({
           list.some((engine) => engine.name === current)
             ? current
             : (list.find((engine) => engine.name === DEFAULT_ENGINE)?.name ??
-                list[0]?.name ??
-                DEFAULT_ENGINE),
+              list[0]?.name ??
+              DEFAULT_ENGINE),
         );
       })
       .catch((cause) => !cancelled && setError((cause as Error).message));
@@ -155,8 +120,8 @@ export function ScanDialog({
           list.some((profile) => profile.name === current)
             ? current
             : (list.find((profile) => profile.name === DEFAULT_PROFILE)?.name ??
-                list[0]?.name ??
-                DEFAULT_PROFILE),
+              list[0]?.name ??
+              DEFAULT_PROFILE),
         );
       })
       .catch((cause) => !cancelled && setError((cause as Error).message));
@@ -201,16 +166,11 @@ export function ScanDialog({
       (r) => CONFIRM_CLASSES.has(r.class) || !saved.has(r.host),
     );
   }, [targets, savedHosts]);
-  const unsaved = useMemo(() => {
-    const saved = new Set(savedHosts);
-    return targets.filter((target) => !saved.has(target.host));
-  }, [savedHosts, targets]);
   // The server refuses an intrusive scan of these hosts without confirmation,
   // and only an intrusive one. Both halves of that rule are the server's: the
   // profile reports the engine's own verdict, so a safe profile does not ask.
   const needsConfirm =
     !discoveryOnly && risky.length > 0 && selectedProfile?.intrusive === true;
-  const needsSavedTargets = discoveryOnly && unsaved.length > 0;
 
   // Authorisation covers exactly the hosts named in the banner — changing the scope
   // revokes it rather than carrying consent to another run.
@@ -230,7 +190,7 @@ export function ScanDialog({
       if (discoveryOnly) {
         setDiscovering(true);
         setDiscoverResult(
-          await runDiscovery({ hosts: targets.map((r) => r.host).join(",") }),
+          await runDiscovery({ host: targets.map((r) => r.host) }),
         );
         return;
       }
@@ -256,7 +216,7 @@ export function ScanDialog({
       // running status arrives over the event stream the parent already
       // subscribes to, so there is nothing to hand to onStatus here.
       await startScan({
-        selector: { hosts: targets.map((r) => r.host).join(",") },
+        target: { host: targets.map((r) => r.host) },
         engine: engineName,
         profile: profileName,
         confirm: confirmed,
@@ -422,10 +382,7 @@ export function ScanDialog({
               onClick={() => void start()}
               loading={starting}
               disabled={
-                starting ||
-                targets.length === 0 ||
-                needsSavedTargets ||
-                (needsConfirm && !confirmed)
+                starting || targets.length === 0 || (needsConfirm && !confirmed)
               }
             >
               {discoveryOnly ? "Rescan" : "Scan"} {targets.length} host
@@ -449,13 +406,6 @@ export function ScanDialog({
               {risky.map((r) => r.host).join(", ")}). I authorise this scan.
             </span>
           </label>
-        )}
-
-        {needsSavedTargets && !running && (
-          <p className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
-            Save {unsaved.length} new target{unsaved.length === 1 ? "" : "s"}{" "}
-            before rescanning discovery observations.
-          </p>
         )}
 
         {error && (
@@ -498,17 +448,16 @@ export function ScanDialog({
         {!hasRun && discoveryOnly && (
           <p className="px-3 pb-2 text-sm text-muted-foreground">
             Re-probes the selected hosts and refreshes their machine-owned
-            observation fields — ports, HTTP status, response time, known
-            paths, login methods, network, TLS, and technology — without
-            creating scan findings.
+            observation fields — ports, HTTP status, response time, known paths,
+            login methods, network, TLS, and technology — without creating scan
+            findings.
           </p>
         )}
 
         {!hasRun && !discoveryOnly && selectedEngine && (
           <p className="px-3 pb-2 text-sm text-muted-foreground">
             Runs {selectedEngine.title} with the "{profileName}" profile over
-            the chosen hosts and updates each host's machine-owned scan
-            fields.{" "}
+            the chosen hosts and updates each host's machine-owned scan fields.{" "}
             {selectedEngine.description}
           </p>
         )}

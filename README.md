@@ -33,7 +33,7 @@ nuclei/
     workflows/              flanksource-baseline.yaml
   hack/                     discovery and report helpers
   app/                      Vite + clicky-ui inventory admin UI
-  .claude/skills/           nuclei-targets inventory maintenance skill
+  .agents/skills/           reconctl inventory maintenance skill
   results/                  scan output (gitignored)
   .gen/                     rendered target lists (gitignored)
 ```
@@ -67,8 +67,10 @@ task app:dev                      # admin UI: tag/bulk-edit targets, see observe
 
 - **Inventory** — filter and bulk-edit targets, or open `/inventory/:host` for a
   preview-first detail page. Edit mode is driven by `target.schema.json`; host identity
-  and machine-owned observation fields remain read-only. **Discover subdomains** runs
-  NS/MX resolution, subfinder, Naabu, and httpx and lets you classify unknown hosts before adding them.
+  and machine-owned observation fields remain read-only. **Discover targets** runs
+  NS/MX resolution, subfinder, Naabu, and httpx. Newly observed identities are added as
+  `unclassified` with the `safe` profile so they are visible immediately without losing
+  any curated fields on targets that already exist.
 - **Scans** — browse every `results/*.jsonl` run (severity breakdown per run) and drill
   into its findings, grouped by result type with the affected domains on each group
   header (regroup by severity/domain/none); expand a finding for remediation, references,
@@ -84,7 +86,7 @@ See [app/README.md](app/README.md).
 Every target carries free-form `tags` used for filtering and bulk selection. Its single
 JSON document contains both curated definition fields and machine-owned `observed`,
 `network`, `http`, `tech`, `tls`, and `scan` sections. Discovery updates successful
-observations for known targets while leaving unknown discoveries unclassified; clean
+observations and creates conservative `unclassified` records for new targets; clean
 scans update `last_scan` and `last_findings` in the same document.
 
 ## Target classes
@@ -95,6 +97,7 @@ scans update `last_scan` and `last_findings` in the same document.
 | `prod`        | Production app + control-plane endpoints                   | no (opt-in)     |
 | `non-prod`    | Beta/demo/sandbox                                          | yes             |
 | `internal`    | Private GKE endpoints — reachable only over Tailscale      | no              |
+| `unclassified`| Newly discovered identity awaiting review                  | safe only       |
 | `deactivated` | Retired but kept for subdomain-takeover coverage           | takeover only   |
 
 `inventory/targets/*.json` is the single source of truth. `task targets:render` validates
@@ -139,9 +142,26 @@ Every scan sends `User-Agent: flanksource-security-scan/nuclei` and
 
 ## Maintaining the target list
 
-Run `task targets:discover` (or use the **nuclei-targets** skill). It
-unions static scrape of `../specs`, NS/MX targets and `subfinder` results over the DNS
-zones, and `kubectl get ingress` across reachable contexts — scans in-domain candidates
-with Naabu, probes open HTTP endpoints and known login paths with httpx, updates typed
-observations for known targets, and reports unknown drift. Unknown hosts
-are never added automatically; classification remains a human decision.
+The generated CLI exposes execution and history on the same resources:
+
+```bash
+reconctl discover --domain flanksource.com --profile default
+reconctl discover --host api.flanksource.com --cidr 192.0.2.0/24
+reconctl discover --selector 'env=prod,tier in (frontend,api)'
+reconctl discover list
+
+reconctl scan --host api.flanksource.com --profile safe
+reconctl scan --selector 'env=prod' --profile safe
+reconctl scan list
+```
+
+Explicit `--host`, `--domain`, and `--cidr` values can be combined, but cannot be
+combined with `--selector` or the other inventory filters. A scan always completes
+discovery first and stops if discovery fails. With no input, discovery uses the
+configured zones and scan targets the whole inventory.
+
+The API mirrors those commands: `POST /api/v1/discover` and `POST /api/v1/scan`
+execute, while `GET /api/v1/discover` and `GET /api/v1/scan` list history. Request
+bodies use the flag names, for example
+`{"domain":["flanksource.com"],"profile":"default"}` or
+`{"selector":"env=prod","profile":"safe"}`.

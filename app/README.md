@@ -47,11 +47,11 @@ All writes are per-host and atomic. A bulk save calls the same target endpoint o
 | `GET`             | `/api/inventory/schema/target` | Target JSON Schema used by the editor                           |
 | `GET`             | `/api/inventory/:host`         | One validated target document                                   |
 | `PUT`             | `/api/inventory/:host`         | Replace editable fields while preserving machine fields         |
-| `GET`             | `/api/discover`                | Cached classified/unclassified discovery view                   |
-| `POST`            | `/api/discover`                | Run discovery, update known observations, and refresh the cache |
-| `GET`             | `/api/scans`                   | List scan result files                                          |
-| `GET`             | `/api/scans/:file`             | Read findings from one result                                   |
-| `GET/POST/DELETE` | `/api/scan`                    | Read, start, or cancel the active scan                          |
+| `GET/POST`        | `/api/v1/discover`             | List discovery history or run domain/host/CIDR discovery        |
+| `GET/POST`        | `/api/v1/scan`                 | List scan history or discover then start a scan                  |
+| `GET`             | `/api/v1/finding`              | Query findings across persisted scans                           |
+| `GET`             | `/api/scan/current`            | Read the current or most recent scan status                      |
+| `POST`            | `/api/scan/cancel`             | Cancel the active scan                                           |
 | `GET`             | `/api/scan/events`             | Stream scan status and stdout/stderr over SSE                   |
 | `GET`             | `/api/profiles`                | List validated scanner profiles                                 |
 | `PUT`             | `/api/profiles/:engine/:name`  | Update one validated profile                                    |
@@ -60,9 +60,9 @@ The static `vite build` output has no standalone backend. Serve it with `vite pr
 
 ## Discovery and scans
 
-Discovery unions the static specification scrape, NS and MX targets from each configured zone, passive subdomain enumeration, and optional cluster enumeration. It runs the bounded `config/discovery.naabu.yaml` port profile, feeds discovered host/port endpoints to `config/discovery.httpx.yaml`, and checks the safe paths in `config/discovery-paths.txt`. Successful observations replace the typed machine snapshot for known targets, including open ports, HTTP status and response time, known paths, and authentication methods derived from `WWW-Authenticate` challenges and login/OAuth/OIDC routes. Failed probes record the attempt and error without erasing the last successful snapshot. Unknown hosts remain in the discovery cache until a user classifies and saves them.
+Discovery accepts domains, hosts, CIDRs, or a Kubernetes label selector over inventory tags. It runs each participating engine with the requested discovery profile, probes the union of explicit and enumerated identities, and stores new identities as `unclassified` with `profiles: [safe]`. Successful observations replace the typed machine snapshot while preserving curated fields. Failed probes record the attempt and error without erasing the last successful snapshot.
 
-The scan dialog runs the same combined discovery runner over selected inventory targets. This targeted rescan is available from bulk selection and the target detail view; it refreshes machine-owned observations without creating a Nuclei findings result.
+The scan dialog calls the root scan resource over selected inventory targets. The server completes discovery first, refreshes machine-owned observations, and only then starts Nuclei; a discovery failure stops the scan.
 
 The target detail scan can use any tracked Nuclei profile as its defaults. Its effective configuration is validated against the same profile schema, written under `.gen/` only while Nuclei is running, and removed when the process exits. DAST settings retain the production/public authorization gate even when they were enabled as a run-only tweak.
 

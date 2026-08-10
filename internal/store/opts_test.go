@@ -75,10 +75,10 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 
 		for _, document := range []api.TargetDocument{
 			target("a.example.test", api.ClassProd,
-				tags("http", "edge"), profiles("safe"), ports(443),
+				tags("http", "edge", "env=prod", "tier=frontend"), profiles("safe"), ports(443),
 				http(200, "https://a.example.test"), seen("2026-08-01T00:00:00Z")),
 			target("b.example.test", api.ClassNonProd,
-				tags("http"), profiles("safe", "full"), openPorts(443, 8443),
+				tags("http", "env=staging", "tier=api"), profiles("safe", "full"), openPorts(443, 8443),
 				http(403, "https://b.example.test"), seen("2026-01-01T00:00:00Z")),
 			target("c.example.test", api.ClassNonProd,
 				tags("internal"), ports(22)),
@@ -118,6 +118,18 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 			To(Equal([]string{"a.example.test", "b.example.test"}))
 		Expect(hosts(store.TargetOpts{Tags: []string{"edge", "internal"}})).
 			To(Equal([]string{"a.example.test", "c.example.test"}))
+	})
+
+	It("filters tags with Kubernetes selector semantics", func() {
+		Expect(hosts(store.TargetOpts{Selector: "http,env=prod,tier in (frontend,api)"})).
+			To(Equal([]string{"a.example.test"}))
+		Expect(hosts(store.TargetOpts{Selector: "!edge,env,env!=prod"})).
+			To(Equal([]string{"b.example.test"}))
+	})
+
+	It("rejects an invalid Kubernetes selector", func() {
+		_, err := st.ListTargets(ctx, store.TargetOpts{Selector: "env in ("})
+		Expect(err).To(MatchError(ContainSubstring("selector")))
 	})
 
 	It("filters by assigned profile", func() {
@@ -212,5 +224,33 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 			Expect(store.Hosts(risky)).To(Equal([]string{"a.example.test"}),
 				"only the prod host is risky; non-prod is not")
 		})
+	})
+})
+
+var _ = Describe("stored target selectors", func() {
+	It("rejects a stored selector with the wrong field type", func() {
+		_, err := store.TargetOptsFrom(map[string]any{"ports": "not-a-list"})
+		Expect(err).To(MatchError(ContainSubstring("decode stored target selector")))
+	})
+})
+
+var _ = Describe("Kubernetes tag selectors", func() {
+	It("matches bare and key-value tags with label-selector semantics", func() {
+		matches, err := (store.TargetOpts{Selector: "http,env=prod,tier in (frontend,api)"}).
+			MatchesTags([]string{"http", "env=prod", "tier=frontend"})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(matches).To(BeTrue())
+	})
+
+	It("supports absence, existence and inequality requirements", func() {
+		matches, err := (store.TargetOpts{Selector: "!edge,env,env!=prod"}).
+			MatchesTags([]string{"env=staging", "tier=api"})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(matches).To(BeTrue())
+	})
+
+	It("rejects conflicting values for one label key", func() {
+		_, err := (store.TargetOpts{Selector: "env"}).MatchesTags([]string{"env=prod", "env=staging"})
+		Expect(err).To(MatchError(`conflicting values for tag "env"`))
 	})
 })

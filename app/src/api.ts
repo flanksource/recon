@@ -42,16 +42,24 @@ async function request<T>(
     try {
       body = JSON.parse(text);
     } catch {
-      throw new Error(`${method} ${path} returned invalid JSON: ${text.slice(0, 200)}`);
+      throw new Error(
+        `${method} ${path} returned invalid JSON: ${text.slice(0, 200)}`,
+      );
     }
   }
 
   const failure = body as ExecutorFailure | null;
   if (!res.ok) {
-    throw new Error(failure?.error ?? failure?.message ?? `${method} ${path} failed: ${res.status}`);
+    throw new Error(
+      failure?.error ??
+        failure?.message ??
+        `${method} ${path} failed: ${res.status}`,
+    );
   }
   if (failure && typeof failure === "object" && failure.success === false) {
-    throw new Error(failure.error ?? failure.message ?? `${method} ${path} failed`);
+    throw new Error(
+      failure.error ?? failure.message ?? `${method} ${path} failed`,
+    );
   }
   return body as T;
 }
@@ -60,7 +68,13 @@ function query(params: Record<string, unknown> | undefined): string {
   if (!params) return "";
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === "" || value === false) continue;
+    if (
+      value === undefined ||
+      value === null ||
+      value === "" ||
+      value === false
+    )
+      continue;
     search.set(key, Array.isArray(value) ? value.join(",") : String(value));
   }
   const encoded = search.toString();
@@ -93,7 +107,10 @@ type LookupFilter = {
 
 type LookupResponse = { filters?: Record<string, LookupFilter> };
 
-function lookupURL(entity: string, params: Record<string, string> = {}): string {
+function lookupURL(
+  entity: string,
+  params: Record<string, string> = {},
+): string {
   return `${API}/${entity}${query({ __lookup: "filters", ...params })}`;
 }
 
@@ -101,7 +118,9 @@ function optionValues(filter: LookupFilter): string[] {
   return Object.keys(filter.options ?? {});
 }
 
-export async function fetchFilters(entity: string): Promise<FilterVocabulary[]> {
+export async function fetchFilters(
+  entity: string,
+): Promise<FilterVocabulary[]> {
   const response = await request<LookupResponse>(lookupURL(entity));
   return Object.entries(response.filters ?? {}).map(([key, filter]) => ({
     key,
@@ -146,14 +165,23 @@ export function fetchTargetSchema(): Promise<Record<string, unknown>> {
 // A save replaces the curated fields wholesale; the machine-owned sections are
 // discovery's and are never sent. Always send every curated field: omitting one
 // clears it rather than leaving it alone.
-export function saveTarget(host: string, curated: CuratedTarget): Promise<Target> {
-  return request<Target>(`${API}/target`, json("PUT", { ...curated, id: host }));
+export function saveTarget(
+  host: string,
+  curated: CuratedTarget,
+): Promise<Target> {
+  return request<Target>(
+    `${API}/target`,
+    json("PUT", { ...curated, id: host }),
+  );
 }
 
 // Classifying a host a sweep found is a create, not an edit: an update refuses
 // a host that is not in the inventory, because a curated record it would have
 // to invent is exactly what nobody asked for.
-export function createTarget(host: string, curated: CuratedTarget): Promise<Target> {
+export function createTarget(
+  host: string,
+  curated: CuratedTarget,
+): Promise<Target> {
   return request<Target>(`${API}/target`, json("POST", { ...curated, host }));
 }
 
@@ -186,7 +214,9 @@ export function addZone(zone: string): Promise<Zone> {
 }
 
 export function deleteZone(zone: string): Promise<void> {
-  return request<void>(`${API}/zone/${encodeURIComponent(zone)}`, { method: "DELETE" });
+  return request<void>(`${API}/zone/${encodeURIComponent(zone)}`, {
+    method: "DELETE",
+  });
 }
 
 // ---------------------------------------------------------------- engines
@@ -219,7 +249,9 @@ export function saveProfile(profile: {
 }
 
 export function deleteProfile(id: string): Promise<void> {
-  return request<void>(`${API}/profile/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return request<void>(`${API}/profile/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // ---------------------------------------------------------------- scans
@@ -267,17 +299,19 @@ export const SCAN_EVENTS_URL = "/api/scan/events";
 // server refuses without it and names the hosts. `wait` is false so the call
 // returns as soon as the run starts.
 export function startScan(args: {
-  selector: TargetSelector;
+  target: RunTarget;
   engine: string;
   profile: string;
+  discoveryProfile?: string;
   confirm?: boolean;
 }): Promise<Scan> {
   return request<Scan>(
-    `${API}/target/scan`,
+    `${API}/scan`,
     json("POST", {
-      ...args.selector,
+      ...args.target,
       engine: args.engine,
       profile: args.profile,
+      "discovery-profile": args.discoveryProfile ?? "default",
       confirm: args.confirm ?? false,
       wait: false,
     }),
@@ -307,8 +341,15 @@ export async function fetchLatestDiscovery(): Promise<Discover | null> {
 
 // Runs a sweep. With no selector it enumerates from the configured zones;
 // with one it re-probes just those targets.
+export type RunTarget = {
+  selector?: string;
+  host?: string[];
+  domain?: string[];
+  cidr?: string[];
+};
+
 export function runDiscovery(
-  selector?: TargetSelector & { chain?: string },
+  target: RunTarget & { profile?: string } = {},
 ): Promise<Discover> {
-  return request<Discover>(`${API}/target/discover`, json("POST", selector ?? {}));
+  return request<Discover>(`${API}/discover`, json("POST", target));
 }

@@ -90,6 +90,17 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 			}
 		})
 
+		It("runs scan and discovery on their collection resources", func() {
+			paths, _ := spec["paths"].(map[string]any)
+			for _, resource := range []string{"scan", "discover"} {
+				methods, _ := paths["/api/v1/"+resource].(map[string]any)
+				Expect(methods).To(HaveKey("get"), resource+" history")
+				Expect(methods).To(HaveKey("post"), resource+" execution")
+			}
+			Expect(paths).ToNot(HaveKey("/api/v1/target/scan"))
+			Expect(paths).ToNot(HaveKey("/api/v1/target/discover"))
+		})
+
 		It("keeps the commands that administer the process off the API", func() {
 			// Publishing a CLI publishes every runnable command in the tree. These
 			// three are not resources: `migrate` altered the schema on an
@@ -241,7 +252,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 			// A class cannot be discovered from the data: a class nobody has
 			// used yet is still one you can classify a host as.
 			Expect(lookup(suite.URL+"/api/v1/target", "")["class"].values()).
-				To(Equal([]string{"deactivated", "internal", "non-prod", "prod", "public"}))
+				To(Equal([]string{"deactivated", "internal", "non-prod", "prod", "public", "unclassified"}))
 		})
 
 		It("offers an open vocabulary from the database", func() {

@@ -97,11 +97,13 @@ func SeverityCounts(findings []Finding) map[string]int {
 	return counts
 }
 
-// Discover is one discovery sweep. Unlike a scan it is not aimed at a selection:
-// it enumerates, and what it finds is the point.
+// Discover is one discovery sweep over configured zones, selected inventory, or
+// explicit hosts, domains, and CIDRs.
 type Discover struct {
-	ID    string `json:"id"`
-	Chain string `json:"chain"`
+	ID      string         `json:"id"`
+	Chain   string         `json:"chain"`
+	Profile string         `json:"profile"`
+	Input   map[string]any `json:"input"`
 
 	RanAt      string `json:"ranAt"`
 	DurationMs int    `json:"durationMs"`
@@ -109,11 +111,7 @@ type Discover struct {
 	Error      string `json:"error,omitempty"`
 	Log        string `json:"log,omitempty"`
 
-	// Hosts is what the sweep saw. Known is recomputed against the current
-	// inventory on every read rather than stored, because a host becomes known
-	// the moment someone adds it — the sweep's own record must not go stale.
-	Hosts   []DiscoveredHost `json:"hosts"`
-	Unknown int              `json:"unknown"`
+	Hosts []DiscoveredHost `json:"hosts"`
 }
 
 // DiscoveredHost is one host a sweep observed.
@@ -121,7 +119,6 @@ type DiscoveredHost struct {
 	Host    string   `json:"host"`
 	Engines []string `json:"engines"`
 	Live    bool     `json:"live"`
-	Known   bool     `json:"known"`
 }
 
 // Profile is a stored engine configuration.
