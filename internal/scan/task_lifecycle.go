@@ -2,21 +2,15 @@ package scan
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
 
+	clickyexec "github.com/flanksource/clicky/exec"
 	"github.com/flanksource/clicky/task"
 
 	"github.com/flanksource/recon/internal/api"
-	"github.com/flanksource/recon/internal/engines"
 )
-
-type managedScan struct {
-	*task.ManagedRun
-	controller *scanTaskController
-}
 
 type scanTaskController struct {
 	stop     func() error
@@ -44,26 +38,38 @@ func (c *scanTaskController) Control(_ context.Context, action task.ControlActio
 	return c.stop()
 }
 
-func startManagedScan(name, engine, profile string, stop func() error) *managedScan {
-	if stop == nil {
-		panic("scan task stop function is required")
-	}
-	controller := &scanTaskController{stop: stop}
-	managed := task.StartManagedRun(name,
-		task.WithKind("scan"),
-		task.WithLabels(map[string]string{"engine": engine, "profile": profile}),
-		task.WithController(controller),
-	)
-	controller.task.Store(managed.Task())
-	return &managedScan{ManagedRun: managed, controller: controller}
+type scanTaskDetails struct {
+	clickyexec.ExecTaskDetails
+	ScanID        string         `json:"scanId"`
+	Engine        string         `json:"engine"`
+	Profile       string         `json:"profile"`
+	Phase         api.Phase      `json:"phase"`
+	DurationMS    int64          `json:"durationMs"`
+	EndpointCount int            `json:"endpointCount"`
+	Findings      int            `json:"findings"`
+	Severities    map[string]int `json:"severities"`
+	Stats         *api.ScanStats `json:"stats,omitempty"`
 }
 
-func bindManagedScan(run *managedScan, invocation *engines.Invocation) {
-	if run == nil || invocation == nil {
-		panic("scan task and invocation are required")
+type scanTaskBinding struct {
+	Session  *session
+	Snapshot func() api.Scan
+}
+
+func bindScanTask(scanTask *task.Task, binding scanTaskBinding) {
+	if scanTask == nil || binding.Session == nil || binding.Snapshot == nil {
+		panic("scan task, session, and snapshot are required")
 	}
-	run.SetOutputProvider(invocation.OutputSnapshot)
-	run.SetDetailsProvider(func() any { return invocation.TaskDetails() })
+	scanTask.SetOutputProvider(binding.Session.OutputSnapshot)
+	scanTask.SetDetailsProvider(func() any {
+		scan := binding.Snapshot()
+		return scanTaskDetails{
+			ExecTaskDetails: binding.Session.TaskDetails(),
+			ScanID:          scan.ID, Engine: scan.Engine, Profile: scan.Profile, Phase: scan.Phase,
+			DurationMS: scan.DurationMS, EndpointCount: scan.EndpointCount,
+			Findings: scan.Findings, Severities: scan.Severities, Stats: scan.Stats,
+		}
+	})
 }
 
 func updateTaskProgress(t *task.Task, stats *api.ScanStats) {
@@ -86,31 +92,4 @@ func taskProgressValue(value float64) (int, bool) {
 		return 0, false
 	}
 	return int(math.Round(value)), true
-}
-
-func finishManagedScan(run *managedScan, phase api.Phase, problem string) {
-	if run == nil {
-		panic("scan task run is required")
-	}
-	run.controller.stopping.Store(true)
-
-	status := task.StatusSuccess
-	switch phase {
-	case api.PhaseDone:
-		if problem != "" {
-			status = task.StatusWarning
-		}
-	case api.PhaseFailed:
-		status = task.StatusFailed
-	case api.PhaseCancelled:
-		status = task.StatusCancelled
-	default:
-		panic("cannot finish scan task in phase " + phase)
-	}
-
-	var err error
-	if problem != "" {
-		err = errors.New(problem)
-	}
-	run.Finish(status, err)
 }

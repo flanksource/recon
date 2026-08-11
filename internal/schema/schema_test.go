@@ -76,6 +76,21 @@ var _ = Describe("target schema", func() {
 		Entry("an IPv6 address", "2001:db8::10"),
 	)
 
+	// Profiles are rows, not a closed vocabulary: an engine ships dozens and a
+	// user can create more. The schema constrains the shape of a name — the same
+	// rule the profile table's check constraint enforces — and leaves existence
+	// to the store, which is the only thing that can actually know.
+	DescribeTable("accepts any profile name the profile table could hold",
+		func(profile string) {
+			document := base()
+			document["profiles"] = []any{profile}
+			Expect(schema.ValidateTarget("t.json", document)).To(Succeed())
+		},
+		Entry("a curated profile", "k8s"),
+		Entry("an imported upstream profile", "subdomain-takeovers"),
+		Entry("a profile someone created", "our-internal-baseline"),
+	)
+
 	// The conditional rule is the one piece of the schema a naive Go validator
 	// gets wrong, and both directions are load-bearing: the UI relies on it to
 	// force a reason when deactivating and to clear it when reactivating.
@@ -121,8 +136,8 @@ var _ = Describe("target schema", func() {
 			func(d map[string]any) { d["class"] = "staging" }, "value must be one of"),
 		Entry("an empty profiles array",
 			func(d map[string]any) { d["profiles"] = []any{} }, "minItems"),
-		Entry("an unknown profile",
-			func(d map[string]any) { d["profiles"] = []any{"aggressive"} }, "value must be one of"),
+		Entry("a profile name the profile table could not hold",
+			func(d map[string]any) { d["profiles"] = []any{"Aggressive Scan"} }, "pattern"),
 		Entry("a duplicated profile",
 			func(d map[string]any) { d["profiles"] = []any{"safe", "safe"} }, "items at 0 and 1 are equal"),
 		Entry("an uppercase host",

@@ -1,14 +1,17 @@
-// Package nuclei wraps the ProjectDiscovery template scanner.
+// Package nuclei drives the ProjectDiscovery template scanner.
+//
+// Nuclei is linked in rather than spawned. That is what makes a profile
+// answerable before it runs: the same template loader the scan uses can be
+// asked which templates a configuration selects, without a subprocess and
+// without a target.
 package nuclei
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"math"
 	"strings"
 
-	"github.com/flanksource/recon/internal/api"
+	nucleiconfig "github.com/projectdiscovery/nuclei/v3/pkg/catalog/config"
+
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/engines/scan"
 )
@@ -16,9 +19,7 @@ import (
 // Engine is the nuclei scanner.
 type Engine struct{}
 
-// Compile-time proof that nuclei reports progress; most engines do not, which is
-// why Progress is a separate optional interface.
-var _ scan.Progress = Engine{}
+var _ scan.Engine = Engine{}
 
 func init() { scan.Register(Engine{}) }
 
@@ -30,13 +31,16 @@ var excludedTags = []string{"dos", "fuzz", "bruteforce", "intrusive"}
 // Spec describes nuclei.
 func (Engine) Spec() engines.Spec {
 	return engines.Spec{
-		Name:            "nuclei",
-		Binary:          "nuclei",
-		Title:           "Nuclei",
-		Description:     "Template-driven vulnerability scanner.",
-		DocsURL:         "https://github.com/projectdiscovery/nuclei",
-		Install:         engines.ProjectDiscovery("nuclei"),
-		Version:         ">=3.11.1",
+		Name:        "nuclei",
+		Title:       "Nuclei",
+		Description: "Template-driven vulnerability scanner.",
+		DocsURL:     "https://github.com/projectdiscovery/nuclei",
+
+		// Linked in, so there is no binary to provision and the version is
+		// whatever recon was compiled against rather than a constraint to
+		// resolve. What still has to be present is the template corpus.
+		InProcess:       true,
+		Version:         nucleiconfig.Version,
 		Sections:        catalog,
 		ValidateOptions: validateConfig,
 		Defaults: engines.DefaultProfile{
@@ -54,6 +58,138 @@ func (Engine) Spec() engines.Spec {
 				"max-host-error": 30,
 			},
 		},
+		Profiles: append([]engines.DefaultProfile{{
+			Name: "full",
+			Comment: "Intrusive assessment with DAST fuzzing and active payloads.\n" +
+				"Requires explicit authorisation for production, public and unclassified targets.",
+			Config: map[string]any{
+				"templates":           []any{"dast/"},
+				"severity":            []any{"info", "low", "medium", "high", "critical"},
+				"type":                []any{"dns", "ssl", "tcp", "http", "javascript"},
+				"dast":                true,
+				"fuzzing-type":        "replace",
+				"payload-concurrency": 25,
+				"rate-limit":          150,
+				"bulk-size":           25,
+				"concurrency":         25,
+				"timeout":             10,
+				"retries":             1,
+				"max-redirects":       5,
+			},
+		}}, allProfiles()...),
+	}
+}
+
+// allProfiles are every profile beyond `safe` and `full`: the focused ones
+// written here, then nuclei's own, imported from the templates release.
+func allProfiles() []engines.DefaultProfile {
+	return append(focusedProfiles(), communityProfiles...)
+}
+
+// safeLimits are the rate limits every non-intrusive profile inherits from
+// `safe`. A focused profile narrows which templates run; it is not licence to
+// hit a host harder.
+func safeLimits() map[string]any {
+	return map[string]any{
+		"rate-limit":     50,
+		"bulk-size":      25,
+		"concurrency":    25,
+		"timeout":        10,
+		"retries":        1,
+		"max-host-error": 30,
+	}
+}
+
+// focused builds a profile from safe's limits plus its own selection.
+func focused(name, comment string, selection map[string]any) engines.DefaultProfile {
+	config := safeLimits()
+	for key, value := range selection {
+		config[key] = value
+	}
+	return engines.DefaultProfile{Name: name, Comment: comment, Config: config}
+}
+
+// focusedProfiles are the narrow profiles.
+//
+// `safe` and `full` are the two ends of a spectrum with nothing in between: one
+// runs every non-intrusive template at every severity, the other sends attack
+// payloads. Faced with only those, someone scanning a static site behind a CDN
+// reaches for `full`. These name the common cases instead, so the answer to
+// "which templates apply to this host" is a choice rather than a guess.
+//
+// Each is anchored on tags the template corpus actually uses — the counts in
+// the comments are what they select against the release this was written for,
+// and the preview reports the real number for whatever is installed.
+func focusedProfiles() []engines.DefaultProfile {
+	return []engines.DefaultProfile{
+		focused("static",
+			"Static sites and anything behind a CDN: TLS, security headers, cookies,\n"+
+				"CORS, redirects, subdomain takeover and exposed buckets. No application\n"+
+				"logic is exercised, so there is nothing here a cache can break.",
+			map[string]any{
+				"tags": []any{
+					"headers", "cookie", "cors", "clickjacking", "redirect",
+					"ssl", "tls", "takeover", "cdn", "bucket", "s3",
+				},
+			}),
+
+		focused("dns",
+			"DNS records only: SPF, DMARC, DNSSEC, zone transfers and dangling\n"+
+				"records. Sends no HTTP at all, so it is safe against a host that\n"+
+				"resolves but should not be reachable.",
+			map[string]any{"type": []any{"dns"}}),
+
+		focused("java",
+			"Java stacks: Spring and Spring Boot, Tomcat, JBoss, Jetty, Struts,\n"+
+				"Log4j and deserialization. Actuator and console exposure included.",
+			map[string]any{
+				"tags": []any{
+					"java", "spring", "springboot", "tomcat", "jboss",
+					"jetty", "log4j", "deserialization", "struts",
+				},
+			}),
+
+		focused("go",
+			"Go services and the infrastructure they usually ship with: Prometheus,\n"+
+				"Grafana, Consul, Vault, etcd, Traefik and MinIO. Mostly exposed\n"+
+				"dashboards and unauthenticated metrics endpoints.",
+			map[string]any{
+				"tags": []any{
+					"go", "golang", "grafana", "prometheus", "consul",
+					"vault", "etcd", "traefik", "minio",
+				},
+			}),
+
+		focused("k8s",
+			"Kubernetes and what surrounds it: exposed API servers and kubelets,\n"+
+				"etcd, Argo CD, Rancher, Istio and open container registries.",
+			map[string]any{
+				"tags": []any{
+					"k8s", "kubernetes", "kubelet", "etcd", "helm",
+					"argocd", "docker", "registry", "rancher", "istio",
+				},
+			}),
+
+		focused("public",
+			"What matters most on an internet-facing host: known-exploited\n"+
+				"vulnerabilities, subdomain takeover, exposures and unauthenticated\n"+
+				"access, at critical and high severity only. The first scan to run on\n"+
+				"something newly exposed.",
+			map[string]any{
+				"tags":     []any{"kev", "takeover", "exposure", "unauth"},
+				"severity": []any{"critical", "high"},
+			}),
+
+		focused("app",
+			"Web applications: admin panels, login pages, default credentials,\n"+
+				"unauthenticated endpoints, exposed APIs and GraphQL. Broad, and the\n"+
+				"slowest of these — narrow it by severity for a large estate.",
+			map[string]any{
+				"tags": []any{
+					"panel", "login", "default-login", "unauth",
+					"exposure", "api", "graphql", "auth-bypass",
+				},
+			}),
 	}
 }
 
@@ -76,168 +212,23 @@ func (Engine) Risk(config map[string]any) engines.Risk {
 	return engines.Safe()
 }
 
-// Args builds the command line.
+// Command renders the `nuclei` invocation equivalent to a run.
 //
-// The template root, output paths and stats flags belong to the runner. The tag
-// excludes are appended last and unconditionally: a profile must not be able to
-// enable a denial-of-service template.
-func (Engine) Args(run engines.Run) []string {
+// Nothing executes this — the scan happens in-process. It is recorded on the
+// run and shown in the UI so a scan can be reproduced by hand and so "what did
+// this actually do" has an answer in a form people already read. It is
+// therefore documentation, and must be kept faithful to Options: a command that
+// no longer matches what ran is worse than no command at all.
+func (Engine) Command(run engines.Run) []string {
 	args := []string{
+		"nuclei",
 		"-list", run.In,
 		"-jsonl",
 		"-output", run.Out,
 		"-silent",
 		"-no-color",
 		"-disable-update-check",
-		"-stats",
-		"-stats-json",
-		"-stats-interval", "2",
 	}
 	args = append(args, engines.ConfigArgs(run.Config)...)
 	return append(args, "-exclude-tags", strings.Join(excludedTags, ","))
-}
-
-// finding mirrors the fields of nuclei's JSONL output that map onto the
-// normalised type. Everything else is preserved in Raw.
-type finding struct {
-	TemplateID  string   `json:"template-id"`
-	MatcherName string   `json:"matcher-name"`
-	Type        string   `json:"type"`
-	Host        string   `json:"host"`
-	MatchedAt   string   `json:"matched-at"`
-	URL         string   `json:"url"`
-	Timestamp   string   `json:"timestamp"`
-	Extracted   []string `json:"extracted-results"`
-	Curl        string   `json:"curl-command"`
-	Request     string   `json:"request"`
-	Response    string   `json:"response"`
-
-	Info struct {
-		Name        string   `json:"name"`
-		Severity    string   `json:"severity"`
-		Tags        []string `json:"tags"`
-		Reference   []string `json:"reference"`
-		Remediation string   `json:"remediation"`
-	} `json:"info"`
-}
-
-// Parse reads nuclei's JSONL output.
-func (Engine) Parse(r io.Reader, emit func(api.Finding) error) error {
-	return engines.ScanJSONLines(r, func(line []byte) error {
-		var decoded finding
-		if err := json.Unmarshal(line, &decoded); err != nil {
-			return fmt.Errorf("nuclei: %w", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(line, &raw); err != nil {
-			return fmt.Errorf("nuclei: %w", err)
-		}
-		// A base64 copy of the whole template, on every finding. Large, and
-		// nothing reads it.
-		delete(raw, "template-encoded")
-
-		// A finding with no locatable host cannot be attributed to a target.
-		// Fall back the way the previous implementation did rather than
-		// dropping it.
-		host := decoded.Host
-		if host == "" {
-			host = engines.HostOf(firstNonEmpty(decoded.MatchedAt, decoded.URL))
-		}
-		if host == "" {
-			return fmt.Errorf("nuclei: finding %q has no host, matched-at or url", decoded.TemplateID)
-		}
-
-		name := decoded.Info.Name
-		if name == "" {
-			name = decoded.TemplateID
-		}
-
-		return emit(api.Finding{
-			TemplateID:  decoded.TemplateID,
-			Name:        name,
-			Severity:    api.ParseSeverity(decoded.Info.Severity),
-			Host:        host,
-			MatchedAt:   firstNonEmpty(decoded.MatchedAt, decoded.URL, host),
-			MatcherName: decoded.MatcherName,
-			Type:        decoded.Type,
-			Tags:        orEmpty(decoded.Info.Tags),
-			Timestamp:   decoded.Timestamp,
-			Extracted:   decoded.Extracted,
-			Remediation: decoded.Info.Remediation,
-			Reference:   decoded.Info.Reference,
-			Curl:        decoded.Curl,
-			Request:     decoded.Request,
-			Response:    decoded.Response,
-			Raw:         raw,
-		})
-	})
-}
-
-// stats mirrors nuclei's -stats-json line. Every value arrives as a string,
-// including the numbers.
-type stats struct {
-	Requests  string `json:"requests"`
-	Total     string `json:"total"`
-	Percent   string `json:"percent"`
-	RPS       string `json:"rps"`
-	Matched   string `json:"matched"`
-	Errors    string `json:"errors"`
-	Hosts     string `json:"hosts"`
-	Templates string `json:"templates"`
-	Duration  string `json:"duration"`
-}
-
-// Progress recognises a -stats-json line.
-//
-// These are interleaved with ordinary log output on the same stream, so the
-// caller uses the second return value to decide whether the line was progress or
-// something to show the user.
-func (Engine) Progress(line string) (api.ScanStats, bool) {
-	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "{") {
-		return api.ScanStats{}, false
-	}
-
-	var decoded stats
-	if err := json.Unmarshal([]byte(line), &decoded); err != nil {
-		return api.ScanStats{}, false
-	}
-	// Findings are also JSON objects on this stream; requests/total are what
-	// distinguishes a stats line from one.
-	if decoded.Total == "" && decoded.Requests == "" {
-		return api.ScanStats{}, false
-	}
-
-	progress := api.ScanStats{
-		Requests:  engines.ParseFloat(decoded.Requests),
-		Total:     engines.ParseFloat(decoded.Total),
-		Percent:   engines.ParseFloat(decoded.Percent),
-		RPS:       engines.ParseFloat(decoded.RPS),
-		Matched:   engines.ParseFloat(decoded.Matched),
-		Errors:    engines.ParseFloat(decoded.Errors),
-		Hosts:     engines.ParseFloat(decoded.Hosts),
-		Templates: engines.ParseFloat(decoded.Templates),
-		Duration:  decoded.Duration,
-	}
-	if progress.Total <= 0 || progress.Percent < 0 || progress.Percent > 100 || math.IsNaN(progress.Percent) || math.IsInf(progress.Percent, 0) {
-		progress.Percent = 0
-	}
-	return progress, true
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func orEmpty(values []string) []string {
-	if values == nil {
-		return []string{}
-	}
-	return values
 }

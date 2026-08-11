@@ -24,10 +24,18 @@ type Runtimes struct {
 // profile stays what it is, and the effective configuration is recorded on the
 // run.
 type scanFlags struct {
-	Engine           string `flag:"engine" help:"Scan engine to run" default:"nuclei"`
-	Profile          string `flag:"profile" help:"Stored scan profile for that engine" default:"safe"`
-	DiscoveryProfile string `flag:"discovery-profile" help:"Stored profile used by every discovery engine before scanning" default:"default"`
-	Confirm          bool   `flag:"confirm" help:"Acknowledge an intrusive scan of production, public or unclassified hosts"`
+	Engine  string `flag:"engine" help:"Scan engine to run" default:"nuclei"`
+	Profile string `flag:"profile" help:"Stored scan profile for that engine" default:"safe"`
+	// Repeatable, and one per engine: pre-scan discovery runs several engines,
+	// so a bare name sets the default for all of them and `engine=name` picks a
+	// different profile for one.
+	DiscoveryProfiles []string `flag:"discovery-profile" help:"Discovery profile used before scanning: a name for every engine, or engine=name; repeatable"`
+	// The pre-scan sweep is part of the run, so what it does is choosable here
+	// too — otherwise a custom scan can only customise half of what it does.
+	DiscoveryEngines  []string `flag:"discovery-engine" help:"Discovery engine to sweep with before scanning; repeatable. Empty runs the ones the sweep needs"`
+	DiscoveryOverride string   `flag:"discovery-override" help:"Run-only discovery configuration as JSON keyed by engine, e.g. {\"naabu\":{\"top-ports\":\"full\"}}; not saved to the profile"`
+	Override          string   `flag:"override" help:"Run-only scan configuration as JSON, e.g. {\"rate-limit\":50}; not saved to the profile"`
+	Confirm           bool     `flag:"confirm" help:"Acknowledge an intrusive scan of production, public or unclassified hosts"`
 	// Wait is on by default so a CLI run reports what it found. Over HTTP the
 	// caller passes wait=false and watches /api/scan/events instead, because a
 	// scan can take longer than any sensible request timeout.
@@ -36,9 +44,17 @@ type scanFlags struct {
 
 func (scanFlags) ClickyActionFlags() {}
 
-// discoverFlags choose the shared profile name for every participating engine.
+// discoverFlags choose the profile each participating engine runs with: a bare
+// name applies to all of them, `engine=name` overrides one.
+// EngineProfiles rather than Profiles: runTarget already carries a --profiles
+// filter over the inventory, and the two are embedded side by side.
 type discoverFlags struct {
-	Profile string `flag:"profile" help:"Stored profile used by every discovery engine" default:"default"`
+	EngineProfiles []string `flag:"profile" help:"Stored discovery profile: a name for every engine, or engine=name; repeatable"`
+	// Engines rather than a chain name: the chain says what a sweep starts from,
+	// and this says which tools it drives on the way. Empty keeps the set the
+	// chain needs, which is what a sweep ran before either was choosable.
+	Engines  []string `flag:"engine" help:"Discovery engine to run; repeatable. Empty runs the ones the sweep needs"`
+	Override string   `flag:"override" help:"Run-only configuration as JSON keyed by engine, e.g. {\"naabu\":{\"top-ports\":\"full\"}}; not saved to the profile"`
 }
 
 func (discoverFlags) ClickyActionFlags() {}
@@ -71,7 +87,23 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		return api.Scan{}, err
 	}
 
-	discoveryOpts := discovery.Options{Profile: opts.DiscoveryProfile}
+	// Decoded before the sweep starts: a malformed override should cost nothing,
+	// and finding out after discovery has already probed the estate would mean
+	// paying for the traffic twice.
+	sweepOverrides, err := discoveryOverrides(opts.DiscoveryOverride)
+	if err != nil {
+		return api.Scan{}, err
+	}
+	scanConfig, err := scanOverrides(opts.Override)
+	if err != nil {
+		return api.Scan{}, err
+	}
+
+	discoveryOpts := discovery.Options{
+		Profiles:  opts.DiscoveryProfiles,
+		Engines:   opts.DiscoveryEngines,
+		Overrides: sweepOverrides,
+	}
 	scanSelector := target.Inventory
 	if target.explicit() {
 		discoveryOpts.Explicit = true
@@ -107,6 +139,7 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		Engine:    opts.Engine,
 		Profile:   opts.Profile,
 		Selector:  scanSelector,
+		Overrides: scanConfig,
 		Confirmed: opts.Confirm,
 	})
 	if err != nil || !opts.Wait {
@@ -114,7 +147,7 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 	}
 	// The scan supervises itself in a goroutine, so returning here would end the
 	// process and take the run with it, leaving the row stuck at "running".
-	return r.Runtimes.Scans.Wait(ctx)
+	return r.Runtimes.Scans.Wait(ctx, started.ID)
 }
 
 // discoverSelection re-probes everything the selector matches.
@@ -127,7 +160,15 @@ func (r *Registry) discoverSelection(ctx context.Context, opts discoverRunOpts) 
 	if err != nil {
 		return api.Discover{}, err
 	}
-	options := discovery.Options{Profile: opts.Profile}
+	overrides, err := discoveryOverrides(opts.Override)
+	if err != nil {
+		return api.Discover{}, err
+	}
+	options := discovery.Options{
+		Profiles:  opts.EngineProfiles,
+		Engines:   opts.Engines,
+		Overrides: overrides,
+	}
 	if target.explicit() {
 		options.Explicit = true
 		options.Hosts = target.Hosts

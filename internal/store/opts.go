@@ -23,7 +23,7 @@ import (
 type TargetOpts struct {
 	Selector string   `json:"selector,omitempty" flag:"selector" help:"Kubernetes label selector over target tags"`
 	Class    []string `json:"class,omitempty" flag:"class" help:"Only these classes (public, prod, non-prod, internal, unclassified, deactivated)"`
-	Tags     []string `json:"tags,omitempty" flag:"tags" help:"Only targets carrying any of these tags"`
+	Tags     []string `json:"tags,omitempty" flag:"tags" help:"Only targets carrying any of these tags; prefix ! to exclude"`
 	Profiles []string `json:"profiles,omitempty" flag:"profiles" help:"Only targets assigned any of these scan profiles"`
 	Hosts    []string `json:"hosts,omitempty" flag:"hosts" help:"Only these exact hosts"`
 	Ports    []int    `json:"ports,omitempty" flag:"ports" help:"Only targets with any of these ports, curated or discovered"`
@@ -141,9 +141,8 @@ func (o TargetOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 	if len(o.Class) > 0 {
 		db = db.Where("class = ANY(?)", pq.StringArray(o.Class))
 	}
-	// && is array overlap: any of these, matching how the filter chips read.
 	if len(o.Tags) > 0 {
-		db = db.Where("tags && ?", pq.StringArray(o.Tags))
+		db = tagPredicate(db, "tags", o.Tags)
 	}
 	if len(o.Profiles) > 0 {
 		db = db.Where("profiles && ?", pq.StringArray(o.Profiles))
@@ -213,6 +212,39 @@ func (o TargetOpts) MatchesTags(tags []string) (bool, error) {
 
 // stringArray is the pq wrapper every ANY(?) predicate needs.
 func stringArray(values []string) pq.StringArray { return pq.StringArray(values) }
+
+// tagPredicate narrows a text[] column by a set of tag patterns.
+//
+// A `!` prefix excludes, following collections.MatchItems — the same grammar the
+// in-memory filters use, so `--tag '!dos'` means one thing across the system.
+// Exclusion is applied to the whole array rather than per element: a row tagged
+// both `network` and `dos` is excluded by `!dos`, not kept because `network`
+// survived. With only exclusions, everything not excluded matches.
+//
+// Wildcards are deliberately not supported here. The array-overlap operator
+// cannot express them, and the filter controls only ever emit values that came
+// from the column's own vocabulary.
+func tagPredicate(db *gorm.DB, column string, patterns []string) *gorm.DB {
+	include, exclude := partitionTags(patterns)
+	if len(include) > 0 {
+		db = db.Where(column+" && ?", stringArray(include))
+	}
+	if len(exclude) > 0 {
+		db = db.Where("NOT ("+column+" && ?)", stringArray(exclude))
+	}
+	return db
+}
+
+func partitionTags(patterns []string) (include, exclude []string) {
+	for _, pattern := range patterns {
+		if after, found := strings.CutPrefix(pattern, "!"); found {
+			exclude = append(exclude, after)
+			continue
+		}
+		include = append(include, pattern)
+	}
+	return include, exclude
+}
 
 // Map renders the selector for storage on a scan row. Going through JSON rather
 // than reflection keeps it identical to what the API accepts, so a stored

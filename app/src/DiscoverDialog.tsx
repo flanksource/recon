@@ -6,6 +6,12 @@ import {
   type DataTableColumn,
 } from "@flanksource/clicky-ui";
 import { fetchLatestDiscovery, runDiscovery } from "./api";
+import {
+  DiscoveryProfiles,
+  describeSelection,
+  discoveryRunFields,
+  useDiscoveryProfiles,
+} from "./DiscoveryProfiles";
 import type { DiscoveredHost, Discover } from "./types";
 
 function relativeTime(iso: string | null): string {
@@ -77,7 +83,8 @@ export function DiscoverDialog({ open, onClose, onDiscovered }: Props) {
   const [domains, setDomains] = useState("");
   const [hostInput, setHostInput] = useState("");
   const [cidrs, setCIDRs] = useState("");
-  const [profile, setProfile] = useState("default");
+  const [editingProfiles, setEditingProfiles] = useState(false);
+  const profiles = useDiscoveryProfiles(open);
 
   const applyResult = useCallback((result: Discover) => {
     setHosts(result.hosts);
@@ -93,16 +100,18 @@ export function DiscoverDialog({ open, onClose, onDiscovered }: Props) {
           domain: values(domains),
           host: values(hostInput),
           cidr: values(cidrs),
-          profile,
+          profile: profiles.refs,
+          ...discoveryRunFields(profiles),
         }),
       );
+      setEditingProfiles(false);
       onDiscovered();
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
       setRunning(false);
     }
-  }, [applyResult, cidrs, domains, hostInput, onDiscovered, profile]);
+  }, [applyResult, cidrs, domains, hostInput, onDiscovered, profiles]);
 
   const loadLatest = useCallback(async () => {
     try {
@@ -161,25 +170,41 @@ export function DiscoverDialog({ open, onClose, onDiscovered }: Props) {
               className="h-8 rounded-md border border-input bg-background px-2 text-sm"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs">
-            Profile
-            <input
-              value={profile}
-              onChange={(event) => setProfile(event.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            />
-          </label>
+          <span className="flex flex-col gap-1 text-xs">
+            Profiles
+            <Button
+              size="sm"
+              variant="outline"
+              aria-expanded={editingProfiles}
+              disabled={running || !profiles.loaded}
+              onClick={() => setEditingProfiles((current) => !current)}
+            >
+              {editingProfiles ? "Done editing" : "Edit profiles"}
+            </Button>
+          </span>
         </div>
 
-        <div className="flex shrink-0 items-center gap-3 text-sm">
+        <div className="flex shrink-0 flex-wrap items-center gap-3 text-sm">
           <Button
             size="sm"
             onClick={() => void discover()}
             loading={running}
-            disabled={running || !profile.trim()}
+            disabled={running || !profiles.loaded}
           >
             Run discovery
           </Button>
+          <span className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+            {describeSelection(profiles).map(({ engine, name }) => (
+              <span key={engine} className="rounded bg-muted px-1.5 py-0.5">
+                {engine} · {name}
+              </span>
+            ))}
+            {profiles.edited && (
+              <span className="text-amber-600 dark:text-amber-400">
+                reconfigured for this sweep only
+              </span>
+            )}
+          </span>
           {running && (
             <span className="text-muted-foreground">
               Enumerating and probing targets…
@@ -196,10 +221,20 @@ export function DiscoverDialog({ open, onClose, onDiscovered }: Props) {
               No previous discovery. Empty input uses configured zones.
             </span>
           )}
-          {error && <span className="text-destructive">{error}</span>}
+          {(error ?? profiles.error) && (
+            <span className="text-destructive">{error ?? profiles.error}</span>
+          )}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border">
+        {editingProfiles && (
+          <DiscoveryProfiles state={profiles} disabled={running} />
+        )}
+
+        <div
+          className={`flex min-h-0 flex-col overflow-hidden rounded-md border border-border ${
+            editingProfiles ? "hidden" : "flex-1"
+          }`}
+        >
           <DataTable<DiscoveredHost>
             className="min-h-0 flex-1"
             data={hosts}

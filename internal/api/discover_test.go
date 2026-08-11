@@ -12,14 +12,15 @@ import (
 var _ = Describe("discovery API", func() {
 	It("always emits the log string consumed by the ANSI renderer", func() {
 		encoded, err := json.Marshal(api.Discover{
-			Input: map[string]any{},
-			Hosts: []api.DiscoveredHost{},
+			Profiles: map[string]string{},
+			Input:    map[string]any{},
+			Hosts:    []api.DiscoveredHost{},
 		})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(encoded).To(MatchJSON(`{
 			"id": "",
 			"chain": "",
-			"profile": "",
+			"profiles": {},
 			"input": {},
 			"ranAt": "",
 			"durationMs": 0,
@@ -27,5 +28,15 @@ var _ = Describe("discovery API", func() {
 			"log": "",
 			"hosts": []
 		}`))
+	})
+
+	It("reports the profile each engine ran with", func() {
+		encoded, err := json.Marshal(api.Discover{
+			Profiles: map[string]string{"naabu": "full-ports", "httpx": "default"},
+			Input:    map[string]any{},
+			Hosts:    []api.DiscoveredHost{},
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(encoded).To(ContainSubstring(`"profiles":{"httpx":"default","naabu":"full-ports"}`))
 	})
 })

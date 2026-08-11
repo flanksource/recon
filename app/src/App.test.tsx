@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -96,5 +96,71 @@ describe("App routes", () => {
     expect(await screen.findByText("run nuclei")).toBeInTheDocument();
     expect(screen.getByText(/25\/100 · 25%/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop run nuclei" })).toBeInTheDocument();
+  });
+
+  it("renders a deep-linked scan with findings, and its execution evidence behind a tab", async () => {
+    window.history.replaceState(null, "", "/scans/scan-1");
+    vi.stubGlobal("EventSource", undefined);
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/api/v1/tasks") {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (path === "/api/v1/finding?__lookup=filters") {
+        return new Response(JSON.stringify({ filters: {} }), { status: 200 });
+      }
+      if (path === "/api/v1/finding?scan=scan-1") {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (path === "/api/v1/scan/scan-1") {
+        return new Response(
+          JSON.stringify({
+            id: "scan-1",
+            name: "nuclei-safe-1",
+            engine: "nuclei",
+            engineVersion: "3.4.10",
+            profile: "safe",
+            selector: { hosts: ["api.example.test"] },
+            selectorLabel: "host api.example.test",
+            endpointCount: 3,
+            phase: "done",
+            startedAt: "2026-08-10T12:00:00",
+            finishedAt: "2026-08-10T12:00:02",
+            durationMs: 2500,
+            command: ["/opt/recon/bin/nuclei", "-target", "api.example.test", "-stats"],
+            exitCode: 0,
+            findings: 0,
+            severities: { critical: 0, high: 0, medium: 0, low: 0, info: 0, unknown: 0 },
+            stats: { requests: 40, total: 60, templates: 18, matched: 0, errors: 2, rps: 12 },
+            hosts: [],
+            outputCaptured: false,
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "nuclei-safe-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back to scans" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Scans" })).toHaveAttribute("href", "/scans");
+    expect(screen.getByText("No findings in this scan.")).toBeInTheDocument();
+
+    // The run's own evidence lives on the Execution tab so the findings table
+    // owns the height; it is one click away, not gone.
+    fireEvent.click(screen.getByRole("tab", { name: "Execution" }));
+    expect(await screen.findByText("templates")).toBeInTheDocument();
+    expect(screen.getByText("templates").parentElement).toHaveTextContent("18");
+    expect(screen.getByText("errors").parentElement).toHaveTextContent("2");
   });
 });

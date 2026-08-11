@@ -65,6 +65,10 @@ export const nucleiProfileSections: ProfileSchemaSection[] = [
         "Require signed templates",
         "Disable unsigned templates and templates with mismatched signatures.",
       ),
+      var: stringList(
+        "Template variables",
+        "Values templates read, in key=value form. Several community profiles require one, such as region=us-east-1. Do not store credentials here.",
+      ),
     },
   },
   {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -146,6 +147,9 @@ func (s *Store) UpdateCurated(ctx context.Context, host string, curated api.Cura
 		if err := validate(document); err != nil {
 			return err
 		}
+		if err := validateProfiles(tx, host, document.Profiles); err != nil {
+			return err
+		}
 
 		if err := tx.Model(&models.Target{}).Where("host = ?", host).Updates(map[string]any{
 			"class":      row.Class,
@@ -220,6 +224,48 @@ func validate(document api.TargetDocument) error {
 		return fmt.Errorf("encode target %s: %w", document.Host, err)
 	}
 	return schema.ValidateTargetJSON(document.Host+".json", encoded)
+}
+
+// validateProfiles refuses a target that opts into a profile nobody defined.
+//
+// The schema constrains the shape of a name but cannot know which names exist:
+// engines ship dozens of profiles and users add their own, so the closed enum
+// this replaces was wrong the moment anyone created one. The table is the only
+// thing that knows, and a typo here means a host is quietly never scanned.
+//
+// Only the curated edit path checks this. An observation merge or a discovered
+// host must never be refused because of a curation problem — a sweep recording
+// what it saw is not the moment to argue about which profile should run.
+func validateProfiles(db *gorm.DB, host string, profiles []string) error {
+	if len(profiles) == 0 {
+		return nil
+	}
+
+	var known []string
+	if err := db.Model(&models.EngineProfile{}).
+		Where("kind = ?", api.KindScan).
+		Distinct().Pluck("name", &known).Error; err != nil {
+		return fmt.Errorf("read scan profiles: %w", err)
+	}
+
+	available := map[string]bool{}
+	for _, name := range known {
+		available[name] = true
+	}
+
+	var unknown []string
+	for _, profile := range profiles {
+		if !available[profile] {
+			unknown = append(unknown, profile)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	sort.Strings(known)
+	return fmt.Errorf("%s: unknown scan profile %s (value must be one of: %s)",
+		host, strings.Join(unknown, ", "), strings.Join(known, ", "))
 }
 
 // ---------------------------------------------------------------------- zones

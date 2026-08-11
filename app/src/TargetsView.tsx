@@ -3,9 +3,9 @@ import { Button, DataTable } from "@flanksource/clicky-ui";
 import { columns } from "./columns";
 import { BulkEditBar, type BulkEdit } from "./BulkEditBar";
 import { DiscoverDialog } from "./DiscoverDialog";
+import { PingDialog } from "./PingDialog";
 import { ScanDialog } from "./ScanDialog";
 import { selectionQuery, useEntityFilters } from "./filters";
-import { boundedScanPercent } from "./scanProgress";
 import { useScanStatus } from "./useScanStatus";
 import { fetchTargets, saveTargets } from "./api";
 import {
@@ -62,6 +62,7 @@ export function InventoryView({
   const [busy, setBusy] = useState(false);
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  const [pingOpen, setPingOpen] = useState(false);
 
   const { filters, selection, error: filterError } = useEntityFilters("target");
 
@@ -179,11 +180,11 @@ export function InventoryView({
   const scannedCount = tableRows.filter((r) => r.last_scan).length;
   const savedHosts = useMemo(() => served.map((r) => r.host), [served]);
 
-  const scanRunning = scan?.phase === "running";
-  const scanLabel = scanRunning
-    ? `Scanning ${boundedScanPercent(scan?.stats?.percent)}%`
-    : selectedIds.length
-      ? `Scan ${selectedIds.length} selected`
+  const scanActive = scan?.phase === "queued" || scan?.phase === "running";
+  const scanLabel = selectedIds.length
+    ? `${scanActive ? "Queue" : "Scan"} ${selectedIds.length} selected`
+    : scanActive
+      ? "Queue scan"
       : "Scan now";
 
   return (
@@ -214,10 +215,17 @@ export function InventoryView({
           Discover targets
         </Button>
         <Button
-          variant={scanRunning ? "default" : "outline"}
+          variant="outline"
+          size="sm"
+          onClick={() => setPingOpen(true)}
+          disabled={busy}
+        >
+          Ping hosts
+        </Button>
+        <Button
+          variant={scanActive ? "default" : "outline"}
           size="sm"
           onClick={() => setScanOpen(true)}
-          loading={scanRunning}
         >
           {scanLabel}
         </Button>
@@ -243,6 +251,14 @@ export function InventoryView({
         open={discoverOpen}
         onClose={() => setDiscoverOpen(false)}
         onDiscovered={() => void load()}
+      />
+
+      <PingDialog
+        open={pingOpen}
+        onClose={() => setPingOpen(false)}
+        rows={tableRows}
+        selectedHosts={selectedIds}
+        onProbed={() => void load()}
       />
 
       {scanOpen && (

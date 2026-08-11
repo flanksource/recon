@@ -1,18 +1,18 @@
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Phase is where a run has got to. The vocabulary is the UI's, not clicky's:
 // the task manager supervises the process, but what the Scans tab renders comes
 // from here.
 type Phase string
 
-// The vocabulary is the one the browser and the schema already use — "idle"
-// rather than "queued", "done" rather than "completed". It is not clicky's task
-// vocabulary and must not drift into it: the frontend switches on these strings
-// and the scans table has a check constraint listing them.
 const (
 	PhaseIdle      Phase = "idle"
+	PhaseQueued    Phase = "queued"
 	PhaseRunning   Phase = "running"
 	PhaseDone      Phase = "done"
 	PhaseFailed    Phase = "failed"
@@ -21,7 +21,7 @@ const (
 
 // Phases lists every phase, in the order a run moves through them.
 func Phases() []Phase {
-	return []Phase{PhaseIdle, PhaseRunning, PhaseDone, PhaseFailed, PhaseCancelled}
+	return []Phase{PhaseIdle, PhaseQueued, PhaseRunning, PhaseDone, PhaseFailed, PhaseCancelled}
 }
 
 // Terminal reports whether a run has stopped.
@@ -49,6 +49,7 @@ type Scan struct {
 	Phase      Phase  `json:"phase"`
 	StartedAt  string `json:"startedAt"`
 	FinishedAt string `json:"finishedAt,omitempty"`
+	DurationMS int64  `json:"durationMs"`
 
 	Command  []string `json:"command,omitempty"`
 	ExitCode *int     `json:"exitCode,omitempty"`
@@ -59,6 +60,12 @@ type Scan struct {
 	Stats      *ScanStats     `json:"stats,omitempty"`
 	Hosts      []string       `json:"hosts"`
 	Result     string         `json:"resultPath,omitempty"`
+
+	OutputCaptured  bool   `json:"outputCaptured,omitempty"`
+	Stdout          string `json:"stdout,omitempty"`
+	Stderr          string `json:"stderr,omitempty"`
+	StdoutTruncated bool   `json:"stdoutTruncated,omitempty"`
+	StderrTruncated bool   `json:"stderrTruncated,omitempty"`
 }
 
 // MarshalJSON emits empty collections rather than null.
@@ -100,10 +107,13 @@ func SeverityCounts(findings []Finding) map[string]int {
 // Discover is one discovery sweep over configured zones, selected inventory, or
 // explicit hosts, domains, and CIDRs.
 type Discover struct {
-	ID      string         `json:"id"`
-	Chain   string         `json:"chain"`
-	Profile string         `json:"profile"`
-	Input   map[string]any `json:"input"`
+	ID    string `json:"id"`
+	Chain string `json:"chain"`
+
+	// Profiles names the profile each engine ran with, keyed by engine.
+	Profiles map[string]string `json:"profiles"`
+
+	Input map[string]any `json:"input"`
 
 	RanAt      string `json:"ranAt"`
 	DurationMs int    `json:"durationMs"`
@@ -112,6 +122,44 @@ type Discover struct {
 	Log        string `json:"log"`
 
 	Hosts []DiscoveredHost `json:"hosts"`
+}
+
+// ProbeResult is what a liveness check saw for one host.
+type ProbeResult struct {
+	Host           string `json:"host"`
+	URL            string `json:"url,omitempty"`
+	Up             bool   `json:"up"`
+	StatusCode     int    `json:"statusCode,omitempty"`
+	ResponseTimeMs int64  `json:"responseTimeMs"`
+	IP             string `json:"ip,omitempty"`
+	ContentType    string `json:"contentType,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// ProbeRun is one pass of liveness checks over selected inventory targets.
+//
+// There is no probes table behind this: a probe writes what it saw onto the
+// targets themselves, and the run is the response rather than a record. What
+// happened to a host is answered by that host's observed state, which is where
+// anyone would look for it.
+type ProbeRun struct {
+	RanAt      string `json:"ranAt"`
+	DurationMs int    `json:"durationMs"`
+
+	// Live counts the hosts that answered, and Updated the ones whose inventory
+	// record was rewritten — they differ when a host is probed but not stored.
+	Live    int `json:"live"`
+	Updated int `json:"updated"`
+
+	Results []ProbeResult `json:"results"`
+}
+
+// GetID identifies a run by when it started.
+func (p ProbeRun) GetID() string { return p.RanAt }
+
+// GetName summarises what the run found.
+func (p ProbeRun) GetName() string {
+	return fmt.Sprintf("%d of %d host(s) answered", p.Live, len(p.Results))
 }
 
 // DiscoveredHost is one host a sweep observed.

@@ -7,16 +7,20 @@ import type { ScanStatus } from "./types";
 export function useScanStatus(onFinish?: (status: ScanStatus) => void) {
   const [status, setStatus] = useState<ScanStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const wasRunning = useRef(false);
+  const wasActive = useRef(false);
   const eventVersion = useRef(0);
   const finish = useRef(onFinish);
-  finish.current = onFinish;
+
+  useEffect(() => {
+    finish.current = onFinish;
+  }, [onFinish]);
 
   const applyStatus = useCallback((next: ScanStatus) => {
     setStatus(next);
     setError(null);
-    if (wasRunning.current && next.phase !== "running") finish.current?.(next);
-    wasRunning.current = next.phase === "running";
+    const active = next.phase === "queued" || next.phase === "running";
+    if (wasActive.current && !active) finish.current?.(next);
+    wasActive.current = active;
   }, []);
 
   const refresh = useCallback(async () => {

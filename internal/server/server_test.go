@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/flanksource/commons-db/dbtest"
@@ -28,6 +29,14 @@ func TestServer(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "server")
 }
+
+// commandTree builds the CLI once per test binary.
+//
+// Building it is what registers the entities, and they register into a registry
+// that belongs to the process. `reconctl serve` builds the tree once; a suite
+// that builds it per spec would list every entity as many times as it built,
+// and would be testing an arrangement that never exists in production.
+var commandTree = sync.OnceValue(cli.New)
 
 var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 	var (
@@ -49,7 +58,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 
 		// Building the command tree is what registers the entities, so the
 		// server under test is wired exactly as `reconctl serve` wires it.
-		root := cli.New()
+		root := commandTree()
 		// The UI is wired as `serve` wires it: with the SPA claiming "/", an
 		// unmatched API path could otherwise fall through to index.html, and a
 		// suite that left it out would not see that.
@@ -99,6 +108,31 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 			}
 			Expect(paths).ToNot(HaveKey("/api/v1/target/scan"))
 			Expect(paths).ToNot(HaveKey("/api/v1/target/discover"))
+		})
+
+		It("offers a custom run every choice the CLI takes", func() {
+			// The dialog builds its request from these, so a choice the action
+			// accepts but the spec omits is a control the UI cannot offer.
+			declared := func(path string) map[string]bool {
+				named := map[string]bool{}
+				for _, parameter := range parameters(spec, path, "post") {
+					named[parameter] = true
+				}
+				return named
+			}
+
+			scan := declared("/api/v1/scan")
+			for _, choice := range []string{
+				"engine", "profile", "override",
+				"discovery-engine", "discovery-profile", "discovery-override",
+			} {
+				Expect(scan).To(HaveKey(choice), "scan cannot be customised by %s", choice)
+			}
+
+			discover := declared("/api/v1/discover")
+			for _, choice := range []string{"engine", "profile", "override"} {
+				Expect(discover).To(HaveKey(choice), "discovery cannot be customised by %s", choice)
+			}
 		})
 
 		It("keeps the commands that administer the process off the API", func() {

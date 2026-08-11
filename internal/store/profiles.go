@@ -113,7 +113,7 @@ func (s *Store) DeleteProfile(ctx context.Context, id string) error {
 	return nil
 }
 
-// SeedDefaultProfiles stores each engine's default profile if it is absent.
+// SeedDefaultProfiles stores each engine's built-in profiles if they are absent.
 //
 // With no import step this is where a working configuration comes from on a
 // blank database. It does not overwrite: an edited profile stays edited across
@@ -121,16 +121,26 @@ func (s *Store) DeleteProfile(ctx context.Context, id string) error {
 func (s *Store) SeedDefaultProfiles(ctx context.Context) (int, error) {
 	seeded := 0
 	for _, engine := range discovery.All() {
-		created, err := s.seedDefault(ctx, "discovery", engine.Spec())
+		created, err := s.seedProfiles(ctx, "discovery", engine.Spec())
 		if err != nil {
 			return seeded, err
 		}
-		if created {
-			seeded++
-		}
+		seeded += created
 	}
 	for _, engine := range scan.All() {
-		created, err := s.seedDefault(ctx, "scan", engine.Spec())
+		created, err := s.seedProfiles(ctx, "scan", engine.Spec())
+		if err != nil {
+			return seeded, err
+		}
+		seeded += created
+	}
+	return seeded, nil
+}
+
+func (s *Store) seedProfiles(ctx context.Context, kind string, spec engines.Spec) (int, error) {
+	seeded := 0
+	for _, profile := range spec.BuiltInProfiles() {
+		created, err := s.seedProfile(ctx, kind, spec.Name, profile)
 		if err != nil {
 			return seeded, err
 		}
@@ -141,18 +151,19 @@ func (s *Store) SeedDefaultProfiles(ctx context.Context) (int, error) {
 	return seeded, nil
 }
 
-func (s *Store) seedDefault(ctx context.Context, kind string, spec engines.Spec) (bool, error) {
+func (s *Store) seedProfile(ctx context.Context, kind, engine string, preset engines.DefaultProfile) (bool, error) {
 	profile := api.Profile{
 		Kind:    kind,
-		Engine:  spec.Name,
-		Name:    spec.Defaults.Name,
-		Config:  spec.Defaults.Config,
-		Comment: spec.Defaults.Comment,
+		Engine:  engine,
+		Name:    preset.Name,
+		Config:  preset.Config,
+		Comment: preset.Comment,
+		Paths:   preset.Paths,
 	}
 
 	var count int64
 	err := s.DB(ctx).Model(&models.EngineProfile{}).
-		Where("kind = ? AND engine = ? AND name = ?", kind, spec.Name, profile.Name).
+		Where("kind = ? AND engine = ? AND name = ?", kind, engine, profile.Name).
 		Count(&count).Error
 	if err != nil {
 		return false, fmt.Errorf("check profile %s: %w", profile.ID(), err)

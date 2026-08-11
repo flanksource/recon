@@ -13,10 +13,11 @@ table "discoveries" {
     type    = text
     comment = "full | targeted | explicit"
   }
-  column "profile" {
+  column "profiles" {
     null    = false
-    type    = text
-    default = "default"
+    type    = jsonb
+    default = sql("'{}'::jsonb")
+    comment = "engine name -> stored discovery profile the run used"
   }
   column "input" {
     null    = false

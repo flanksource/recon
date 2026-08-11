@@ -230,7 +230,11 @@ export function TargetView({ host, onBack }: Props) {
 
   const canScan = scanProfiles.length > 0;
   const dialogStatus =
-    scan?.phase === "running" || scanRunMode === scanMode ? scan : null;
+    scan?.phase === "queued" ||
+    scan?.phase === "running" ||
+    scanRunMode === scanMode
+      ? scan
+      : null;
 
   const openScan = (mode: ScanMode) => {
     setScanRunMode(null);
@@ -312,7 +316,6 @@ export function TargetView({ host, onBack }: Props) {
               variant="outline"
               size="sm"
               disabled={!target || !canScan}
-              loading={scan?.phase === "running" && scan.hosts.includes(host)}
               onClick={() => openScan("scan")}
             >
               Run scan

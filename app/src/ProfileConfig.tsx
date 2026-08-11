@@ -4,6 +4,7 @@ import {
   JsonSchemaForm,
   type JsonSchemaObject,
 } from "@flanksource/clicky-ui";
+import { useProfileFilterPairs } from "./ProfileFilterPairs";
 import { profileId } from "./types";
 import type { Engine, EngineSection, Profile } from "./types";
 
@@ -30,16 +31,20 @@ type Props = {
   value: Record<string, unknown>;
   onChange: (value: Record<string, unknown>) => void;
   onReset: () => void;
+  /** What editing here does, in the caller's own words. */
+  note?: string;
 };
 
-export function ScanProfileConfig({
+export function ProfileConfig({
   engine,
   profile,
   value,
   onChange,
   onReset,
+  note,
 }: Props) {
   const sections = engine.sections;
+  const { pre, post, hiddenKeys } = useProfileFilterPairs();
   const [sectionId, setSectionId] = useState(sections[0]?.id ?? "");
   const activeSection =
     sections.find((section) => section.id === sectionId) ?? sections[0];
@@ -48,7 +53,10 @@ export function ScanProfileConfig({
     [profile.config, value],
   );
 
-  useEffect(() => setSectionId(sections[0]?.id ?? ""), [profileId(profile), sections]);
+  useEffect(
+    () => setSectionId(sections[0]?.id ?? ""),
+    [profileId(profile), sections],
+  );
   if (!activeSection)
     throw new Error(`${engine.title} profile schema has no sections`);
 
@@ -84,23 +92,31 @@ export function ScanProfileConfig({
               Unsaved changes
             </span>
           ) : null}
-          <Button variant="outline" size="sm" disabled={!tweaked} onClick={onReset}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!tweaked}
+            onClick={onReset}
+          >
             Reset changes
           </Button>
         </div>
         <JsonSchemaForm
           key={`${profileId(profile)}:${activeSection.id}`}
-          idPrefix={`scan-${profile.name}-${activeSection.id}`}
+          idPrefix={`${profile.engine}-${profile.name}-${activeSection.id}`}
           schema={sectionSchema(activeSection)}
           value={value}
           onChange={onChange}
+          pre={pre}
+          post={post}
+          hiddenKeys={hiddenKeys}
           layout={{ mode: "stacked", help: "hover", valueMaxWidth: "100%" }}
           size="sm"
-          preferencesStorageKey="scan-run-profile-form-preferences"
+          preferencesStorageKey="run-profile-form-preferences"
         />
         <p className="mt-4 text-xs text-muted-foreground">
-          Changes here update the "{profile.name}" profile before this scan
-          runs.
+          {note ??
+            `Changes here update the "${profile.name}" profile before this run.`}
         </p>
       </section>
     </div>

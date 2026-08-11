@@ -43,7 +43,23 @@ type Runner struct {
 
 // Options selects what a sweep does.
 type Options struct {
-	Profile  string
+	// Profiles are the profile references the sweep runs with: a bare name every
+	// engine uses, plus any number of engine=name overrides. Empty means the
+	// default profile everywhere.
+	Profiles []string
+
+	// Engines chooses which discovery engines the sweep runs. Empty means the
+	// ones the chain needs, which is what a sweep did before it was choosable.
+	// The order is derived from what each engine consumes, so a caller supplies
+	// a set rather than a pipeline.
+	Engines []string
+
+	// Overrides are run-only configuration tweaks, keyed by engine name and
+	// layered over that engine's stored profile. They are not persisted: the
+	// profile stays what it is, and a sweep that widened a port range once does
+	// not widen every sweep after it.
+	Overrides map[string]map[string]any
+
 	Explicit bool
 	Hosts    []string
 	Domains  []string
@@ -63,6 +79,22 @@ func (r *Runner) Run(ctx context.Context, opts Options) (api.Discover, error) {
 	if r.Provisioner == nil {
 		return api.Discover{}, fmt.Errorf("discovery runner requires a provisioner")
 	}
+	set, err := ParseProfiles(opts.Profiles)
+	if err != nil {
+		return api.Discover{}, err
+	}
+	// Canonical references, so two spellings of the same profile selection share
+	// one run rather than doubling the traffic to third parties. The engine
+	// selection is canonicalised for the same reason, and rejecting an unknown
+	// engine here means a bad name fails before any traffic is sent.
+	opts.Profiles = set.Refs()
+	if len(opts.Engines) > 0 {
+		opts.Engines, err = OrderEngines(opts.Engines)
+		if err != nil {
+			return api.Discover{}, err
+		}
+	}
+
 	key, err := runKey(opts)
 	if err != nil {
 		return api.Discover{}, err
@@ -70,7 +102,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (api.Discover, error) {
 	result, err, _ := r.group.Do(key, func() (any, error) {
 		bounded, cancel := context.WithTimeout(ctx, sweepDeadline)
 		defer cancel()
-		return r.run(bounded, opts)
+		return r.run(bounded, opts, set)
 	})
 	if err != nil {
 		return api.Discover{}, err
@@ -78,30 +110,36 @@ func (r *Runner) Run(ctx context.Context, opts Options) (api.Discover, error) {
 	return result.(api.Discover), nil
 }
 
-func (r *Runner) run(ctx context.Context, opts Options) (api.Discover, error) {
+func (r *Runner) run(ctx context.Context, opts Options, set ProfileSet) (api.Discover, error) {
 	started := time.Now()
 	mode, err := modeFor(opts)
 	if err != nil {
 		return api.Discover{}, err
 	}
-	if opts.Profile == "" {
-		opts.Profile = "default"
+	// Which engines run depends on the chain unless the caller chose, so the set
+	// is only resolved to names once that is known — a profile or configuration
+	// override for an engine this sweep does not use is not an error, it simply
+	// does not apply.
+	engines := opts.Engines
+	if len(engines) == 0 {
+		engines = requiredEngines(mode, len(opts.Domains) > 0)
 	}
-	profiles, err := r.resolveProfiles(ctx, opts.Profile, requiredEngines(mode, len(opts.Domains) > 0))
+	names := set.Resolve(engines)
+	profiles, err := r.resolveProfiles(ctx, names, opts.Overrides)
 	if err != nil {
 		return api.Discover{}, err
 	}
 
 	input := discoveryInput(opts)
 	row := models.Discovery{
-		Chain: mode, Profile: opts.Profile, Input: models.Wrap(&input), RanAt: started,
+		Chain: mode, Profiles: models.Wrap(&names), Input: models.Wrap(&input), RanAt: started,
 	}
 	if err := r.Store.CreateDiscovery(ctx, &row); err != nil {
 		return api.Discover{}, err
 	}
 
-	tasks := newDiscoveryTaskGroup(row.ID, mode, opts.Profile)
-	stages, runErr := r.runStages(ctx, row.ID, mode, opts, profiles, tasks)
+	tasks := newDiscoveryTaskGroup(row.ID, mode, set.String())
+	stages, runErr := r.runStages(ctx, row.ID, mode, engines, opts, profiles, tasks)
 
 	// A stage failing does not discard what earlier stages found: those hosts
 	// are real, and dropping them would make a partial sweep look like an empty
@@ -142,6 +180,7 @@ func (r *Runner) run(ctx context.Context, opts Options) (api.Discover, error) {
 func (r *Runner) runStages(
 	ctx context.Context,
 	id, mode string,
+	engines []string,
 	opts Options,
 	profiles map[string]map[string]any,
 	tasks task.TypedGroup[Stage],
@@ -170,17 +209,22 @@ func (r *Runner) runStages(
 	}
 
 	if mode != ChainExplicit {
-		chain, err := r.chainFor(mode)
+		chain, err := chainFor(mode, engines)
 		if err != nil {
 			return nil, err
 		}
 		return run(chain, prepared.Hosts)
 	}
 
+	// An explicit request can name domains, hosts and CIDRs at once, so the
+	// selection runs as two chains: the stages that enumerate a zone, then the
+	// stages that probe everything the caller named plus whatever that produced.
+	enumerators, probers := seedsFromZones(engines)
+
 	probeInput := prepared.Hosts
 	var stages []Stage
-	if len(opts.Domains) > 0 {
-		enumerate, err := NewChain(ChainExplicit, enginediscovery.Zones, "subfinder")
+	if len(opts.Domains) > 0 && len(enumerators) > 0 {
+		enumerate, err := NewChain(ChainExplicit, enginediscovery.Zones, enumerators...)
 		if err != nil {
 			return nil, err
 		}
@@ -194,10 +238,10 @@ func (r *Runner) runStages(
 		}
 	}
 	probeInput = distinctStrings(probeInput)
-	if len(probeInput) == 0 {
+	if len(probeInput) == 0 || len(probers) == 0 {
 		return stages, nil
 	}
-	probe, err := NewChain(ChainExplicit, enginediscovery.Hosts, "naabu", "httpx", "tlsx")
+	probe, err := NewChain(ChainExplicit, enginediscovery.Hosts, probers...)
 	if err != nil {
 		return stages, err
 	}
@@ -261,28 +305,49 @@ func (r *Runner) seed(ctx context.Context, mode string, selected []string) ([]st
 	return seeded, nil
 }
 
-func (r *Runner) chainFor(name string) (Chain, error) {
+// chainFor builds a sweep out of the engines it will run. The seed is what the
+// mode supplies: zones for a full sweep, hosts for a targeted one, which is what
+// makes a targeted chain valid without an enumerating stage.
+func chainFor(name string, engines []string) (Chain, error) {
 	switch name {
 	case ChainFull:
-		return NewChain(ChainFull, enginediscovery.Zones, "subfinder", "naabu", "httpx", "tlsx")
+		return NewChain(ChainFull, enginediscovery.Zones, engines...)
 	case ChainTargeted:
 		// Skips enumeration: the hosts are already known, and this is the
 		// rescan that refreshes what is recorded about them.
-		return NewChain(ChainTargeted, enginediscovery.Hosts, "naabu", "httpx", "tlsx")
+		return NewChain(ChainTargeted, enginediscovery.Hosts, engines...)
 	default:
 		return Chain{}, fmt.Errorf("unknown chain %q: expected one of %s",
 			name, strings.Join(ChainNames(), ", "))
 	}
 }
 
-func (r *Runner) resolveProfiles(ctx context.Context, name string, engines []string) (map[string]map[string]any, error) {
-	profiles := make(map[string]map[string]any, len(engines))
-	for _, engine := range engines {
+func (r *Runner) resolveProfiles(
+	ctx context.Context,
+	names map[string]string,
+	overrides map[string]map[string]any,
+) (map[string]map[string]any, error) {
+	profiles := make(map[string]map[string]any, len(names))
+	for engine, name := range names {
 		profile, err := r.Store.GetProfile(ctx, "discovery:"+engine+":"+name)
 		if err != nil {
 			return nil, fmt.Errorf("discovery profile %q for %s: %w", name, engine, err)
 		}
-		profiles[engine] = profile.Config
+		config := withOverrides(profile.Config, overrides[engine])
+		// Only the overridden configuration is checked: it is the input this
+		// request supplied, and a stored profile is validated where it is
+		// written. An override the engine would reject must fail before the
+		// sweep sends traffic, not once the tool exits non-zero.
+		if len(overrides[engine]) > 0 {
+			spec, err := enginediscovery.Get(engine)
+			if err != nil {
+				return nil, err
+			}
+			if err := spec.Spec().ValidateConfig(config); err != nil {
+				return nil, fmt.Errorf("%s configuration: %w", engine, err)
+			}
+		}
+		profiles[engine] = config
 	}
 	return profiles, nil
 }

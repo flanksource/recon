@@ -26,6 +26,7 @@ var catalog = engines.Sections{
 			{Key: "enable-self-contained", Property: engines.Property{Type: "boolean", Title: "Self-contained templates", Description: "Enable self-contained templates."}},
 			{Key: "enable-global-matchers", Property: engines.Property{Type: "boolean", Title: "Global matchers", Description: "Enable global matcher templates."}},
 			{Key: "disable-unsigned-templates", Property: engines.Property{Type: "boolean", Title: "Require signed templates", Description: "Disable unsigned templates and templates with mismatched signatures."}},
+			{Key: "var", Property: engines.Property{Type: "array", Title: "Template variables", Description: "Values templates read, in key=value form. Several community profiles require one, such as region=us-east-1. Do not store credentials here.", Items: &engines.Property{Type: "string"}}},
 		},
 	},
 	{

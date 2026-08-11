@@ -187,6 +187,53 @@ func (r *Registry) profileFilters() []clicky.Filter[store.ProfileOpts] {
 	}
 }
 
+// templateFilters narrow the engines' template catalogues.
+//
+// The vocabularies come from the installed templates rather than from a fixed
+// list, so a tag that appears in a new templates release is offerable the moment
+// it is installed — the catalogue is the source of truth, and nothing here
+// duplicates it.
+func (r *Registry) templateFilters() []clicky.Filter[TemplateOpts] {
+	return []clicky.Filter[TemplateOpts]{
+		filter[TemplateOpts]{key: "engine", label: "Engine", values: engineNames(api.KindScan)},
+		filter[TemplateOpts]{key: "severity", label: "Severity", values: fixed(severityNames()...)},
+		filter[TemplateOpts]{key: "type", label: "Protocol", values: r.templateValues(func(t api.Template) []string {
+			return []string{t.Type}
+		})},
+		filter[TemplateOpts]{key: "tag", label: "Tag", values: r.templateValues(func(t api.Template) []string {
+			return t.Tags
+		})},
+		filter[TemplateOpts]{key: "author", label: "Author", values: r.templateValues(func(t api.Template) []string {
+			return t.Authors
+		})},
+		filter[TemplateOpts]{key: "profile", label: "Profile", values: r.vocabulary(store.ProfileNames)},
+	}
+}
+
+// templateValues enumerates one field across every installed template.
+func (r *Registry) templateValues(field func(api.Template) []string) values {
+	return func(ctx context.Context) []string {
+		templates, err := r.listTemplates(ctx, TemplateOpts{Limit: -1})
+		if err != nil {
+			logger.Debugf("template filter values: %v", err)
+			return nil
+		}
+
+		seen := map[string]bool{}
+		var found []string
+		for _, template := range templates {
+			for _, value := range field(template) {
+				if value != "" && !seen[value] {
+					seen[value] = true
+					found = append(found, value)
+				}
+			}
+		}
+		sort.Strings(found)
+		return found
+	}
+}
+
 func discoverFilters() []clicky.Filter[store.DiscoverOpts] {
 	return []clicky.Filter[store.DiscoverOpts]{
 		filter[store.DiscoverOpts]{key: "chain", label: "Chain", values: fixed(discovery.ChainNames()...)},

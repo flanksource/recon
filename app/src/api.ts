@@ -11,11 +11,14 @@ import type {
   Engine,
   Finding,
   Profile,
+  ProbeRun,
   Scan,
   ScanStatus,
   Target,
   TargetDocument,
   TargetSelector,
+  Template,
+  TemplatePreview,
   FilterVocabulary,
   Zone,
 } from "./types";
@@ -254,6 +257,37 @@ export function deleteProfile(id: string): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------- templates
+
+export function fetchTemplates(params?: {
+  engine?: string;
+  severity?: string;
+  type?: string;
+  tag?: string;
+  author?: string;
+  profile?: string;
+  search?: string;
+  limit?: number;
+}): Promise<Template[]> {
+  return request<Template[]>(`${API}/template${query(params)}`);
+}
+
+// Previews a configuration that has not been saved.
+//
+// A POST because the subject is the draft in the form, not a stored profile:
+// the whole point is to answer "what would this change run" without having to
+// save it first. A stored profile is previewed with
+// fetchTemplates({ profile }) instead.
+export function previewTemplates(args: {
+  engine?: string;
+  config: Record<string, unknown>;
+}): Promise<TemplatePreview> {
+  return request<TemplatePreview>(
+    "/api/template/preview",
+    json("POST", { engine: args.engine ?? "nuclei", config: args.config }),
+  );
+}
+
 // ---------------------------------------------------------------- scans
 
 export function fetchScans(params?: {
@@ -302,7 +336,13 @@ export function startScan(args: {
   target: RunTarget;
   engine: string;
   profile: string;
-  discoveryProfile?: string;
+  discoveryProfiles?: string[];
+  /** Which engines sweep before the scan. Empty runs the ones the sweep needs. */
+  discoveryEngines?: string[];
+  /** Run-only scan configuration, layered over the profile without saving it. */
+  override?: EngineConfig;
+  /** Run-only discovery configuration, keyed by engine. */
+  discoveryOverride?: Record<string, EngineConfig>;
   confirm?: boolean;
 }): Promise<Scan> {
   return request<Scan>(
@@ -311,7 +351,12 @@ export function startScan(args: {
       ...args.target,
       engine: args.engine,
       profile: args.profile,
-      "discovery-profile": args.discoveryProfile ?? "default",
+      "discovery-profile": args.discoveryProfiles ?? ["default"],
+      ...(args.discoveryEngines?.length
+        ? { "discovery-engine": args.discoveryEngines }
+        : {}),
+      ...overrideFields("override", args.override),
+      ...overrideFields("discovery-override", args.discoveryOverride),
       confirm: args.confirm ?? false,
       wait: false,
     }),
@@ -348,8 +393,48 @@ export type RunTarget = {
   cidr?: string[];
 };
 
+// One engine's configuration: the keys its stored profile holds.
+export type EngineConfig = Record<string, unknown>;
+
+// Run-only configuration is sent as a nested object and omitted when empty.
+//
+// The server takes it as one JSON-encoded parameter rather than a repeatable
+// key=value flag, because a flag value is a string and `50` and `"50"` are not
+// the same thing to an engine's schema. Sending the object is what keeps the
+// types the form produced; an empty one is dropped so a run that customises
+// nothing says so.
+function overrideFields(
+  field: string,
+  value: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  return value && Object.keys(value).length > 0 ? { [field]: value } : {};
+}
+
+// `profile` is a list because a sweep runs several engines: a bare name applies
+// to all of them and `engine=name` overrides one, which is the same grammar
+// `reconctl discover --profile` takes. `engine` chooses which of them run at
+// all, and `override` configures them for this sweep only.
+// ---------------------------------------------------------------- probes
+
+// Re-probes inventory targets and refreshes their liveness, status code and
+// response time. Unlike `reconctl ping` this takes a selector rather than a
+// URL — the server will only reach hosts the inventory already knows.
+export function probeTargets(
+  target: RunTarget & { timeout?: string; concurrency?: number } = {},
+): Promise<ProbeRun> {
+  return request<ProbeRun>(`${API}/probe`, json("POST", target));
+}
+
 export function runDiscovery(
-  target: RunTarget & { profile?: string } = {},
+  target: RunTarget & {
+    profile?: string[];
+    engine?: string[];
+    override?: Record<string, EngineConfig>;
+  } = {},
 ): Promise<Discover> {
-  return request<Discover>(`${API}/discover`, json("POST", target));
+  const { override, ...rest } = target;
+  return request<Discover>(
+    `${API}/discover`,
+    json("POST", { ...rest, ...overrideFields("override", override) }),
+  );
 }

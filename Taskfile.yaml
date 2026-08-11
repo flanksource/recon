@@ -74,8 +74,11 @@ tasks:
 
   templates:update:
     desc: Update the community nuclei-templates to the latest release.
+    # Through reconctl rather than the nuclei binary: nuclei is linked into
+    # reconctl, and it writes the same corpus the legacy `_scan` path reads.
+    deps: [build]
     cmds:
-      - nuclei -update-templates
+      - ./.bin/reconctl engine templates update
 
   templates:validate:
     desc: Validate all custom templates and the workflow.

@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +18,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
+
+	"github.com/flanksource/recon/internal/probe"
 )
 
 var _ = Describe("reconctl ping", Ordered, func() {
@@ -258,7 +257,7 @@ var _ = Describe("reconctl ping", Ordered, func() {
 			{status: 299, up: true},
 			{status: http.StatusMultipleChoices, up: false},
 		} {
-			Expect(isSuccessfulPingStatus(test.status)).To(Equal(test.up), "status %d", test.status)
+			Expect(probe.Successful(test.status)).To(Equal(test.up), "status %d", test.status)
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -341,14 +340,6 @@ var _ = Describe("reconctl ping", Ordered, func() {
 		Expect(attempts.Load()).To(Equal(int32(1)))
 	})
 
-	It("extracts the TLS common name and socket IP", func() {
-		state := &tls.ConnectionState{PeerCertificates: []*x509.Certificate{{
-			Subject: pkix.Name{CommonName: "service.example.test"},
-		}}}
-		Expect(tlsCommonName(state)).To(Equal("service.example.test"))
-		Expect(tlsCommonName(nil)).To(BeEmpty())
-		Expect(addressIP("[2001:db8::10]:443")).To(Equal("2001:db8::10"))
-	})
 })
 
 func testPingOptions(targets ...string) pingOptions {

@@ -7,17 +7,34 @@
 // vocabulary from drifting away from the database's.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FilterBarFilter } from "@flanksource/clicky-ui";
+import type { FilterBarFilter, FilterBarMultiFilterMode } from "@flanksource/clicky-ui";
 
 import { fetchFilterOptions, fetchFilters } from "./api";
 import type { FilterSelection, FilterVocabulary } from "./types";
 
 /**
+ * Filters whose server-side predicate honours a leading `!` as "exclude".
+ *
+ * These are the vocabularies where "everything except" is the question worth
+ * asking: a template is tagged half a dozen ways and speaks one protocol, so
+ * narrowing by subtraction is often shorter than listing what you want. A
+ * severity or a class is neither — you pick from six, you do not carve them up.
+ *
+ * The list is short because it has to stay true. Rendering a tri-state control
+ * over a filter the server reads as a literal value would send `!dos` as a tag
+ * name, match nothing, and look like a working exclusion. The Go side honours
+ * `!` for exactly these keys: TemplateOpts.Tag and .Type via
+ * collections.MatchItems, FindingOpts.Tag and TargetOpts.Tags via tagPredicate.
+ */
+const NEGATABLE = new Set(["tag", "tags", "type"]);
+
+/**
  * Loads a listing's filter controls and holds the current selection.
  *
- * The controls are include-only, matching the server: a selector means "any of
- * these", and there is no way to express an exclusion that the Go side would
- * honour. Offering one would send `!prod` as a class and be refused.
+ * Most controls are include-only, matching the server: a selector means "any of
+ * these". The vocabularies in NEGATABLE get a tri-state control instead, where
+ * each value can be included or excluded — the two the Go side reads as
+ * patterns rather than as literal values.
  */
 export function useEntityFilters(
   entity: string,
@@ -48,35 +65,89 @@ export function useEntityFilters(
     };
   }, [entity, excluded]);
 
+  // Returns the matches as well as recording them. The two control kinds read
+  // the result differently: `lookup-multi` re-reads its `options` prop, while
+  // the tri-state `multi` merges whatever the promise resolves to and shows "No
+  // results" if it resolves to nothing — so a search that only set state left
+  // every value past the head set unreachable.
   const search = useCallback(
-    (key: string, query: string) => {
+    (key: string, query: string): Promise<{ value: string; label: string }[]> =>
       fetchFilterOptions(entity, key, query)
-        .then((options) => setSearched((current) => ({ ...current, [key]: options })))
-        .catch((e: Error) => setError(e.message));
-    },
+        .then((options) => {
+          setSearched((current) => ({ ...current, [key]: options }));
+          return options.map((value) => ({ value, label: value }));
+        })
+        .catch((e: Error) => {
+          setError(e.message);
+          return [];
+        }),
     [entity],
   );
 
   const filters = useMemo<FilterBarFilter[]>(
     () =>
-      vocabularies.map((vocabulary) => ({
-        key: vocabulary.key,
-        kind: "lookup-multi",
-        label: vocabulary.label,
-        value: selection[vocabulary.key] ?? [],
+      vocabularies.map((vocabulary) => {
         // A search replaces the head set for that control, which is what the
         // server-side narrowing is for; until one runs, the head is all there is.
-        options: (searched[vocabulary.key] ?? vocabulary.options).map((value) => ({ value })),
-        onChange: (values: string[]) =>
-          setSelection((current) => withValues(current, vocabulary.key, values)),
-        onSearch: (query: string) => search(vocabulary.key, query),
-        truncated: vocabulary.truncated,
-        total: vocabulary.total,
-      })),
+        const options = (searched[vocabulary.key] ?? vocabulary.options).map((value) => ({
+          value,
+          label: value,
+        }));
+        const values = selection[vocabulary.key] ?? [];
+        const shared = {
+          key: vocabulary.key,
+          label: vocabulary.label,
+          options,
+          truncated: vocabulary.truncated,
+          total: vocabulary.total,
+        };
+
+        if (NEGATABLE.has(vocabulary.key)) {
+          return {
+            ...shared,
+            kind: "multi",
+            value: modesOf(values),
+            onChange: (modes: Record<string, FilterBarMultiFilterMode>) =>
+              setSelection((current) => withValues(current, vocabulary.key, patternsOf(modes))),
+            onSearch: (query: string) => search(vocabulary.key, query),
+          };
+        }
+
+        return {
+          ...shared,
+          kind: "lookup-multi",
+          value: values,
+          onChange: (next: string[]) =>
+            setSelection((current) => withValues(current, vocabulary.key, next)),
+          onSearch: (query: string) => {
+            void search(vocabulary.key, query);
+          },
+        };
+      }),
     [search, searched, selection, vocabularies],
   );
 
   return { filters, selection, setSelection, error };
+}
+
+// The selection is stored as the patterns the server takes — `dos` and `!dos` —
+// rather than as the control's mode map. Keeping one representation means
+// selectionQuery stays a join, a selection can be read straight out of a URL,
+// and the include-only controls need no special case.
+
+function modesOf(patterns: string[]): Record<string, FilterBarMultiFilterMode> {
+  const modes: Record<string, FilterBarMultiFilterMode> = {};
+  for (const pattern of patterns) {
+    if (pattern.startsWith("!")) modes[pattern.slice(1)] = "exclude";
+    else modes[pattern] = "include";
+  }
+  return modes;
+}
+
+function patternsOf(modes: Record<string, FilterBarMultiFilterMode>): string[] {
+  return Object.entries(modes).map(([value, mode]) =>
+    mode === "exclude" ? `!${value}` : value,
+  );
 }
 
 // withValues drops a filter entirely when nothing is selected, so an empty

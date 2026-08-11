@@ -14,6 +14,7 @@ import {
 
 const PHASE_LABEL: Record<ScanStatus["phase"], string> = {
   idle: "Idle",
+  queued: "Queued",
   running: "Running",
   done: "Completed",
   failed: "Failed",
@@ -193,7 +194,7 @@ export function ScanRunStatus({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Stat label="targets" value={status.hosts.length} />
+          <Stat label="targets" value={status.endpointCount} />
           {!discovery && (
             <>
               <Stat

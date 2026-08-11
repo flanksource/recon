@@ -53,6 +53,12 @@ table "scans" {
     null = true
     type = timestamptz
   }
+  column "duration_ms" {
+    null    = false
+    type    = bigint
+    default = 0
+    comment = "wall-clock runtime measured by recon"
+  }
   column "exit_code" {
     null = true
     type = integer
@@ -100,6 +106,49 @@ table "scans" {
   }
   index "scans_engine_idx" {
     columns = [column.engine, column.profile]
+  }
+}
+
+// Process output is split from scans so listing runs never reads megabytes of
+// evidence. A row exists even when both streams were empty, distinguishing a
+// captured empty process from a legacy scan whose output is unavailable.
+table "scan_outputs" {
+  schema = schema.public
+
+  column "scan_id" {
+    null = false
+    type = uuid
+  }
+  column "stdout" {
+    null    = false
+    type    = text
+    default = ""
+  }
+  column "stderr" {
+    null    = false
+    type    = text
+    default = ""
+  }
+  column "stdout_truncated" {
+    null    = false
+    type    = boolean
+    default = false
+  }
+  column "stderr_truncated" {
+    null    = false
+    type    = boolean
+    default = false
+  }
+
+  primary_key {
+    columns = [column.scan_id]
+  }
+
+  foreign_key "scan_outputs_scan_id_fkey" {
+    columns     = [column.scan_id]
+    ref_columns = [table.scans.column.id]
+    on_update   = NO_ACTION
+    on_delete   = CASCADE
   }
 }
 

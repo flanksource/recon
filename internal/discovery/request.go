@@ -48,16 +48,19 @@ func discoveryInput(opts Options) map[string]any {
 
 func runKey(opts Options) (string, error) {
 	payload := struct {
-		Profile  string
-		Explicit bool
-		Hosts    []string
-		Domains  []string
-		CIDRs    []string
-		Input    map[string]any
+		Profiles  []string
+		Engines   []string
+		Overrides map[string]map[string]any
+		Explicit  bool
+		Hosts     []string
+		Domains   []string
+		CIDRs     []string
+		Input     map[string]any
 	}{
-		Profile: opts.Profile, Explicit: opts.Explicit,
-		Hosts: distinctStrings(opts.Hosts), Domains: distinctStrings(opts.Domains),
-		CIDRs: distinctStrings(opts.CIDRs), Input: opts.Input,
+		Profiles: opts.Profiles, Engines: opts.Engines, Overrides: opts.Overrides,
+		Explicit: opts.Explicit,
+		Hosts:    distinctStrings(opts.Hosts), Domains: distinctStrings(opts.Domains),
+		CIDRs:    distinctStrings(opts.CIDRs), Input: opts.Input,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

@@ -15,7 +15,6 @@ import (
 
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/engines/discovery"
-	"github.com/flanksource/recon/internal/engines/scan"
 )
 
 // Every engine's default profile must be one the engine itself accepts.
@@ -93,13 +92,17 @@ func loopbackFor(accepts discovery.Kind) string {
 	}
 }
 
+// allEngines lists the engines this check applies to: the ones that run as a
+// binary.
+//
+// Scan engines are absent because nuclei is linked in, so there is no process to
+// start and no startup validation to observe. The same question is asked of it
+// directly, and of every profile it ships rather than only the default, by
+// "loading the templates a built-in profile selects" in the nuclei package.
 func allEngines() []engineUnderTest {
 	var all []engineUnderTest
 	for _, engine := range discovery.All() {
 		all = append(all, engineUnderTest{engine.Spec(), engine.Args, loopbackFor(engine.Accepts())})
-	}
-	for _, engine := range scan.All() {
-		all = append(all, engineUnderTest{engine.Spec(), engine.Args, "http://127.0.0.1"})
 	}
 	return all
 }

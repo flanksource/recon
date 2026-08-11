@@ -111,6 +111,16 @@ var _ = Describe("the target store", Ordered, Label("db"), func() {
 	Describe("updating", func() {
 		var original api.TargetDocument
 
+		BeforeAll(func() {
+			// A curated edit names a profile that has to exist, so the catalog the
+			// server seeds on startup has to be here too.
+			_, err := st.SeedDefaultProfiles(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			DeferCleanup(func() {
+				Expect(db.Gorm().Exec(`DELETE FROM engine_profiles`).Error).To(Succeed())
+			})
+		})
+
 		BeforeEach(func() {
 			original = api.TargetDocument{
 				Host: "a.example.test", Class: api.ClassNonProd,
@@ -169,11 +179,23 @@ var _ = Describe("the target store", Ordered, Label("db"), func() {
 			Expect(reactivated.Reason).To(BeEmpty())
 		})
 
-		It("rejects an unknown profile before it reaches the database", func() {
+		// Profile names are rows, not a closed vocabulary, so the schema can only
+		// check the shape of one. Existence is checked against the catalog: a
+		// typo here means a host is quietly never scanned by what was intended.
+		It("rejects a profile name nobody defined, naming what is available", func() {
 			_, err := st.UpdateCurated(ctx, "a.example.test", api.Curated{
 				Class: api.ClassNonProd, Profiles: []string{"aggressive"}, Tags: []string{},
 			})
-			Expect(err).To(MatchError(ContainSubstring("value must be one of")))
+			Expect(err).To(MatchError(ContainSubstring("unknown scan profile aggressive")))
+			Expect(err).To(MatchError(ContainSubstring("safe")))
+		})
+
+		It("accepts a focused profile the engine ships", func() {
+			updated, err := st.UpdateCurated(ctx, "a.example.test", api.Curated{
+				Class: api.ClassNonProd, Profiles: []string{"k8s", "static"}, Tags: []string{},
+			})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(updated.Profiles).To(Equal([]string{"k8s", "static"}))
 		})
 
 		It("reports a missing target", func() {

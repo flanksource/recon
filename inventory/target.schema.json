@@ -18,7 +18,7 @@
     "source": { "$ref": "#/$defs/nonEmptyString" },
     "profiles": {
       "type": "array",
-      "items": { "type": "string", "enum": ["safe", "full"] },
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true
     },

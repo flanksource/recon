@@ -3,6 +3,14 @@
 @import "@flanksource/clicky-ui/styles.css";
 @import "tailwindcss";
 
+/* clicky-ui's prebuilt bundle is imported first so this app's preflight wins,
+   which also puts every utility it ships *before* the ones Tailwind generates
+   here — so an app class like `flex-col` beat a library class like
+   `md:flex-row` and AppShell's responsive rows collapsed into columns.
+   Scanning the shipped components makes this build emit those utilities too,
+   in cascade order. */
+@source "../node_modules/@flanksource/clicky-ui/dist";
+
 html,
 body,
 #root {

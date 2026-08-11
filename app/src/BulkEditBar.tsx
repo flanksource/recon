@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, MultiSelect, Select } from "@flanksource/clicky-ui";
-import { CLASS_ORDER, PROFILES, type TargetClass } from "./types";
+import { fetchProfiles } from "./api";
+import { CLASS_ORDER, FALLBACK_PROFILES, type TargetClass } from "./types";
 
 export type BulkEdit =
   | { op: "add-tag"; tag: string }
@@ -26,6 +27,25 @@ export function BulkEditBar({
 }: Props) {
   const [tag, setTag] = useState("");
   const [profiles, setProfiles] = useState<string[]>([]);
+
+  // Offered profiles come from the server: nuclei ships focused profiles
+  // alongside its own, so a list hardcoded here would hide most of them from
+  // the control that assigns them. The fallback covers a failed fetch, where
+  // offering nothing would be worse than offering the two that always exist.
+  const [available, setAvailable] = useState<string[]>([...FALLBACK_PROFILES]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchProfiles({ kind: "scan" })
+      .then((found) => {
+        if (cancelled || found.length === 0) return;
+        setAvailable([...new Set(found.map((profile) => profile.name))].sort());
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [targetClass, setTargetClass] = useState<TargetClass | "">("");
   const [reason, setReason] = useState("");
 
@@ -115,7 +135,7 @@ export function BulkEditBar({
         className="w-40"
         placeholder="Set profiles…"
         value={profiles}
-        options={PROFILES.map((p) => ({ value: p, label: p }))}
+        options={available.map((name) => ({ value: name, label: name }))}
         onChange={(next) => {
           setProfiles(next);
           onApply({ op: "set-profiles", value: next });

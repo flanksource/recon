@@ -120,6 +120,26 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 			To(Equal([]string{"a.example.test", "c.example.test"}))
 	})
 
+	// What the tri-state filter control sends when a tag is switched to
+	// "exclude". It has to narrow in SQL exactly as it does in the in-memory
+	// template filter, or the same chip would mean two different things
+	// depending on which listing it is on.
+	It("excludes a tag prefixed with !", func() {
+		Expect(hosts(store.TargetOpts{Tags: []string{"!http"}})).
+			To(Equal([]string{"c.example.test", "d.example.test"}))
+	})
+
+	It("drops a target carrying an excluded tag even when another tag was included", func() {
+		Expect(hosts(store.TargetOpts{Tags: []string{"http", "!edge"}})).
+			To(Equal([]string{"b.example.test"}))
+	})
+
+	It("keeps a target with no tags at all out of the way of an exclusion", func() {
+		// d has no tags, so "not tagged edge" is true of it.
+		Expect(hosts(store.TargetOpts{Tags: []string{"!edge"}})).
+			To(ContainElement("d.example.test"))
+	})
+
 	It("filters tags with Kubernetes selector semantics", func() {
 		Expect(hosts(store.TargetOpts{Selector: "http,env=prod,tier in (frontend,api)"})).
 			To(Equal([]string{"a.example.test"}))

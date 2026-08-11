@@ -82,6 +82,7 @@ func (r *Registry) Register() {
 	r.registerFinding()
 	r.registerDiscover()
 	r.registerProfile()
+	r.registerTemplate()
 	r.registerEngine()
 	r.registerZone()
 }

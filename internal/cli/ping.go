@@ -13,6 +13,8 @@ import (
 	flanksourceContext "github.com/flanksource/commons/context"
 	"github.com/flanksource/commons/duration"
 	"github.com/spf13/cobra"
+
+	"github.com/flanksource/recon/internal/probe"
 )
 
 const (
@@ -20,63 +22,9 @@ const (
 	defaultPingTimeout     = 3 * time.Second
 )
 
-// PingResult is the result of probing one URL.
-type PingResult struct {
-	Up            bool          `json:"up"`
-	URL           string        `json:"url"`
-	FinalURL      string        `json:"final_url,omitempty"`
-	IP            string        `json:"ip,omitempty"`
-	TLSCN         string        `json:"tls_cn,omitempty"`
-	ResponseCode  int           `json:"response_code,omitempty"`
-	ContentType   string        `json:"content_type,omitempty"`
-	ContentLength *int64        `json:"content_length,omitempty"`
-	ResponseTime  time.Duration `json:"response_time"`
-	ResponseSize  int64         `json:"response_size,omitempty"`
-	Error         string        `json:"error,omitempty"`
-}
-
-var _ api.TableProvider = PingResult{}
-
-func (PingResult) Columns() []api.ColumnDef {
-	return []api.ColumnDef{
-		api.Column("up").Label("Up").Build(),
-		api.Column("url").Label("URL").Build(),
-		api.Column("final_url").Label("Final URL").Build(),
-		api.Column("ip").Label("IP").Build(),
-		api.Column("tls_cn").Label("TLS CN").Build(),
-		api.Column("response_code").Label("Response Code").Build(),
-		api.Column("content_type").Label("Content Type").Build(),
-		api.Column("content_length").Label("Content Length").Build(),
-		api.Column("response_time").Label("Response Time").Build(),
-		api.Column("response_size").Label("Response Size").Build(),
-		api.Column("error").Label("Error").Build(),
-	}
-}
-
-func (r PingResult) Row() map[string]any {
-	row := map[string]any{
-		"up":            r.Up,
-		"url":           r.URL,
-		"final_url":     r.FinalURL,
-		"ip":            r.IP,
-		"tls_cn":        r.TLSCN,
-		"response_code": r.ResponseCode,
-		"content_type":  r.ContentType,
-		"response_time": clicky.Human(r.ResponseTime),
-		"error":         r.Error,
-	}
-	if r.ContentLength != nil {
-		row["content_length"] = api.HumanizeBytes(*r.ContentLength)
-	} else {
-		row["content_length"] = nil
-	}
-	if r.ResponseCode > 0 {
-		row["response_size"] = api.HumanizeBytes(r.ResponseSize)
-	} else {
-		row["response_size"] = nil
-	}
-	return row
-}
+// PingResult is what one probe saw. Aliased rather than redeclared so the
+// inventory probe and this command cannot describe a host differently.
+type PingResult = probe.Result
 
 func addPingCommand(parent *cobra.Command) *cobra.Command {
 	cmd := clicky.AddNamedCommandWithContext("ping", parent, pingOptions{}, runPing)
@@ -139,51 +87,13 @@ func pingTargets(inputs []string) ([]string, error) {
 		if input == "" {
 			return nil, fmt.Errorf("target %d is empty", i+1)
 		}
-		expanded, err := expandPingTarget(input)
+		expanded, err := probe.Expand(input)
 		if err != nil {
 			return nil, err
 		}
 		targets = append(targets, expanded...)
 	}
 	return targets, nil
-}
-
-func expandPingTarget(input string) ([]string, error) {
-	if strings.Contains(input, "://") {
-		target, err := validatePingURL(input)
-		if err != nil {
-			return nil, fmt.Errorf("invalid target %q: %w", input, err)
-		}
-		return []string{target}, nil
-	}
-
-	targets := make([]string, 0, 2)
-	for _, scheme := range []string{"https", "http"} {
-		target, err := validatePingURL(scheme + "://" + input)
-		if err != nil {
-			return nil, fmt.Errorf("invalid target %q: %w", input, err)
-		}
-		targets = append(targets, target)
-	}
-	return targets, nil
-}
-
-func validatePingURL(input string) (string, error) {
-	parsed, err := url.Parse(input)
-	if err != nil {
-		return "", err
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", fmt.Errorf("unsupported scheme %q", parsed.Scheme)
-	}
-	if parsed.Host == "" || parsed.Hostname() == "" {
-		return "", fmt.Errorf("URL must include a host")
-	}
-	if parsed.User != nil {
-		return "", fmt.Errorf("URL userinfo is not supported")
-	}
-	return parsed.String(), nil
 }
 
 func probeTargets(ctx context.Context, targets []string, options pingOptions) ([]PingResult, int) {
@@ -202,7 +112,7 @@ func probeTargets(ctx context.Context, targets []string, options pingOptions) ([
 				stop()
 				cancel()
 			}()
-			return probeURL(probeCtx, target, pingProbeOptions{
+			return probe.URL(probeCtx, target, probe.Options{
 				Timeout:         time.Duration(options.Timeout),
 				FollowRedirects: options.FollowRedirects,
 			})

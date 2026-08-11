@@ -17,6 +17,7 @@ const idle = {
   endpointCount: 0,
   phase: "idle",
   startedAt: "",
+  durationMs: 0,
   finishedAt: undefined,
   stats: undefined,
   hosts: [],
@@ -90,6 +91,16 @@ describe("useScanStatus", () => {
       });
     });
     expect(screen.getByText("running:1")).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instance?.emit({ ...idle, phase: "queued" });
+    });
+    expect(screen.getByText("queued:0")).toBeInTheDocument();
+    expect(onFinish).not.toHaveBeenCalled();
+
+    act(() => {
+      FakeEventSource.instance?.emit({ ...idle, phase: "running" });
+    });
 
     act(() => {
       FakeEventSource.instance?.emit({ ...idle, phase: "done" });

@@ -65,6 +65,12 @@ var _ = Describe("engine install definitions", Label("network"), func() {
 	for _, engine := range allSpecs() {
 		spec := engine // one entry per engine, so a failure names the engine
 
+		// An in-process engine is linked into this binary: there is no release
+		// to publish assets, and its version is whatever recon compiled against.
+		if spec.InProcess {
+			continue
+		}
+
 		It(fmt.Sprintf("%s publishes every asset its package names", spec.Name), func(ctx SpecContext) {
 			owner, repo, found := splitRepo(spec.Install.Repo)
 			Expect(found).To(BeTrue(), "repo must be owner/name")

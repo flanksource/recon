@@ -86,11 +86,23 @@ type EngineSpec struct {
 	Accepts string `json:"accepts,omitempty"`
 	Emits   string `json:"emits,omitempty"`
 
+	// Default reports whether a sweep runs this engine when the caller chooses
+	// none, which is what the engine picker opens on. False for scan engines,
+	// which are chosen one at a time rather than as a set.
+	Default bool `json:"default,omitempty"`
+
 	Version   string `json:"version,omitempty"`
 	Installed bool   `json:"installed"`
 	Managed   bool   `json:"managed"`
 	Path      string `json:"path,omitempty"`
 	Problem   string `json:"problem,omitempty"`
+
+	// Templates is the corpus an engine matches against, when it has one. For an
+	// engine compiled into this binary the binary cannot be missing, so this is
+	// the artifact that can actually be absent or stale — and without it every
+	// scan matches nothing, which reads as a clean run rather than a broken
+	// install. Nil for engines that carry no catalogue.
+	Templates *EngineTemplates `json:"templates,omitempty"`
 
 	// Sections is the option catalog the profile form renders. It is an opaque
 	// ordered structure here because its order is meaningful.
@@ -98,6 +110,16 @@ type EngineSpec struct {
 
 	// Defaults names the profile shipped with the engine.
 	Defaults string `json:"defaults,omitempty"`
+}
+
+// EngineTemplates describes an installed template corpus.
+type EngineTemplates struct {
+	Version string `json:"version,omitempty"`
+	Count   int    `json:"count"`
+	Path    string `json:"path,omitempty"`
+	// Problem says why the corpus could not be read, rather than reporting a
+	// count of zero as if the engine simply had nothing to run.
+	Problem string `json:"problem,omitempty"`
 }
 
 // GetID returns the engine's name.

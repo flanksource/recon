@@ -1,16 +1,18 @@
-package nuclei_test
+package nuclei
 
 import (
+	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/projectdiscovery/nuclei/v3/pkg/output"
+
 	"github.com/flanksource/recon/internal/api"
-	"github.com/flanksource/recon/internal/engines/scan/nuclei"
 )
 
 func TestNuclei(t *testing.T) {
@@ -19,9 +21,14 @@ func TestNuclei(t *testing.T) {
 }
 
 // results are the redacted captures of real nuclei output taken before the
-// TypeScript backend was removed. Parsing has to keep working against the bytes
-// the tool actually produced, not against a hand-written idea of them.
-func results(name string) *os.File {
+// TypeScript backend was removed.
+//
+// Nuclei is linked in now, so nothing parses this file during a scan — but it is
+// still exactly the JSON encoding of the result events the engine hands us, and
+// the run writes the same shape back out. Driving the mapping from the bytes the
+// tool actually produced is what keeps convert honest against a hand-written
+// idea of nuclei's output.
+func results(name string) (events []*output.ResultEvent, rejected []string) {
 	dir, err := os.Getwd()
 	Expect(err).ToNot(HaveOccurred())
 	for filepath.Base(dir) != "recon" {
@@ -33,25 +40,46 @@ func results(name string) *os.File {
 	file, err := os.Open(filepath.Join(dir, "contract/snapshot/results", name))
 	Expect(err).ToNot(HaveOccurred())
 	DeferCleanup(file.Close)
-	return file
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64<<10), 4<<20)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		event := &output.ResultEvent{}
+		if err := json.Unmarshal(line, event); err != nil {
+			var loose struct {
+				TemplateID string `json:"template-id"`
+			}
+			_ = json.Unmarshal(line, &loose)
+			rejected = append(rejected, loose.TemplateID)
+			continue
+		}
+		events = append(events, event)
+	}
+	Expect(scanner.Err()).ToNot(HaveOccurred())
+	return events, rejected
 }
 
-func parse(name string) ([]api.Finding, error) {
+func convertAll(name string) []api.Finding {
+	events, rejected := results(name)
+	Expect(rejected).To(BeEmpty(), "every record in %s should decode", name)
+
 	var found []api.Finding
-	err := nuclei.Engine{}.Parse(results(name), func(f api.Finding) error {
-		found = append(found, f)
-		return nil
-	})
-	return found, err
+	for _, event := range events {
+		_, finding := convert(event)
+		found = append(found, finding)
+	}
+	return found
 }
 
-var _ = Describe("parsing a captured scan", func() {
+var _ = Describe("converting a captured scan", func() {
 	var findings []api.Finding
 
 	BeforeEach(func() {
-		var err error
-		findings, err = parse("safe-non-prod-20260101-000000.jsonl")
-		Expect(err).ToNot(HaveOccurred())
+		findings = convertAll("safe-non-prod-20260101-000000.jsonl")
 	})
 
 	It("reads every finding in the file", func() {
@@ -97,18 +125,23 @@ var _ = Describe("parsing a captured scan", func() {
 	})
 })
 
-var _ = Describe("parsing the edge cases", func() {
+var _ = Describe("converting the edge cases", func() {
 	var findings []api.Finding
-	var err error
 
 	BeforeEach(func() {
-		findings, err = parse("safe-edge-20260101-000001.jsonl")
-	})
+		events, rejected := results("safe-edge-20260101-000001.jsonl")
 
-	It("reports the malformed line without losing the good ones", func() {
-		Expect(findings).To(HaveLen(5))
-		Expect(err).ToNot(HaveOccurred(),
-			"the malformed line does not open like a record, so it is a banner")
+		// nuclei's own decoder refuses a severity outside its vocabulary, so a
+		// record carrying one never becomes a result event at all. That is the
+		// engine's boundary, not ours — what matters here is that it costs one
+		// record and not the file.
+		Expect(rejected).To(ConsistOf("edge-bad-severity"))
+
+		findings = nil
+		for _, event := range events {
+			_, finding := convert(event)
+			findings = append(findings, finding)
+		}
 	})
 
 	byID := func(id string) api.Finding {
@@ -121,8 +154,13 @@ var _ = Describe("parsing the edge cases", func() {
 		return api.Finding{}
 	}
 
-	It("coerces a severity nuclei does not define rather than dropping the finding", func() {
-		Expect(byID("edge-bad-severity").Severity).To(Equal(api.SeverityUnknown))
+	It("classifies an unset severity as unknown rather than dropping the finding", func() {
+		// This is the reachable case: nuclei hands us a severity enum, and its
+		// zero value means the template declared none. A finding nobody can
+		// classify is still a finding.
+		_, finding := convert(&output.ResultEvent{TemplateID: "no-severity", Host: "h.example.test"})
+
+		Expect(finding.Severity).To(Equal(api.SeverityUnknown))
 	})
 
 	It("falls back to matched-at when the finding has no host", func() {
@@ -142,54 +180,9 @@ var _ = Describe("parsing the edge cases", func() {
 	})
 })
 
-var _ = Describe("parsing damaged output", func() {
-	// Cancelling a run truncates whatever line nuclei was mid-write on.
-	parseString := func(body string) ([]api.Finding, error) {
-		var found []api.Finding
-		err := nuclei.Engine{}.Parse(strings.NewReader(body), func(f api.Finding) error {
-			found = append(found, f)
-			return nil
-		})
-		return found, err
-	}
-
-	good := `{"template-id":"a","host":"h1.example.test","info":{"name":"A","severity":"high"}}`
-
-	It("keeps the findings either side of a truncated line and reports it", func() {
-		findings, err := parseString(good + "\n" + `{"template-id":"b","host":"h2` + "\n" + good)
-		Expect(findings).To(HaveLen(2))
-		Expect(err).To(MatchError(ContainSubstring("line 2 is not valid JSON")))
-	})
-
-	It("skips banners and blank lines silently", func() {
-		findings, err := parseString("[INF] Templates loaded: 100\n\n" + good + "\n")
-		Expect(findings).To(HaveLen(1))
-		Expect(err).ToNot(HaveOccurred())
-	})
-
-	It("fails outright when the caller cannot accept a finding", func() {
-		// A storage failure is not the engine's to absorb.
-		err := nuclei.Engine{}.Parse(strings.NewReader(good), func(api.Finding) error {
-			return os.ErrClosed
-		})
-		Expect(err).To(MatchError(os.ErrClosed))
-	})
-})
-
-var _ = Describe("Nuclei progress", func() {
-	It("discards the zero-total percentage overflow sentinel", func() {
-		stats, ok := nuclei.Engine{}.Progress(`{"duration":"0:00:01","errors":"0","hosts":"1","matched":"0","percent":"9223372036854775808","requests":"0","rps":"0","templates":"0","total":"0"}`)
-
-		Expect(ok).To(BeTrue())
-		Expect(stats).To(Equal(api.ScanStats{
-			Hosts: 1, Duration: "0:00:01",
-		}))
-	})
-})
-
 var _ = Describe("Nuclei configuration", func() {
 	It("rejects automatic technology selection when DAST removes its detection templates", func() {
-		err := nuclei.Engine{}.Spec().ValidateConfig(map[string]any{
+		err := Engine{}.Spec().ValidateConfig(map[string]any{
 			"automatic-scan": true,
 			"dast":           true,
 		})

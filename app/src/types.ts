@@ -13,7 +13,11 @@ export const CLASS_ORDER = [
 ] as const;
 export type TargetClass = (typeof CLASS_ORDER)[number];
 
-export const PROFILES = ["safe", "full"] as const;
+// The profiles a target can opt into are whatever the server has stored, which
+// is no longer a list short enough to keep here: nuclei ships focused profiles
+// alongside its own, and a hardcoded pair would silently hide the rest from
+// every control that offers them. Fetch with fetchProfiles({ kind: "scan" }).
+export const FALLBACK_PROFILES = ["safe", "full"] as const;
 
 // The server stamps `_id` onto rows in a list response so one is addressable
 // without knowing which field is its key. A single get does not carry it, hence
@@ -167,10 +171,55 @@ export type Finding = {
   curl?: string;
   request?: string;
   response?: string;
+  /** The engine's original record, kept verbatim. */
+  raw?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
-export type ScanPhase = "idle" | "running" | "done" | "failed" | "cancelled";
+// Template is one check a scan engine could run. The catalogue is read from the
+// installed templates rather than the database, so these are the engine's own
+// fields — renaming them would make it harder to trace a finding back to what
+// produced it.
+export type Template = Identified & {
+  id: string;
+  name: string;
+  engine: string;
+  severity: Severity;
+  type: string;
+  tags: string[];
+  authors: string[];
+  path: string;
+  description?: string;
+  remediation?: string;
+  reference?: string[];
+  cveId?: string;
+  cvssScore?: number;
+  maxRequests?: number;
+  // Options a profile must enable before this template runs at all.
+  requires?: string[];
+};
+
+export type TemplateTag = { tag: string; count: number };
+
+// TemplatePreview is what a profile configuration would run, answered before it
+// runs. Counts describe the whole selection; `templates` is a capped sample, so
+// read `total` for the number and `truncated` to know the list is partial.
+export type TemplatePreview = {
+  engine: string;
+  profile?: string;
+  total: number;
+  bySeverity: Partial<Record<Severity, number>>;
+  byType: Record<string, number>;
+  byTag: TemplateTag[];
+  maxRequests: number;
+  templates: Template[];
+  truncated: boolean;
+  // Reasons the count may overstate what runs — a filter the preview cannot
+  // evaluate, or a requirement that depends on the scanning host.
+  caveats?: string[];
+};
+
+export type ScanPhase = "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
 
 export const TERMINAL_PHASES: ScanPhase[] = ["done", "failed", "cancelled"];
 
@@ -200,6 +249,7 @@ export type Scan = Identified & {
   phase: ScanPhase;
   startedAt: string;
   finishedAt?: string;
+  durationMs: number;
   command?: string[];
   exitCode?: number;
   error?: string;
@@ -207,6 +257,11 @@ export type Scan = Identified & {
   severities: SeverityCounts;
   stats?: ScanStats;
   hosts: string[];
+  outputCaptured?: boolean;
+  stdout?: string;
+  stderr?: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
 };
 
 export type ScanOutputEvent = {
@@ -258,10 +313,23 @@ export type Engine = Identified & {
   // validated; scan engines leave these empty.
   accepts?: string;
   emits?: string;
+  // Whether a sweep runs this engine when nothing is chosen. The engine picker
+  // opens on this rather than on a list of its own, so what it shows as on is
+  // what the server would actually run.
+  default?: boolean;
   version?: string;
   installed: boolean;
   managed: boolean;
   path?: string;
+  // The template corpus, for engines that match against one. An in-process
+  // engine's binary cannot be missing, so this is the part that can be — and
+  // without it every scan matches nothing.
+  templates?: {
+    version?: string;
+    count: number;
+    path?: string;
+    problem?: string;
+  };
   sections: EngineSection[];
 };
 
@@ -288,10 +356,34 @@ export type DiscoveredHost = {
   live: boolean;
 };
 
+export type ProbeResult = {
+  host: string;
+  url?: string;
+  up: boolean;
+  statusCode?: number;
+  responseTimeMs: number;
+  ip?: string;
+  contentType?: string;
+  error?: string;
+};
+
+// One pass of liveness checks. There is no probes table behind it: a probe
+// writes what it saw onto the targets, so this is the response, not a record.
+export type ProbeRun = {
+  ranAt: string;
+  durationMs: number;
+  live: number;
+  updated: number;
+  results: ProbeResult[];
+};
+
 export type Discover = Identified & {
   id: string;
   chain: string;
-  profile: string;
+  // The profile each engine in the chain ran with, keyed by engine name. A
+  // sweep drives several engines and each can be configured separately, so one
+  // name would misreport any run that overrode one of them.
+  profiles: Record<string, string>;
   input: Record<string, unknown>;
   ranAt: string;
   durationMs: number;

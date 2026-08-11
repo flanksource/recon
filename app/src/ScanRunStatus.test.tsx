@@ -27,6 +27,7 @@ describe("ScanRunStatus", () => {
             phase: "running",
             profile: "full",
             selectorLabel: "class prod",
+            endpointCount: 7,
             hosts: ["api.example.com", "www.example.com"],
             id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
             name: "full-prod-20260809-080000",
@@ -71,6 +72,7 @@ describe("ScanRunStatus", () => {
 
     expect(screen.getByText("Nuclei full scan")).toBeInTheDocument();
     expect(screen.getByText("class prod")).toBeInTheDocument();
+    expect(screen.getByText("targets").parentElement).toHaveTextContent("7");
     expect(screen.getByText("25 / 100")).toBeInTheDocument();
     expect(screen.getByText("18")).toBeInTheDocument();
     expect(screen.getByText("nuclei -config .gen/scan-profile.yaml")).toBeInTheDocument();
@@ -95,6 +97,7 @@ describe("ScanRunStatus", () => {
       selectorLabel: "host app.example.test",
       endpointCount: 1,
       startedAt: "2026-08-10T12:45:19.000Z",
+      durationMs: 1000,
       stats: {
         requests: 0,
         total: 0,

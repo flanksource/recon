@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -23,6 +24,7 @@ type Scan struct {
 	Phase      string     `gorm:"column:phase"`
 	StartedAt  time.Time  `gorm:"column:started_at"`
 	FinishedAt *time.Time `gorm:"column:finished_at"`
+	DurationMS int64      `gorm:"column:duration_ms"`
 
 	ExitCode *int           `gorm:"column:exit_code"`
 	Error    *string        `gorm:"column:error"`
@@ -38,6 +40,17 @@ type Scan struct {
 // TableName is explicit so a gorm naming-strategy change cannot repoint the
 // model at a different table than the HCL declares.
 func (Scan) TableName() string { return "scans" }
+
+// ScanOutput is the bounded process evidence loaded only for one scan.
+type ScanOutput struct {
+	ScanID          string `gorm:"column:scan_id;primaryKey"`
+	Stdout          string `gorm:"column:stdout"`
+	Stderr          string `gorm:"column:stderr"`
+	StdoutTruncated bool   `gorm:"column:stdout_truncated"`
+	StderrTruncated bool   `gorm:"column:stderr_truncated"`
+}
+
+func (ScanOutput) TableName() string { return "scan_outputs" }
 
 // Document projects the row onto the wire type.
 //
@@ -56,6 +69,7 @@ func (s Scan) Document(findings int, hosts []string, label string) api.Scan {
 		EndpointCount: s.EndpointCount,
 		Phase:         api.Phase(s.Phase),
 		StartedAt:     localTimestamp(s.StartedAt),
+		DurationMS:    s.DurationMS,
 		Command:       stringSlice(s.Command),
 		ExitCode:      s.ExitCode,
 		Error:         deref(s.Error),
@@ -149,25 +163,35 @@ func (f Finding) Document() api.Finding {
 }
 
 // FindingFrom builds a row from a parsed finding.
+//
+// Every string is scrubbed of NUL on the way in. A finding carries the raw
+// request and response an engine saw, and a scanner that probes anything binary
+// — a TLS handshake, a compressed body, a network protocol — sees NUL bytes
+// routinely. Postgres accepts them in neither text nor jsonb, so one such
+// response used to abort the insert for the entire scan and lose every finding
+// in it along with the run's terminal status.
 func FindingFrom(scanID string, lineNo int, finding api.Finding) Finding {
 	row := Finding{
 		ScanID:      scanID,
 		LineNo:      lineNo,
-		TemplateID:  finding.TemplateID,
-		Name:        finding.Name,
+		TemplateID:  scrub(finding.TemplateID),
+		Name:        scrub(finding.Name),
 		Severity:    string(finding.Severity),
-		Host:        finding.Host,
-		MatchedAt:   finding.MatchedAt,
-		MatcherName: nonEmpty(finding.MatcherName),
-		Type:        nonEmpty(finding.Type),
-		Tags:        pq.StringArray(finding.Tags),
-		Extracted:   pq.StringArray(finding.Extracted),
-		Remediation: nonEmpty(finding.Remediation),
-		Reference:   pq.StringArray(finding.Reference),
-		Curl:        nonEmpty(finding.Curl),
-		Request:     nonEmpty(finding.Request),
-		Response:    nonEmpty(finding.Response),
-		Raw:         wrapMap(finding.Raw),
+		Host:        scrub(finding.Host),
+		MatchedAt:   scrub(finding.MatchedAt),
+		MatcherName: nonEmpty(scrub(finding.MatcherName)),
+		Type:        nonEmpty(scrub(finding.Type)),
+		// Never nil: the column is NOT NULL with a '{}' default, and GORM sends an
+		// explicit NULL for a nil slice rather than letting the default apply. A
+		// tagless finding is an empty list, not an absent one.
+		Tags:        pq.StringArray(orEmpty(scrubAll(finding.Tags))),
+		Extracted:   pq.StringArray(scrubAll(finding.Extracted)),
+		Remediation: nonEmpty(scrub(finding.Remediation)),
+		Reference:   pq.StringArray(scrubAll(finding.Reference)),
+		Curl:        nonEmpty(scrub(finding.Curl)),
+		Request:     nonEmpty(scrub(finding.Request)),
+		Response:    nonEmpty(scrub(finding.Response)),
+		Raw:         wrapMap(scrubMap(finding.Raw)),
 	}
 	if finding.Timestamp != "" {
 		if parsed, err := time.Parse(time.RFC3339, finding.Timestamp); err == nil {
@@ -175,6 +199,57 @@ func FindingFrom(scanID string, lineNo int, finding api.Finding) Finding {
 		}
 	}
 	return row
+}
+
+// nulReplacement marks where a byte Postgres cannot store used to be. The
+// standard replacement character rather than deletion, so the evidence says a
+// byte was dropped instead of quietly closing the gap.
+const nulReplacement = "�"
+
+// scrub removes the one character Postgres accepts in neither text nor jsonb.
+func scrub(value string) string {
+	if !strings.ContainsRune(value, 0) {
+		return value
+	}
+	return strings.ReplaceAll(value, "\x00", nulReplacement)
+}
+
+func scrubAll(values []string) []string {
+	for i, value := range values {
+		values[i] = scrub(value)
+	}
+	return values
+}
+
+// scrubMap walks a decoded JSON document. Keys are scrubbed as well as values:
+// an engine's raw record is arbitrary JSON, and a NUL anywhere in it fails the
+// whole insert.
+func scrubMap(document map[string]any) map[string]any {
+	if document == nil {
+		return nil
+	}
+	out := make(map[string]any, len(document))
+	for key, value := range document {
+		out[scrub(key)] = scrubValue(value)
+	}
+	return out
+}
+
+func scrubValue(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return scrub(typed)
+	case map[string]any:
+		return scrubMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = scrubValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // wrapMap stores a map as jsonb, keeping an absent map as SQL NULL rather than

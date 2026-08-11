@@ -60,9 +60,17 @@ func (p *Provisioner) register(specs []Spec) error {
 	return p.registered
 }
 
+// InProcessPath is the path reported for an engine that is linked in. It is not
+// a filesystem path on purpose: nothing can exec it, and a plausible-looking
+// path would invite something to try.
+const InProcessPath = "(in-process)"
+
 // Install provisions one engine's binary and returns its path. It is a no-op
 // when a suitable binary is already present.
 func (p *Provisioner) Install(ctx context.Context, spec Spec, all []Spec) (string, error) {
+	if spec.InProcess {
+		return InProcessPath, nil
+	}
 	if err := p.register(all); err != nil {
 		return "", err
 	}
@@ -90,6 +98,10 @@ func (p *Provisioner) Install(ctx context.Context, spec Spec, all []Spec) (strin
 // first, then PATH. Returning the managed one first means a pinned version wins
 // over whatever else is installed on the machine.
 func (p *Provisioner) Resolve(spec Spec) (string, error) {
+	if spec.InProcess {
+		return InProcessPath, nil
+	}
+
 	managed := filepath.Join(p.BinDir, spec.Binary)
 	if executable(managed) {
 		return managed, nil
@@ -115,6 +127,16 @@ type Status struct {
 // Status resolves one engine's installation state.
 func (p *Provisioner) Status(spec Spec) Status {
 	status := Status{Engine: spec.Name, Binary: spec.Binary}
+
+	// A linked-in engine cannot be absent, out of date, or shadowed by a copy on
+	// PATH. Reporting it as installed is not optimism — there is nothing that
+	// could make it false.
+	if spec.InProcess {
+		status.Path = InProcessPath
+		status.Installed = true
+		status.Managed = true
+		return status
+	}
 
 	path, err := p.Resolve(spec)
 	if err != nil {

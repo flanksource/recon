@@ -72,6 +72,9 @@ func New() *cobra.Command {
 		Runtimes:    entities.Runtimes{Scans: scans, Discovery: sweeps},
 	}
 	registry.Register()
+	// Served over HTTP as well, unlike `ping` above: a probe can only reach the
+	// inventory, so publishing it does not hand a caller an arbitrary fetcher.
+	registry.AddProbeCommand(cmd)
 	registerEngineCommands()
 	clicky.GenerateCLI(cmd)
 

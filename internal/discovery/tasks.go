@@ -28,11 +28,11 @@ func (c stageTaskController) Control(_ context.Context, action task.ControlActio
 	return nil
 }
 
-func newDiscoveryTaskGroup(id, mode, profile string) task.TypedGroup[Stage] {
+func newDiscoveryTaskGroup(id, mode, profiles string) task.TypedGroup[Stage] {
 	return clicky.StartGroup[Stage]("discover "+mode,
 		task.WithGroupID(id),
 		task.WithKind("discovery"),
-		task.WithLabels(map[string]string{"mode": mode, "profile": profile}),
+		task.WithLabels(map[string]string{"mode": mode, "profiles": profiles}),
 		task.WithConcurrency(1),
 	)
 }

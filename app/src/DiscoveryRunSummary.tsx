@@ -23,7 +23,16 @@ export function DiscoveryRunSummary({
           {result.hosts.length} host{result.hosts.length === 1 ? "" : "s"}{" "}
           probed
         </span>
-        <span className="text-muted-foreground">profile {result.profile}</span>
+        {Object.entries(result.profiles)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([engine, profile]) => (
+            <span
+              key={engine}
+              className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+            >
+              {engine} · {profile}
+            </span>
+          ))}
         {result.error && (
           <span className="text-destructive">{result.error}</span>
         )}

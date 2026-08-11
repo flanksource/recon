@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,9 +60,12 @@ type Runtime struct {
 	Provisioner *engines.Provisioner
 	Publisher   Publisher
 	Root        string
+	Concurrency int
 
 	mu      sync.Mutex
 	current *Run
+	runs    map[string]*Run
+	queue   *scanQueue
 }
 
 // Run is one scan, live or finished.
@@ -69,12 +73,46 @@ type Run struct {
 	Scan   api.Scan
 	Output *Output
 
-	invocation *engines.Invocation
-	managed    *managedScan
-	cancel     context.CancelFunc
+	session   *session
+	task      *task.Task
+	queueDone func()
+	row       models.Scan
 
 	// done closes when the run reaches a terminal phase. Wait blocks on it.
-	done chan struct{}
+	done     chan struct{}
+	doneOnce sync.Once
+}
+
+// SetConcurrency configures the number of scans that may run at once. It must be
+// called before the first scan is accepted.
+//
+// An engine that runs in this process caps it at one. Nuclei's engine keeps
+// global state, so two concurrent scans would interfere with each other's
+// results rather than merely competing for bandwidth. Refusing is the honest
+// answer: silently serialising would leave the operator believing a setting
+// took effect that did not.
+func (r *Runtime) SetConcurrency(concurrency int) error {
+	if concurrency < 1 {
+		return fmt.Errorf("scan concurrency must be at least 1, got %d", concurrency)
+	}
+	if concurrency > 1 {
+		if serial := serialEngines(); len(serial) > 0 {
+			return fmt.Errorf(
+				"scan concurrency must be 1: %s runs in this process and cannot scan concurrently",
+				strings.Join(serial, ", "))
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	configured := r.Concurrency
+	if configured == 0 {
+		configured = 1
+	}
+	if r.queue != nil && configured != concurrency {
+		return fmt.Errorf("scan concurrency cannot change after scans have been queued")
+	}
+	r.Concurrency = concurrency
+	return nil
 }
 
 // Status is the snapshot the UI renders. It is derived from Run rather than
@@ -133,7 +171,7 @@ func (r *Runtime) status() Status {
 	}
 	status := Status{
 		Scan:    r.current.Scan,
-		Running: !r.current.Scan.Phase.Terminal(),
+		Running: r.current.Scan.Phase == api.PhaseRunning,
 	}
 	if r.current.Output != nil {
 		snapshot := r.current.Output.Snapshot()
@@ -166,10 +204,9 @@ func (r *Runtime) PublishCurrent() {
 
 // Start validates a request and begins a scan.
 //
-// The order of checks is the order the UI expects to see them fail in: already
-// running, then the engine, then the profile, then what the selector actually
-// resolves to, and only then the risk gate — so "no endpoints match" is
-// reported before being asked to confirm a scan of nothing.
+// Validation happens before admission so an invalid request never occupies a
+// queue slot. Accepted scans are recorded as queued and start when capacity is
+// available.
 func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -180,8 +217,16 @@ func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) 
 	if r.Provisioner == nil {
 		return api.Scan{}, fmt.Errorf("scan runtime has no provisioner: it was not wired up")
 	}
-	if r.current != nil && !r.current.Scan.Phase.Terminal() {
-		return api.Scan{}, fmt.Errorf("a scan is already running: %s", r.current.Scan.Name)
+	if r.queue == nil {
+		concurrency := r.Concurrency
+		if concurrency == 0 {
+			concurrency = 1
+		}
+		queue, err := newScanQueue(concurrency)
+		if err != nil {
+			return api.Scan{}, err
+		}
+		r.queue = queue
 	}
 
 	engine, err := enginescan.Get(request.Engine)
@@ -212,12 +257,7 @@ func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) 
 		}
 	}
 
-	bin, err := r.Provisioner.Resolve(spec)
-	if err != nil {
-		return api.Scan{}, err
-	}
-
-	return r.launch(ctx, engine, bin, config, endpoints, request)
+	return r.enqueue(ctx, engine, config, endpoints, request)
 }
 
 // resolveConfig layers the run-only overrides over the stored profile and
@@ -243,17 +283,16 @@ func (r *Runtime) resolveConfig(ctx context.Context, spec engines.Spec, request 
 	return config, nil
 }
 
-func (r *Runtime) launch(
+func (r *Runtime) enqueue(
 	ctx context.Context,
 	engine enginescan.Engine,
-	bin string,
 	config map[string]any,
 	endpoints []store.Endpoint,
 	request Request,
 ) (api.Scan, error) {
 	spec := engine.Spec()
-	started := time.Now()
-	name := fmt.Sprintf("%s-%s-%s", spec.Name, request.Profile, started.Format("20060102-150405"))
+	queuedAt := time.Now()
+	name := fmt.Sprintf("%s-%s-%s", spec.Name, request.Profile, queuedAt.Format("20060102-150405.000000000"))
 	selector, err := selectorMap(request.Selector)
 	if err != nil {
 		return api.Scan{}, err
@@ -265,8 +304,8 @@ func (r *Runtime) launch(
 		Profile:       request.Profile,
 		Selector:      models.Wrap(selector),
 		EndpointCount: len(endpoints),
-		Phase:         string(api.PhaseRunning),
-		StartedAt:     started,
+		Phase:         string(api.PhaseQueued),
+		StartedAt:     queuedAt,
 	})
 	if err != nil {
 		return api.Scan{}, err
@@ -274,7 +313,7 @@ func (r *Runtime) launch(
 
 	dir, err := engines.NewWorkDir(r.Root, "scan", row.ID)
 	if err != nil {
-		return api.Scan{}, err
+		return api.Scan{}, r.failQueuedScan(ctx, row, err)
 	}
 
 	targets := make([]string, 0, len(endpoints))
@@ -283,174 +322,137 @@ func (r *Runtime) launch(
 	}
 	in, err := engines.WriteList(dir, "targets.txt", targets)
 	if err != nil {
-		return api.Scan{}, err
+		_ = os.RemoveAll(dir)
+		return api.Scan{}, r.failQueuedScan(ctx, row, err)
 	}
 
 	out := filepath.Join(dir, "findings.jsonl")
-	output := NewOutput(progressOf(engine))
-	invocation := &engines.Invocation{
-		Bin:     bin,
-		Args:    engine.Args(engines.Run{Bin: bin, WorkDir: dir, Config: config, In: in, Out: out}),
-		WorkDir: dir,
-	}
+	engineRun := engines.Run{WorkDir: dir, Config: config, In: in, Out: out}
+	output := NewOutput()
+	current := newSession(output, dir, commandOf(engine, engineRun))
 
-	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	managed := startManagedScan(name, spec.Name, request.Profile, func() error {
-		cancel()
-		return invocation.Cancel()
-	})
-	bindManagedScan(managed, invocation)
-	invocation.Stdout = streamWriter{output: output, stream: StreamStdout, task: managed.Task(), runtime: r}
-	invocation.Stderr = streamWriter{output: output, stream: StreamStderr, task: managed.Task(), runtime: r}
 	run := &Run{
-		Scan:       row.Document(0, nil, request.Selector.Describe()),
-		Output:     output,
-		invocation: invocation,
-		managed:    managed,
-		cancel:     cancel,
-		done:       make(chan struct{}),
+		Scan:    row.Document(0, nil, request.Selector.Describe()),
+		Output:  output,
+		session: current,
+		row:     row,
+		done:    make(chan struct{}),
 	}
-	run.Scan.Command = append([]string{bin}, invocation.Args...)
+	run.Scan.Command = current.Command
+	row.Command = append(row.Command, run.Scan.Command...)
+	run.row.Command = append(run.row.Command, run.Scan.Command...)
+	if err := r.Store.UpdateScan(ctx, row); err != nil {
+		current.Cleanup()
+		return api.Scan{}, fmt.Errorf("persist queued scan command: %w", err)
+	}
+	if r.runs == nil {
+		r.runs = map[string]*Run{}
+	}
+	r.runs[run.Scan.ID] = run
 	r.current = run
-	r.publish()
-
-	go r.supervise(runCtx, run, engine, row, out)
-	return run.Scan, nil
-}
-
-// collect reads the findings the engine wrote.
-func (r *Runtime) collect(engine enginescan.Engine, path string) ([]api.Finding, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// A scan that matched nothing writes no file. That is a clean run
-			// with no findings, not a failure.
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read findings: %w", err)
-	}
-	defer file.Close()
-
-	var findings []api.Finding
-	parseErr := engine.Parse(file, func(finding api.Finding) error {
-		findings = append(findings, finding)
-		return nil
+	queuedTask := r.queue.Add(name, spec.Name, request.Profile, func(taskCtx context.Context, scanTask *task.Task) (api.Scan, error) {
+		return r.execute(taskCtx, scanTask, run, engine, engineRun)
+	}, func() error {
+		return r.cancelRun(run)
 	})
-	return findings, parseErr
-}
-
-// Wait blocks until the current run finishes and returns how it ended.
-//
-// The CLI needs this: a scan runs in a goroutine, so a command that returned as
-// soon as the engine started would exit and take the run with it, leaving the
-// row stuck at "running" forever. The server does not wait — that is what the
-// event stream is for.
-func (r *Runtime) Wait(ctx context.Context) (api.Scan, error) {
-	r.mu.Lock()
-	run := r.current
-	r.mu.Unlock()
-
-	if run == nil {
-		return api.Scan{}, fmt.Errorf("no scan has been started")
-	}
-
-	select {
-	case <-run.done:
-	case <-ctx.Done():
-		return api.Scan{}, ctx.Err()
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	run.task = queuedTask.Task
+	run.queueDone = queuedTask.complete
+	bindScanTask(run.task, scanTaskBinding{
+		Session: current,
+		Snapshot: func() api.Scan {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			return run.Scan
+		},
+	})
+	r.publish()
 	return run.Scan, nil
 }
 
-// Cancel stops the running scan and everything it started.
-func (r *Runtime) Cancel() error {
+func (r *Runtime) failQueuedScan(ctx context.Context, row models.Scan, cause error) error {
+	finished := time.Now()
+	row.Phase = string(api.PhaseFailed)
+	row.FinishedAt = &finished
+	row.Error = new(string)
+	*row.Error = cause.Error()
+	if err := r.Store.FinalizeScan(context.WithoutCancel(ctx), store.FinalizeScanOptions{
+		Scan: row, Output: models.ScanOutput{},
+	}); err != nil {
+		return fmt.Errorf("%w; persist failed queued scan: %v", cause, err)
+	}
+	return cause
+}
+
+func (r *Runtime) execute(
+	ctx context.Context,
+	scanTask *task.Task,
+	run *Run,
+	engine enginescan.Engine,
+	engineRun engines.Run,
+) (api.Scan, error) {
 	r.mu.Lock()
-	run := r.current
+	if run.Scan.Phase.Terminal() {
+		result := run.Scan
+		r.mu.Unlock()
+		return result, context.Canceled
+	}
+
+	started := time.Now()
+	run.Scan.Phase = api.PhaseRunning
+	run.Scan.StartedAt = started.Format("2006-01-02T15:04:05")
+	run.row.Phase = string(api.PhaseRunning)
+	run.row.StartedAt = started
+	run.row.Command = run.Scan.Command
+	r.current = run
+	if err := r.Store.UpdateScan(context.WithoutCancel(ctx), run.row); err != nil {
+		finished := time.Now()
+		run.Scan.Phase = api.PhaseFailed
+		run.Scan.Error = err.Error()
+		run.Scan.FinishedAt = finished.Format("2006-01-02T15:04:05")
+		run.doneOnce.Do(func() { close(run.done) })
+		r.publish()
+		result := run.Scan
+		r.mu.Unlock()
+		return result, err
+	}
+	r.publish()
 	r.mu.Unlock()
 
-	if run == nil || run.Scan.Phase.Terminal() {
-		return fmt.Errorf("no scan is running")
+	r.supervise(ctx, scanTask, run, engine, run.row, engineRun)
+
+	r.mu.Lock()
+	result := run.Scan
+	r.mu.Unlock()
+	return result, finishScanTask(scanTask, result)
+}
+
+func finishScanTask(scanTask *task.Task, result api.Scan) error {
+	switch result.Phase {
+	case api.PhaseDone:
+		if result.Error != "" {
+			scanTask.Warning()
+		}
+		return nil
+	case api.PhaseCancelled:
+		scanTask.SetStatus(task.StatusCancelled)
+		return context.Canceled
+	default:
+		return fmt.Errorf("scan %s failed: %s", result.Name, result.Error)
 	}
-	run.managed.controller.stopping.Store(true)
-	run.cancel()
-	return run.invocation.Cancel()
 }
 
-// streamWriter feeds one pipe into the buffer and publishes as it goes.
-type streamWriter struct {
-	output  *Output
-	stream  Stream
-	task    *task.Task
-	runtime *Runtime
-}
-
-func (w streamWriter) Write(p []byte) (int, error) {
-	w.output.Append(w.stream, string(p))
-	updateTaskProgress(w.task, w.output.Snapshot().Stats)
-	// Take the lock to publish: the snapshot has to be consistent with whatever
-	// the supervising goroutine is writing.
-	w.runtime.mu.Lock()
-	w.runtime.publish()
-	w.runtime.mu.Unlock()
-	return len(p), nil
-}
-
-// progressOf returns the engine's progress parser, or nil when it reports none.
-func progressOf(engine enginescan.Engine) enginescan.Progress {
-	parser, ok := engine.(enginescan.Progress)
+// commandOf renders the equivalent command line for a run, when the engine can
+// describe itself that way.
+//
+// Nothing executes it. It is recorded on the scan so the UI can show what the
+// run amounted to and someone can reproduce it by hand — an in-process engine
+// would otherwise leave no trace of its configuration outside the database.
+func commandOf(engine enginescan.Engine, run engines.Run) []string {
+	describer, ok := engine.(interface {
+		Command(engines.Run) []string
+	})
 	if !ok {
 		return nil
 	}
-	return parser
-}
-
-func selectorMap(opts store.TargetOpts) (*map[string]any, error) {
-	stored, err := opts.Map()
-	if err != nil {
-		return nil, err
-	}
-	return &stored, nil
-}
-
-func hostsOf(findings []api.Finding) []string {
-	seen := map[string]bool{}
-	var hosts []string
-	for _, finding := range findings {
-		if finding.Host != "" && !seen[finding.Host] {
-			seen[finding.Host] = true
-			hosts = append(hosts, finding.Host)
-		}
-	}
-	return hosts
-}
-
-func errorText(err error, code int) string {
-	if err != nil {
-		return err.Error()
-	}
-	return fmt.Sprintf("engine exited %d", code)
-}
-
-// summarise names the first few hosts and counts the rest. A prompt that says
-// "3 production hosts" without saying which is not one anyone can answer.
-func summarise(hosts []string) string {
-	const shown = 3
-	if len(hosts) <= shown {
-		return joinHosts(hosts)
-	}
-	return fmt.Sprintf("%s and %d more", joinHosts(hosts[:shown]), len(hosts)-shown)
-}
-
-func joinHosts(hosts []string) string {
-	out := ""
-	for i, host := range hosts {
-		if i > 0 {
-			out += ", "
-		}
-		out += host
-	}
-	return out
+	return describer.Command(run)
 }

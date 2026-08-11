@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -58,8 +59,18 @@ var _ = Describe("the engine registries", func() {
 	// Register panics on a malformed spec, so reaching this point already proves
 	// the basics. These assertions cover what Validate cannot: that the install
 	// metadata is complete enough to actually resolve a binary on this machine.
-	It("declares an installable package for every engine", func() {
+	It("declares an installable package for every engine that is a binary", func() {
 		for _, spec := range allSpecs() {
+			if spec.InProcess {
+				// Nothing to provision, and nothing that could be missing. The
+				// artifact a linked-in engine still needs is its templates,
+				// which the runtime installs rather than deps.
+				By(spec.Name + " (in-process)")
+				Expect(spec.Install.Name).To(BeEmpty(),
+					"install metadata for an engine that is never installed")
+				continue
+			}
+
 			By(spec.Name)
 			Expect(spec.Install.Manager).To(Equal("github_release"))
 			Expect(spec.Install.Repo).ToNot(BeEmpty())
@@ -77,14 +88,46 @@ var _ = Describe("the engine registries", func() {
 		}
 	})
 
-	It("gives every engine a default profile that validates against its own catalog", func() {
+	It("gives every engine built-in profiles that validate against its own catalog", func() {
 		// Without an import step this is the only source of a working
-		// configuration, so a default that its own catalog rejects would leave a
+		// configuration, so a profile that its own catalog rejects would leave a
 		// fresh install with no usable profile.
 		for _, spec := range allSpecs() {
 			By(spec.Name)
 			Expect(spec.Defaults.Name).ToNot(BeEmpty())
-			Expect(spec.Sections.Validate(spec.Defaults.Config)).To(Succeed())
+			for _, profile := range spec.BuiltInProfiles() {
+				Expect(spec.ValidateConfig(profile.Config)).To(Succeed())
+			}
+		}
+	})
+
+	It("publishes the Nuclei scan profiles written here", func() {
+		// The imported community profiles are not listed: they come from the
+		// installed templates release and change with it, so pinning them here
+		// would make a template update a test failure. That they are present,
+		// valid and non-empty is covered in the nuclei package itself.
+		var names []string
+		for _, profile := range mustFind("nuclei").BuiltInProfiles() {
+			names = append(names, profile.Name)
+		}
+
+		Expect(names).To(ContainElements(
+			"safe", "full",
+			"static", "dns", "java", "go", "k8s", "public", "app",
+		))
+	})
+
+	It("gives every scan profile a name the database will accept", func() {
+		// engine_profiles has a check constraint on the name format, and a
+		// built-in profile that violates it fails at seeding — on startup, for
+		// everyone, rather than for whoever created it.
+		valid := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+		for _, spec := range allSpecs() {
+			for _, profile := range spec.BuiltInProfiles() {
+				Expect(profile.Name).To(MatchRegexp(valid.String()),
+					"%s profile %q cannot be stored", spec.Name, profile.Name)
+			}
 		}
 	})
 
@@ -231,18 +274,11 @@ var _ = Describe("the nuclei scan engine", func() {
 		Expect(risk.Reason).To(ContainSubstring("fuzzing"))
 	})
 
-	It("always excludes the destructive template tags", func() {
-		engine, err := scan.Get("nuclei")
-		Expect(err).ToNot(HaveOccurred())
-
-		// A profile must not be able to switch these back on.
-		args := engine.Args(engines.Run{
-			In: "hosts.txt", Out: "out.jsonl",
-			Config: map[string]any{"tags": []any{"dos"}},
-		})
-		Expect(args).To(ContainElement("-exclude-tags"))
-		Expect(args[len(args)-1]).To(Equal("dos,fuzz,bruteforce,intrusive"))
-	})
+	// Nuclei's refusal to run destructive templates whatever a profile says is
+	// asserted where it is now enforced — against the options the engine
+	// actually reads, in internal/engines/scan/nuclei/options_test.go. It used
+	// to be checked here, on the last two arguments of a command line that no
+	// longer exists.
 })
 
 func mustFind(name string) engines.Spec {

@@ -84,11 +84,42 @@ const engines = [
   },
 ];
 
+// The scan dialog also loads the discovery catalog, because every run sweeps
+// before it scans.
+const discoveryEngines = [
+  {
+    _id: "naabu",
+    name: "naabu",
+    kind: "discovery",
+    title: "Naabu",
+    binary: "naabu",
+    installed: true,
+    managed: true,
+    sections: [
+      {
+        id: "ports",
+        title: "Ports",
+        properties: { "top-ports": { type: "string", title: "Top ports" } },
+      },
+    ],
+  },
+];
+
+const discoveryProfiles: Profile[] = [
+  {
+    _id: "discovery:naabu:default",
+    kind: "discovery",
+    engine: "naabu",
+    name: "default",
+    config: { "top-ports": "100" },
+  },
+];
+
 const discoverResult = {
   _id: "sweep-1",
   id: "sweep-1",
   chain: "targeted",
-  profile: "default",
+  profiles: { naabu: "default", httpx: "default" },
   input: { hosts: ["api.example.com"] },
   ranAt: "2026-08-09T08:00:00",
   durationMs: 10,
@@ -182,8 +213,13 @@ describe("TargetView", () => {
     vi.mocked(api.fetchTarget).mockResolvedValue(target);
     vi.mocked(api.fetchTargetSchema).mockResolvedValue(schema);
     vi.mocked(api.saveTarget).mockResolvedValue(target);
-    vi.mocked(api.fetchProfiles).mockResolvedValue(profiles as never);
-    vi.mocked(api.fetchEngines).mockResolvedValue(engines as never);
+    vi.mocked(api.fetchProfiles).mockImplementation(
+      async (params) =>
+        (params?.kind === "discovery" ? discoveryProfiles : profiles) as never,
+    );
+    vi.mocked(api.fetchEngines).mockImplementation(
+      async (kind) => (kind === "discovery" ? discoveryEngines : engines) as never,
+    );
     vi.mocked(api.fetchScanStatus).mockResolvedValue(idleStatus as never);
     vi.mocked(api.startScan).mockImplementation(
       async (args) => runningStatus(args.profile) as never,
@@ -241,7 +277,10 @@ describe("TargetView", () => {
     );
 
     await waitFor(() =>
-      expect(api.runDiscovery).toHaveBeenCalledWith({ host: [target.host] }),
+      expect(api.runDiscovery).toHaveBeenCalledWith({
+        host: [target.host],
+        profile: ["default"],
+      }),
     );
     expect(api.startScan).not.toHaveBeenCalled();
   });

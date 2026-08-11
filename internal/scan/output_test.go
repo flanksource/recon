@@ -13,7 +13,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/recon/internal/api"
-	"github.com/flanksource/recon/internal/engines/scan/nuclei"
 	"github.com/flanksource/recon/internal/scan"
 )
 
@@ -38,45 +37,29 @@ func writes(events []scan.OutputEvent) []wrote {
 	return out
 }
 
-// stubProgress recognises a line shape no real engine emits, which is the
-// point: the buffer must ask the engine what progress looks like rather than
-// knowing itself.
-type stubProgress struct{}
-
-func (stubProgress) Progress(line string) (api.ScanStats, bool) {
-	rest, ok := strings.CutPrefix(line, "PROGRESS ")
-	if !ok {
-		return api.ScanStats{}, false
-	}
-	return api.ScanStats{Duration: rest}, true
-}
-
-var _ = Describe("reassembling output from two pipes", func() {
+var _ = Describe("reassembling output written in chunks", func() {
 	// Ported from app/server/scan-runtime.test.ts.
-	It("parses split stats without combining interleaved stdout and stderr lines", func() {
-		out := scan.NewOutput(nuclei.Engine{})
+	It("does not combine lines written on different streams", func() {
+		out := scan.NewOutput()
 
-		out.Append(scan.StreamStdout, `{"requests":"5",`)
+		out.Append(scan.StreamStdout, "loaded ")
 		out.Append(scan.StreamStderr, "retrying ")
-		out.Append(scan.StreamStdout, `"total":"10","percent":"50","templates":"3"}`+"\n")
+		out.Append(scan.StreamStdout, "4314 templates\n")
 		out.Append(scan.StreamStderr, "request\n")
 		out.Flush()
 
 		state := out.Snapshot()
-		Expect(state.Stats).To(Equal(&api.ScanStats{
-			Requests: 5, Total: 10, Percent: 50, Templates: 3,
-		}))
-		Expect(state.Log).To(Equal("retrying request\n"))
+		Expect(state.Log).To(Equal("loaded 4314 templates\nretrying request\n"))
 		Expect(writes(state.Events)).To(Equal([]wrote{
-			{Sequence: 1, Stream: scan.StreamStdout, Text: `{"requests":"5",`},
+			{Sequence: 1, Stream: scan.StreamStdout, Text: "loaded "},
 			{Sequence: 2, Stream: scan.StreamStderr, Text: "retrying "},
-			{Sequence: 3, Stream: scan.StreamStdout, Text: `"total":"10","percent":"50","templates":"3"}` + "\n"},
+			{Sequence: 3, Stream: scan.StreamStdout, Text: "4314 templates\n"},
 			{Sequence: 4, Stream: scan.StreamStderr, Text: "request\n"},
 		}))
 	})
 
 	It("holds a line back until its newline arrives", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, "half a ")
 
 		Expect(out.Snapshot().Log).To(BeEmpty())
@@ -86,7 +69,7 @@ var _ = Describe("reassembling output from two pipes", func() {
 	})
 
 	It("interprets the trailing partial line on flush, once", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStderr, "engine died mid-")
 
 		out.Flush()
@@ -96,7 +79,7 @@ var _ = Describe("reassembling output from two pipes", func() {
 	})
 
 	It("ignores an empty write rather than spending a sequence number on it", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, "")
 		out.Append(scan.StreamStdout, "first\n")
 
@@ -106,14 +89,14 @@ var _ = Describe("reassembling output from two pipes", func() {
 	})
 
 	It("drops blank lines from the log", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, "one\n\n   \ntwo\n")
 
 		Expect(out.Snapshot().Log).To(Equal("one\ntwo\n"))
 	})
 
 	It("logs a system message whole without waiting for a newline", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, "partial")
 		out.Append(scan.StreamSystem, "cancelled by user")
 
@@ -127,7 +110,7 @@ var _ = Describe("reassembling output from two pipes", func() {
 	})
 
 	It("stamps every event with the time it arrived", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		before := time.Now().UTC()
 		out.Append(scan.StreamStdout, "a\n")
 		out.Append(scan.StreamStderr, "b\n")
@@ -146,52 +129,48 @@ var _ = Describe("reassembling output from two pipes", func() {
 	})
 
 	It("rejects a stream it cannot buffer rather than inventing one", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		Expect(func() { out.Append(scan.Stream("stdin"), "x\n") }).To(PanicWith(ContainSubstring(`unknown output stream "stdin"`)))
 	})
 })
 
 var _ = Describe("progress reported by the engine", func() {
-	It("keeps a recognised progress line out of the log", func() {
-		out := scan.NewOutput(stubProgress{})
-		out.Append(scan.StreamStdout, "PROGRESS 12s\nreal log line\n")
-
-		state := out.Snapshot()
-		Expect(state.Stats).To(Equal(&api.ScanStats{Duration: "12s"}))
-		Expect(state.Log).To(Equal("real log line\n"))
-	})
-
 	It("keeps only the latest report", func() {
-		out := scan.NewOutput(stubProgress{})
-		out.Append(scan.StreamStdout, "PROGRESS 12s\nPROGRESS 30s\n")
+		out := scan.NewOutput()
+		out.SetStats(api.ScanStats{Requests: 5, Total: 10, Duration: "12s"})
+		out.SetStats(api.ScanStats{Requests: 9, Total: 10, Duration: "30s"})
 
-		Expect(out.Snapshot().Stats).To(Equal(&api.ScanStats{Duration: "30s"}))
+		Expect(out.Snapshot().Stats).To(Equal(&api.ScanStats{
+			Requests: 9, Total: 10, Duration: "30s",
+		}))
 	})
 
-	It("reports nothing for an engine that reports no progress", func() {
-		// No parser means no progress bar; a JSON line is then just output.
-		line := `{"requests":"5","total":"10"}`
-		out := scan.NewOutput(nil)
-		out.Append(scan.StreamStdout, line+"\n")
+	It("reports nothing until the engine says something", func() {
+		// No stats means no progress bar, which is the honest answer: a bar that
+		// never moves is worse than none.
+		out := scan.NewOutput()
+		out.Append(scan.StreamStdout, "loading templates\n")
 
 		state := out.Snapshot()
 		Expect(state.Stats).To(BeNil())
-		Expect(state.Log).To(Equal(line + "\n"))
+		Expect(state.Log).To(Equal("loading templates\n"))
 	})
 
-	It("logs a finding, which is JSON on the same stream but is not progress", func() {
-		finding := `{"template-id":"a","host":"h1.example.test"}`
-		out := scan.NewOutput(nuclei.Engine{})
-		out.Append(scan.StreamStdout, finding+"\n")
+	It("logs JSON the engine writes rather than mistaking it for progress", func() {
+		// Progress arrives as counters now, so no line on this stream is ever
+		// interpreted — one that looks like stats is just a line.
+		line := `{"requests":"5","total":"10"}`
+		out := scan.NewOutput()
+		out.Append(scan.StreamStdout, line+"\n")
 
 		Expect(out.Snapshot().Stats).To(BeNil())
-		Expect(out.Snapshot().Log).To(Equal(finding + "\n"))
+		Expect(out.Snapshot().Log).To(Equal(line + "\n"))
 	})
 })
 
 var _ = Describe("bounding what is kept", func() {
 	It("truncates a long line by runes, so the tail it counts in bytes is longer", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, strings.Repeat("é", scan.LogLineChars+100)+"\n")
 
 		logged := strings.TrimSuffix(out.Snapshot().Log, "\n")
@@ -201,7 +180,7 @@ var _ = Describe("bounding what is kept", func() {
 	})
 
 	It("leaves a line at the limit alone", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		line := strings.Repeat("x", scan.LogLineChars)
 		out.Append(scan.StreamStdout, line+"\n")
 
@@ -209,7 +188,7 @@ var _ = Describe("bounding what is kept", func() {
 	})
 
 	It("keeps the last 20000 bytes of the log", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		line := strings.Repeat("x", 99)
 		for i := 0; i < 1000; i++ {
 			out.Append(scan.StreamStdout, line+"\n")
@@ -221,7 +200,7 @@ var _ = Describe("bounding what is kept", func() {
 	})
 
 	It("bounds the log in bytes, not runes", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		for i := 0; i < 200; i++ {
 			out.Append(scan.StreamStdout, strings.Repeat("é", 100)+"\n")
 		}
@@ -232,7 +211,7 @@ var _ = Describe("bounding what is kept", func() {
 	})
 
 	It("slices into the oldest surviving write rather than dropping it whole", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, strings.Repeat("a", 15_000))
 		out.Append(scan.StreamStdout, strings.Repeat("b", 10_000))
 
@@ -243,7 +222,7 @@ var _ = Describe("bounding what is kept", func() {
 	})
 
 	It("drops a write that has fallen entirely out of the tail, keeping its sequence gap", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		for _, char := range []string{"a", "b", "c"} {
 			out.Append(scan.StreamStdout, strings.Repeat(char, 10_000))
 		}
@@ -255,7 +234,7 @@ var _ = Describe("bounding what is kept", func() {
 	})
 
 	It("trims a single oversized write down to the tail", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, strings.Repeat("a", 25_000)+strings.Repeat("z", 1))
 
 		events := out.Snapshot().Events
@@ -269,7 +248,7 @@ var _ = Describe("concurrent writers", func() {
 	const perStream = 200
 
 	It("keeps every line while both pipes write and a reader snapshots", func() {
-		out := scan.NewOutput(nuclei.Engine{})
+		out := scan.NewOutput()
 
 		var wg sync.WaitGroup
 		for _, stream := range []scan.Stream{scan.StreamStdout, scan.StreamStderr} {
@@ -303,7 +282,7 @@ var _ = Describe("concurrent writers", func() {
 	})
 
 	It("hands the reader a copy that later writes cannot rewrite", func() {
-		out := scan.NewOutput(nil)
+		out := scan.NewOutput()
 		out.Append(scan.StreamStdout, strings.Repeat("a", 15_000))
 		taken := out.Snapshot()
 

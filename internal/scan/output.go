@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/flanksource/recon/internal/api"
-	engine "github.com/flanksource/recon/internal/engines/scan"
 )
 
 const (
@@ -52,30 +51,35 @@ type OutputSnapshot struct {
 }
 
 // Output accumulates a running engine's output into what the UI renders. It is
-// written by the goroutines draining stdout and stderr and read by whoever is
-// serving the status, so every method takes the lock.
+// written by the engine as it runs and read by whoever is serving the status, so
+// every method takes the lock.
 type Output struct {
-	mu       sync.Mutex
-	progress engine.Progress
-	stats    *api.ScanStats
-	log      []byte
-	pending  map[Stream]string
-	events   []OutputEvent
-	next     int
+	mu      sync.Mutex
+	stats   *api.ScanStats
+	log     []byte
+	pending map[Stream]string
+	events  []OutputEvent
+	next    int
 }
 
-// NewOutput returns an empty buffer for an engine.
-//
-// progress may be nil, and most engines pass nil: reporting machine-readable
-// progress is the exception. Without it stats stay unset and the UI shows no
-// progress bar, which is the honest answer — a bar that never moves is worse
-// than none.
-func NewOutput(progress engine.Progress) *Output {
+// NewOutput returns an empty buffer.
+func NewOutput() *Output {
 	return &Output{
-		progress: progress,
-		pending:  map[Stream]string{StreamStdout: "", StreamStderr: ""},
-		next:     1,
+		pending: map[Stream]string{StreamStdout: "", StreamStderr: ""},
+		next:    1,
 	}
+}
+
+// SetStats records the engine's latest progress.
+//
+// Progress arrives as counters from the engine rather than being recovered from
+// its log output, so there is no chance of a stats line being mistaken for
+// something worth showing the user, or of a malformed one silently freezing the
+// progress bar.
+func (o *Output) SetStats(stats api.ScanStats) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.stats = &stats
 }
 
 // Append records one write from a pipe.
@@ -158,17 +162,7 @@ func (o *Output) Snapshot() OutputSnapshot {
 }
 
 // appendLine interprets one completed line.
-//
-// A progress line is not log output. Stats arrive every couple of seconds, so
-// logging them would push everything worth reading out of the tail within a
-// minute. Only the engine knows which lines those are.
 func (o *Output) appendLine(line string) {
-	if o.progress != nil {
-		if stats, ok := o.progress.Progress(line); ok {
-			o.stats = &stats
-			return
-		}
-	}
 	if strings.TrimSpace(line) == "" {
 		return
 	}

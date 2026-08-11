@@ -14,6 +14,7 @@ import (
 	_ "github.com/flanksource/recon/internal/engines/all" // register the built-in engines
 	"github.com/flanksource/recon/internal/engines/discovery"
 	"github.com/flanksource/recon/internal/engines/scan"
+	"github.com/flanksource/recon/internal/engines/scan/nuclei"
 )
 
 // engineKind labels which registry a spec came from, which is the one thing
@@ -84,6 +85,38 @@ func selectEngines(names []string) ([]engineKind, error) {
 // name. Installing is an action on an engine, not a resource of its own.
 func registerEngineCommands() {
 	entity.RegisterSubCommand("engine", newEngineInstallCommand())
+	entity.RegisterSubCommand("engine", newEngineTemplatesCommand())
+}
+
+// newEngineTemplatesCommand provisions what an in-process engine actually needs.
+//
+// Nuclei is linked into this binary, so `engine install` has nothing to fetch
+// for it. The corpus is the artifact that can be missing or stale instead, and
+// without it every scan matches nothing — which reads as a clean run rather than
+// a broken install.
+func newEngineTemplatesCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "templates",
+		Short: "Manage the nuclei template corpus",
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "update",
+		Short: "Download or update the nuclei templates",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := nuclei.InstallTemplates(); err != nil {
+				return err
+			}
+			if err := nuclei.UpdateTemplates(); err != nil {
+				return err
+			}
+			cmd.Printf("nuclei templates %s at %s\n",
+				nuclei.TemplateVersion(), nuclei.TemplatesDir())
+			return nil
+		},
+	})
+
+	return cmd
 }
 
 func newEngineInstallCommand() *cobra.Command {

@@ -5,8 +5,8 @@
 package scan
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"sort"
 	"sync"
 
@@ -23,21 +23,50 @@ type Engine interface {
 	// gate; the engine decides what intrusive means for itself.
 	Risk(config map[string]any) engines.Risk
 
-	// Args builds the command line for one run.
-	Args(engines.Run) []string
-
-	// Parse reads the engine's output, calling emit for each finding. Streaming
-	// so a long scan surfaces findings as they land rather than at the end.
-	Parse(r io.Reader, emit func(api.Finding) error) error
+	// Run executes one scan, reporting to sink as the scan progresses rather
+	// than at the end: a scan takes minutes, and findings the UI only learns
+	// about on completion are findings nobody can act on while it runs.
+	//
+	// Cancellation is the context. Returning nil means the engine ran to
+	// completion — not that it found nothing.
+	Run(ctx context.Context, run engines.Run, sink Sink) error
 }
 
-// Progress is implemented by engines that report machine-readable progress.
-// Optional on purpose: nuclei emits periodic stats, most tools do not, and
-// requiring it would mean every other engine returning false forever.
-type Progress interface {
-	// Progress parses one output line, returning stats when the line carried
-	// them.
-	Progress(line string) (api.ScanStats, bool)
+// Catalogue is implemented by engines that can say which templates a
+// configuration selects before it runs.
+//
+// Optional, like Progress was: it is answerable for a template-driven scanner
+// and meaningless for one whose checks are compiled in. An engine that cannot
+// answer is not asked, and the UI shows no preview rather than a wrong one.
+type Catalogue interface {
+	// Templates lists everything the engine could run, unfiltered.
+	Templates() ([]api.Template, error)
+
+	// Preview reports what one configuration selects.
+	Preview(config map[string]any) (api.TemplatePreview, error)
+
+	// Corpus describes the installed catalogue without loading it into API
+	// values. It reports its own failure rather than returning an error, because
+	// "the templates are missing" is the answer an engine listing needs to show,
+	// not a reason to fail the listing.
+	Corpus() api.EngineTemplates
+}
+
+// Sink receives everything a run produces.
+//
+// It replaces reading an engine's stdout: nuclei is linked in, so findings
+// arrive as values and progress arrives as counters. There is no stdout/stderr
+// distinction here because in-process there is no such thing — the runtime
+// decides which stream to attribute engine output to.
+type Sink interface {
+	// Finding records one finding. An error aborts the run.
+	Finding(api.Finding) error
+
+	// Stats reports progress. Called often; the last call wins.
+	Stats(api.ScanStats)
+
+	// Log records the engine's own log output, verbatim.
+	Log(text string)
 }
 
 var (

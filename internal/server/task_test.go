@@ -18,7 +18,7 @@ var _ = Describe("the task API", func() {
 		run := task.StartManagedRun("task API fixture", task.WithKind("test"))
 		DeferCleanup(func() { run.Finish(task.StatusCancelled, nil) })
 
-		root := cli.New()
+		root := commandTree()
 		handler := server.Handler(server.Config{
 			Host: "localhost", Root: root, Registry: cli.EntityRegistry(),
 		})

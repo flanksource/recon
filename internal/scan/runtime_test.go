@@ -66,11 +66,10 @@ var _ = Describe("the status snapshot", func() {
 	})
 
 	It("uses the vocabulary the browser and the schema already agree on", func() {
-		// Not clicky's task vocabulary: the frontend switches on these strings
-		// and the scans table has a check constraint listing them.
 		Expect(api.Phases()).To(Equal([]api.Phase{
-			"idle", "running", "done", "failed", "cancelled",
+			"idle", "queued", "running", "done", "failed", "cancelled",
 		}))
+		Expect(api.PhaseQueued.Terminal()).To(BeFalse())
 		Expect(api.PhaseRunning.Terminal()).To(BeFalse())
 		Expect(api.PhaseIdle.Terminal()).To(BeFalse())
 		for _, phase := range []api.Phase{api.PhaseDone, api.PhaseFailed, api.PhaseCancelled} {

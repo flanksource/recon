@@ -55,7 +55,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 
 		Expect(tables).To(ConsistOf(
 			"discoveries", "discovery_hosts",
-			"engine_profiles", "findings", "scans", "targets", "zones",
+			"engine_profiles", "findings", "scan_outputs", "scans", "targets", "zones",
 		))
 	})
 
@@ -131,6 +131,30 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 				'findings_severity_enum'
 			)`).Scan(&remaining)).To(Succeed())
 		Expect(remaining).To(Equal(0))
+	})
+
+	It("backfills wall-clock duration for terminal legacy scans", func() {
+		var scanID string
+		Expect(db.SQL().QueryRow(`
+			INSERT INTO scans (
+				name, engine, profile, endpoint_count, phase,
+				started_at, finished_at, severities
+			) VALUES (
+				'legacy-duration-scan', 'nuclei', 'safe', 1, 'done',
+				'2026-08-10T12:00:00Z', '2026-08-10T12:00:03.250Z', '{}'::jsonb
+			) RETURNING id::text`).Scan(&scanID)).To(Succeed())
+		_, err := db.SQL().Exec(`
+			DELETE FROM schema_migration_scripts
+			WHERE scope = $1 AND path = '013_scan_duration.sql'`, schema.Name)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+
+		var durationMS int64
+		Expect(db.SQL().QueryRow(`SELECT duration_ms FROM scans WHERE id = $1`, scanID).Scan(&durationMS)).To(Succeed())
+		Expect(durationMS).To(Equal(int64(3250)))
+		_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)
+		Expect(err).ToNot(HaveOccurred())
 	})
 
 	It("provides generate_ulid from the pre-phase script", func() {

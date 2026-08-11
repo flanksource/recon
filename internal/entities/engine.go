@@ -7,6 +7,7 @@ import (
 	"github.com/flanksource/clicky"
 
 	"github.com/flanksource/recon/internal/api"
+	sweeps "github.com/flanksource/recon/internal/discovery"
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/engines/discovery"
 	"github.com/flanksource/recon/internal/engines/scan"
@@ -41,16 +42,26 @@ func (r *Registry) listEngines(_ context.Context, opts EngineOpts) ([]api.Engine
 
 	var specs []api.EngineSpec
 	if keep("discovery") {
+		byDefault := map[string]bool{}
+		for _, name := range sweeps.DefaultEngines() {
+			byDefault[name] = true
+		}
 		for _, engine := range discovery.All() {
 			spec := r.describe(engine.Spec(), "discovery")
 			spec.Accepts = string(engine.Accepts())
 			spec.Emits = string(engine.Emits())
+			spec.Default = byDefault[spec.Name]
 			specs = append(specs, spec)
 		}
 	}
 	if keep("scan") {
 		for _, engine := range scan.All() {
-			specs = append(specs, r.describe(engine.Spec(), "scan"))
+			spec := r.describe(engine.Spec(), "scan")
+			if catalogue, ok := engine.(scan.Catalogue); ok {
+				corpus := catalogue.Corpus()
+				spec.Templates = &corpus
+			}
+			specs = append(specs, spec)
 		}
 	}
 

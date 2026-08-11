@@ -29,6 +29,12 @@ type Spec struct {
 	Description string
 	DocsURL     string
 
+	// InProcess reports that the engine is linked into this binary rather than
+	// spawned. Install, Binary and Version describe nothing for such an engine —
+	// its version is whatever recon was compiled against — so they are neither
+	// required nor consulted.
+	InProcess bool
+
 	// Install describes how to provision the binary. A deps.Package rather than
 	// a shell line, so the version is pinned, the download is checksum-verified
 	// and an already-installed copy on PATH is honoured.
@@ -46,6 +52,10 @@ type Spec struct {
 	// no import step, this is where a working configuration comes from.
 	Defaults DefaultProfile
 
+	// Profiles are additional built-in profiles seeded without overwriting
+	// user-edited or user-created profiles.
+	Profiles []DefaultProfile
+
 	// ValidateOptions applies engine-specific constraints that the field catalog
 	// cannot express, such as mutually exclusive flags.
 	ValidateOptions func(map[string]any) error
@@ -57,6 +67,13 @@ type DefaultProfile struct {
 	Comment string
 	Config  map[string]any
 	Paths   []string
+}
+
+// BuiltInProfiles returns the profiles seeded for an engine on startup.
+func (s Spec) BuiltInProfiles() []DefaultProfile {
+	profiles := make([]DefaultProfile, 0, 1+len(s.Profiles))
+	profiles = append(profiles, s.Defaults)
+	return append(profiles, s.Profiles...)
 }
 
 // ValidateConfig checks both the option catalog and engine-specific constraints.
@@ -73,26 +90,42 @@ func (s Spec) ValidateConfig(config map[string]any) error {
 // Validate checks a spec at registration time. These are programming errors: a
 // malformed spec should fail the process, not a scan.
 func (s Spec) Validate() error {
-	switch {
-	case s.Name == "":
+	if s.Name == "" {
 		return fmt.Errorf("engine spec: name is required")
-	case s.Binary == "":
-		return fmt.Errorf("engine %s: binary is required", s.Name)
-	case s.Install.Name == "":
-		return fmt.Errorf("engine %s: install package is required", s.Name)
-	case s.Install.Manager == "":
-		return fmt.Errorf("engine %s: install manager is required", s.Name)
 	}
 
-	// Without a version command, `doctor` cannot tell an outdated binary from a
-	// current one, and the run cannot record what it actually used.
-	if s.Install.VersionCommand == "" {
-		return fmt.Errorf("engine %s: install version_command is required", s.Name)
+	// A linked-in engine has nothing to provision, so the binary contract does
+	// not apply to it. Everything below it still does: the option catalog and
+	// the built-in profiles are what a profile is validated against, and those
+	// are the same either way.
+	if !s.InProcess {
+		switch {
+		case s.Binary == "":
+			return fmt.Errorf("engine %s: binary is required", s.Name)
+		case s.Install.Name == "":
+			return fmt.Errorf("engine %s: install package is required", s.Name)
+		case s.Install.Manager == "":
+			return fmt.Errorf("engine %s: install manager is required", s.Name)
+		}
+
+		// Without a version command, `doctor` cannot tell an outdated binary from
+		// a current one, and the run cannot record what it actually used.
+		if s.Install.VersionCommand == "" {
+			return fmt.Errorf("engine %s: install version_command is required", s.Name)
+		}
 	}
 
-	if s.Defaults.Name != "" {
-		if err := s.ValidateConfig(s.Defaults.Config); err != nil {
-			return fmt.Errorf("engine %s: default profile %q: %w", s.Name, s.Defaults.Name, err)
+	names := map[string]bool{}
+	for _, profile := range s.BuiltInProfiles() {
+		if profile.Name == "" {
+			return fmt.Errorf("engine %s: built-in profile name is required", s.Name)
+		}
+		if names[profile.Name] {
+			return fmt.Errorf("engine %s: duplicate built-in profile %q", s.Name, profile.Name)
+		}
+		names[profile.Name] = true
+		if err := s.ValidateConfig(profile.Config); err != nil {
+			return fmt.Errorf("engine %s: built-in profile %q: %w", s.Name, profile.Name, err)
 		}
 	}
 	return nil

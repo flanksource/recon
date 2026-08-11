@@ -10,10 +10,15 @@ import (
 
 // Discovery is one row of the discoveries table — one sweep.
 type Discovery struct {
-	ID      string               `gorm:"column:id;primaryKey;default:generate_ulid()"`
-	Chain   string               `gorm:"column:chain"`
-	Profile string               `gorm:"column:profile"`
-	Input   JSON[map[string]any] `gorm:"column:input;type:jsonb"`
+	ID    string `gorm:"column:id;primaryKey;default:generate_ulid()"`
+	Chain string `gorm:"column:chain"`
+
+	// Profiles names the profile each engine in the chain ran with. A sweep
+	// drives several engines and each may be configured separately, so recording
+	// one name would misreport any run that overrode one of them.
+	Profiles JSON[map[string]string] `gorm:"column:profiles;type:jsonb"`
+
+	Input JSON[map[string]any] `gorm:"column:input;type:jsonb"`
 
 	RanAt      time.Time `gorm:"column:ran_at"`
 	Log        *string   `gorm:"column:log"`
@@ -37,11 +42,15 @@ func (d Discovery) Document(hosts []api.DiscoveredHost) api.Discover {
 	if input == nil {
 		input = map[string]any{}
 	}
+	profiles := d.Profiles.Get()
+	if profiles == nil {
+		profiles = map[string]string{}
+	}
 
 	return api.Discover{
 		ID:         d.ID,
 		Chain:      d.Chain,
-		Profile:    d.Profile,
+		Profiles:   profiles,
 		Input:      input,
 		RanAt:      d.RanAt.In(time.Local).Format("2006-01-02T15:04:05"),
 		DurationMs: d.DurationMs,

@@ -8,6 +8,7 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"net/url"
 
 	"github.com/flanksource/clicky/rpc"
 	"github.com/flanksource/clicky/task"
@@ -47,6 +48,11 @@ type Config struct {
 	// not need it, and leaving it nil serves the API alone.
 	UI    fs.FS
 	UIDir string
+
+	// DevServer is a running Vite dev server to serve the interface from
+	// instead of UI. Set by `serve --dev`, so that what is served is the working
+	// tree rather than whatever was embedded when the binary was compiled.
+	DevServer *url.URL
 }
 
 // Handler builds the mux.
@@ -96,12 +102,17 @@ func Handler(config Config) http.Handler {
 	swagger.RegisterRoutes(mux)
 
 	httpapi.RegisterSchema(mux)
+	httpapi.RegisterTemplatePreview(mux, config.Registry)
 
-	// The SPA claims "/", so it is the fallback for everything the API did not
-	// match. Registered last for readability only — net/http resolves by
+	// The interface claims "/", so it is the fallback for everything the API did
+	// not match. Registered last for readability only — net/http resolves by
 	// specificity, not by registration order.
-	if config.UI != nil {
-		mux.Handle("/", httpapi.SPA(config.UI, config.UIDir))
+	if config.DevServer != nil || config.UI != nil {
+		if config.DevServer != nil {
+			mux.Handle("/", httpapi.DevProxy(config.DevServer))
+		} else {
+			mux.Handle("/", httpapi.SPA(config.UI, config.UIDir))
+		}
 
 		// "/api/" is more specific than "/", so this stops an unmatched API path
 		// falling through to the SPA. Without it a request for a route that does

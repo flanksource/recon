@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/models"
@@ -15,7 +16,7 @@ import (
 type ScanOpts struct {
 	Engine   []string `flag:"engine" help:"Only runs of these engines"`
 	Profile  []string `flag:"profile" help:"Only runs of these profiles"`
-	Phase    []string `flag:"phase" help:"Only runs in these phases (idle, running, done, failed, cancelled)"`
+	Phase    []string `flag:"phase" help:"Only runs in these phases (idle, queued, running, done, failed, cancelled)"`
 	Severity []string `flag:"severity" help:"Only runs that found at least one finding of these severities"`
 	Since    string   `flag:"since" help:"Only runs started since this time (RFC3339 or a duration such as 24h)"`
 	Limit    int      `flag:"limit" help:"Most recent N runs" default:"100"`
@@ -99,7 +100,20 @@ func (s *Store) GetScan(ctx context.Context, id string) (api.Scan, error) {
 	if err != nil {
 		return api.Scan{}, err
 	}
-	return row.Document(counts, hosts, label), nil
+	document := row.Document(counts, hosts, label)
+	var output models.ScanOutput
+	if err := s.DB(ctx).Where("scan_id = ?", row.ID).Take(&output).Error; err != nil {
+		if IsNotFound(err) {
+			return document, nil
+		}
+		return api.Scan{}, fmt.Errorf("get output for scan %s: %w", row.ID, err)
+	}
+	document.OutputCaptured = true
+	document.Stdout = output.Stdout
+	document.Stderr = output.Stderr
+	document.StdoutTruncated = output.StdoutTruncated
+	document.StderrTruncated = output.StderrTruncated
+	return document, nil
 }
 
 // scanRow resolves a run by id or by name, because a name is what the results
@@ -171,9 +185,15 @@ func (s *Store) CreateScan(ctx context.Context, scan models.Scan) (models.Scan, 
 
 // UpdateScan writes the run's terminal state.
 func (s *Store) UpdateScan(ctx context.Context, scan models.Scan) error {
-	err := s.DB(ctx).Model(&models.Scan{}).Where("id = ?", scan.ID).Updates(map[string]any{
+	return updateScan(s.DB(ctx), scan)
+}
+
+func updateScan(db *gorm.DB, scan models.Scan) error {
+	result := db.Model(&models.Scan{}).Where("id = ?", scan.ID).Updates(map[string]any{
 		"phase":          scan.Phase,
+		"started_at":     scan.StartedAt,
 		"finished_at":    scan.FinishedAt,
+		"duration_ms":    scan.DurationMS,
 		"exit_code":      scan.ExitCode,
 		"error":          scan.Error,
 		"command":        scan.Command,
@@ -182,15 +202,58 @@ func (s *Store) UpdateScan(ctx context.Context, scan models.Scan) error {
 		"result_path":    scan.ResultPath,
 		"engine_version": scan.EngineVersion,
 		"endpoint_count": scan.EndpointCount,
-	}).Error
-	if err != nil {
-		return fmt.Errorf("update scan %s: %w", scan.ID, err)
+	})
+	if result.Error != nil {
+		return fmt.Errorf("update scan %s: %w", scan.ID, result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return NotFound("scan", scan.ID)
 	}
 	return nil
 }
 
-// SaveFindings writes a run's findings in the order the engine emitted them.
-func (s *Store) SaveFindings(ctx context.Context, scanID string, findings []api.Finding) error {
+// FinalizeScan stores terminal metadata, findings, and bounded process output as
+// one record. Readers never observe a terminal scan whose evidence is missing.
+type FinalizeScanOptions struct {
+	Scan     models.Scan
+	Output   models.ScanOutput
+	Findings []api.Finding
+}
+
+func (s *Store) FinalizeScan(ctx context.Context, options FinalizeScanOptions) error {
+	phase := api.Phase(options.Scan.Phase)
+	if !phase.Terminal() {
+		return fmt.Errorf("finalize scan %s: phase %q is not terminal", options.Scan.ID, phase)
+	}
+	if options.Scan.FinishedAt == nil {
+		return fmt.Errorf("finalize scan %s: finished time is required", options.Scan.ID)
+	}
+	if options.Scan.DurationMS < 0 {
+		return fmt.Errorf("finalize scan %s: duration cannot be negative", options.Scan.ID)
+	}
+
+	return s.DB(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := saveFindings(tx, options.Scan.ID, options.Findings); err != nil {
+			return err
+		}
+		if err := updateScan(tx, options.Scan); err != nil {
+			return err
+		}
+
+		options.Output.ScanID = options.Scan.ID
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "scan_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"stdout", "stderr", "stdout_truncated", "stderr_truncated",
+			}),
+		}).Create(&options.Output).Error; err != nil {
+			return fmt.Errorf("save output for scan %s: %w", options.Scan.ID, err)
+		}
+		return nil
+	})
+}
+
+func saveFindings(db *gorm.DB, scanID string, findings []api.Finding) error {
 	if len(findings) == 0 {
 		return nil
 	}
@@ -201,7 +264,7 @@ func (s *Store) SaveFindings(ctx context.Context, scanID string, findings []api.
 	}
 	// Batched: a broad scan can produce tens of thousands of findings, and one
 	// statement per row would dominate the run's wall clock.
-	if err := s.DB(ctx).CreateInBatches(rows, 500).Error; err != nil {
+	if err := db.CreateInBatches(rows, 500).Error; err != nil {
 		return fmt.Errorf("save findings for %s: %w", scanID, err)
 	}
 	return nil
@@ -213,7 +276,7 @@ type FindingOpts struct {
 	Severity []string `flag:"severity" help:"Only these severities"`
 	Host     []string `flag:"host" help:"Only these hosts"`
 	Template []string `flag:"template" help:"Only these template ids"`
-	Tag      []string `flag:"tag" help:"Only findings carrying any of these tags"`
+	Tag      []string `flag:"tag" help:"Only findings carrying any of these tags; prefix ! to exclude"`
 	Limit    int      `flag:"limit" help:"Most N findings" default:"500"`
 }
 
@@ -237,7 +300,7 @@ func (s *Store) ListFindings(ctx context.Context, opts FindingOpts) ([]api.Findi
 		query = query.Where("template_id = ANY(?)", stringArray(opts.Template))
 	}
 	if len(opts.Tag) > 0 {
-		query = query.Where("tags && ?", stringArray(opts.Tag))
+		query = tagPredicate(query, "tags", opts.Tag)
 	}
 	if opts.Limit > 0 {
 		query = query.Limit(opts.Limit)

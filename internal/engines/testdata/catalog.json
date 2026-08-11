@@ -61,6 +61,14 @@
           "type": "boolean",
           "title": "Require signed templates",
           "description": "Disable unsigned templates and templates with mismatched signatures."
+        },
+        "var": {
+          "type": "array",
+          "title": "Template variables",
+          "description": "Values templates read, in key=value form. Several community profiles require one, such as region=us-east-1. Do not store credentials here.",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

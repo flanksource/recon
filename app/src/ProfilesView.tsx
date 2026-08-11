@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, JsonSchemaForm } from "@flanksource/clicky-ui";
-import { sameConfig, sectionSchema } from "./ScanProfileConfig";
+import { sameConfig, sectionSchema } from "./ProfileConfig";
+import { useProfileFilterPairs } from "./ProfileFilterPairs";
+import { TemplatePreviewPanel, usePreview } from "./TemplatePreview";
 import { fetchEngines, fetchProfiles, saveProfile } from "./api";
 import { profileId } from "./types";
 import type { Engine, Profile } from "./types";
 
-export function ProfilesView() {
+type Props = {
+  /** Opens the template browser scoped to a profile. */
+  onBrowseTemplates?: (profile: string) => void;
+};
+
+export function ProfilesView({ onBrowseTemplates }: Props = {}) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [engines, setEngines] = useState<Engine[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>(
@@ -15,6 +22,7 @@ export function ProfilesView() {
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { pre, post, hiddenKeys } = useProfileFilterPairs();
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -62,6 +70,18 @@ export function ProfilesView() {
     sections.find((section) => section.id === sectionId) ?? sections[0];
   const draft = selected ? (drafts[profileId(selected)] ?? selected.config) : {};
   const dirty = selected ? !sameConfig(draft, selected.config) : false;
+
+  // Previewed from the draft rather than the stored profile: the question being
+  // asked is what the edit in front of you would run, not what the last save
+  // did. Discovery profiles have no template catalogue, so they get no preview.
+  const {
+    preview,
+    error: previewError,
+    loading: previewLoading,
+  } = usePreview(
+    selected && selected.kind === "scan" ? draft : null,
+    selected?.engine ?? "nuclei",
+  );
 
   const selectProfile = (profile: Profile) => {
     setSelectedId(profileId(profile));
@@ -246,6 +266,9 @@ export function ProfilesView() {
                       [profileId(selected)]: next,
                     }))
                   }
+                  pre={pre}
+                  post={post}
+                  hiddenKeys={hiddenKeys}
                   layout={{
                     mode: "stacked",
                     help: "hover",
@@ -261,6 +284,26 @@ export function ProfilesView() {
                 rather than these fields.
               </p>
             </main>
+
+            {/* The form describes the configuration; this says what it does.
+                Without it the only way to learn what a tag change selected was
+                to save the profile and run a scan. */}
+            {selected.kind === "scan" && (
+              <aside
+                aria-label="Templates this profile runs"
+                className="w-80 shrink-0 overflow-y-auto border-l border-border bg-muted/20 p-4"
+              >
+                <h3 className="mb-3 text-sm font-semibold">This profile runs</h3>
+                <TemplatePreviewPanel
+                  preview={preview}
+                  error={previewError}
+                  loading={previewLoading}
+                  onBrowse={
+                    onBrowseTemplates ? () => onBrowseTemplates(selected.name) : undefined
+                  }
+                />
+              </aside>
+            )}
           </div>
         )}
       </section>

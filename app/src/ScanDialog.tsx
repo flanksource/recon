@@ -13,9 +13,17 @@ import {
   saveProfile,
   startScan,
 } from "./api";
-import { sameConfig, ScanProfileConfig } from "./ScanProfileConfig";
+import { ProfileConfig, sameConfig } from "./ProfileConfig";
+import {
+  DiscoveryProfiles,
+  PROFILE_NAME,
+  describeSelection,
+  discoveryRunFields,
+  useDiscoveryProfiles,
+} from "./DiscoveryProfiles";
 import { DiscoveryRunSummary } from "./DiscoveryRunSummary";
 import { ScanRunStatus } from "./ScanRunStatus";
+import { TemplateSummary, usePreview } from "./TemplatePreview";
 import type { Discover, Engine, Profile, ScanStatus, TargetRow } from "./types";
 
 // Classes where a scan would send malicious payloads at something real — same
@@ -41,7 +49,11 @@ type Props = {
   allowAllTargets?: boolean;
   /** Re-probes the selected hosts via discovery instead of running a scan engine. */
   discoveryOnly?: boolean;
-  /** Lets this run's profile configuration be tweaked before starting. */
+  /**
+   * Lets this run's profile configuration be tweaked before starting. On by
+   * default: tweaks are run-only, so offering them costs nothing that a stored
+   * profile has to be protected from.
+   */
   editableProfile?: boolean;
 };
 
@@ -56,7 +68,7 @@ export function ScanDialog({
   onOpenScan,
   allowAllTargets = true,
   discoveryOnly = false,
-  editableProfile = false,
+  editableProfile = true,
 }: Props) {
   const [scope, setScope] = useState<Scope>("selected");
   const [engines, setEngines] = useState<Engine[]>([]);
@@ -66,27 +78,41 @@ export function ScanDialog({
   const [runConfig, setRunConfig] = useState<Record<string, unknown> | null>(
     null,
   );
+  const [newProfileName, setNewProfileName] = useState("");
+  const [keeping, setKeeping] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [discoverResult, setDiscoverResult] = useState<Discover | null>(null);
+  const [editingDiscovery, setEditingDiscovery] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
-  const scanRunning = status?.phase === "running";
-  const running = discoveryOnly ? discovering : scanRunning;
+  // Every run here sweeps first — a scan discovers its endpoints before it
+  // touches them — so the discovery profiles belong in this dialog too, not
+  // only in the discover one.
+  const discoveryProfiles = useDiscoveryProfiles(open);
+
+  const scanActive = status?.phase === "queued" || status?.phase === "running";
+  const controlsLocked = discoveryOnly ? discovering : starting;
+  // A discovery rescan reads no scan catalog; every other run needs the chosen
+  // profile in hand before it can say what configuration it is running with.
+  const catalogLoaded =
+    discoveryOnly || !editableProfile || runConfig !== null;
 
   // Scope defaults on open only. Re-deriving it while the dialog is open would silently
   // widen a run to every target if the selection changed underneath it.
-  const selectionCount = useRef(selectedHosts.length);
-  selectionCount.current = selectedHosts.length;
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    const opened = open && !wasOpen.current;
+    wasOpen.current = open;
+    if (!opened) return;
     setError(null);
     setConfirmed(false);
     setDiscoverResult(null);
-    setScope(selectionCount.current ? "selected" : "all");
-  }, [open]);
+    setEditingDiscovery(false);
+    setScope(selectedHosts.length ? "selected" : "all");
+  }, [open, selectedHosts.length]);
 
   useEffect(() => {
     if (!open || discoveryOnly) return;
@@ -149,6 +175,26 @@ export function ScanDialog({
     setRunConfig(structuredClone(selectedProfile.config));
   }, [editableProfile, selectedProfile]);
 
+  // What this run changes about the scan profile. Sent with the run rather than
+  // written back: a one-off custom scan should not redefine what "safe" means
+  // for every target that scans with it on a schedule.
+  const profileEdits = useMemo(() => {
+    if (!runConfig || !selectedProfile) return undefined;
+    return sameConfig(runConfig, selectedProfile.config) ? undefined : runConfig;
+  }, [runConfig, selectedProfile]);
+
+  // Previewed from the edited config when there is one, so tweaking a profile
+  // in the dialog updates what the scan says it will do. Discovery reruns have
+  // no scan profile to preview.
+  const {
+    preview,
+    error: previewError,
+    loading: previewLoading,
+  } = usePreview(
+    discoveryOnly ? null : (runConfig ?? selectedProfile?.config ?? null),
+    engineName,
+  );
+
   // Follow status while the scanner writes.
   useEffect(() => {
     const el = logRef.current;
@@ -185,34 +231,27 @@ export function ScanDialog({
     return [...counts.entries()].sort();
   }, [targets]);
 
+  const sweep = discoveryRunFields(discoveryProfiles);
+
   const start = useCallback(async () => {
     setStarting(true);
     setError(null);
     try {
+      setEditingDiscovery(false);
       if (discoveryOnly) {
         setDiscovering(true);
         setDiscoverResult(
-          await runDiscovery({ host: targets.map((r) => r.host) }),
+          await runDiscovery({
+            host: targets.map((r) => r.host),
+            profile: discoveryProfiles.refs,
+            ...sweep,
+          }),
         );
         return;
       }
       if (editableProfile && !runConfig) {
         setError(`Profile defaults not found: ${profileName}`);
         return;
-      }
-      if (
-        editableProfile &&
-        runConfig &&
-        selectedProfile &&
-        !sameConfig(runConfig, selectedProfile.config)
-      ) {
-        await saveProfile({
-          kind: "scan",
-          engine: engineName,
-          name: profileName,
-          config: runConfig,
-          comment: selectedProfile.comment,
-        });
       }
       // startScan returns the created scan record, not a live status — the
       // running status arrives over the event stream the parent already
@@ -221,6 +260,12 @@ export function ScanDialog({
         target: { host: targets.map((r) => r.host) },
         engine: engineName,
         profile: profileName,
+        // Run-only: the profile every other target scans with is left as it
+        // is, and "Save as" is how a tweak worth keeping is kept.
+        override: profileEdits,
+        discoveryProfiles: discoveryProfiles.refs,
+        discoveryEngines: sweep.engine,
+        discoveryOverride: sweep.override,
         confirm: confirmed,
       });
     } catch (e) {
@@ -230,11 +275,13 @@ export function ScanDialog({
       setDiscovering(false);
     }
   }, [
+    sweep,
     discoveryOnly,
+    discoveryProfiles,
     targets,
     editableProfile,
+    profileEdits,
     runConfig,
-    selectedProfile,
     engineName,
     profileName,
     confirmed,
@@ -266,6 +313,36 @@ export function ScanDialog({
     setError(null);
   };
 
+  // Keeping a run-only tweak: it becomes a profile of its own rather than
+  // redefining the one it was copied from, and this run then uses it.
+  const keepAs = async () => {
+    if (!selectedProfile || !runConfig) return;
+    setKeeping(true);
+    setError(null);
+    try {
+      const created = await saveProfile({
+        kind: "scan",
+        engine: engineName,
+        name: newProfileName,
+        config: runConfig,
+        comment: selectedProfile.comment,
+      });
+      setProfiles((current) => [...current, created]);
+      setProfileName(created.name);
+      setNewProfileName("");
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setKeeping(false);
+    }
+  };
+
+  const nameTaken = profiles.some(
+    (profile) => profile.name === newProfileName,
+  );
+  const nameable =
+    PROFILE_NAME.test(newProfileName) && !nameTaken && profileEdits !== undefined;
+
   return (
     // The panel is pinned so the findings list and the log own their own scroll
     // regions; Escape is disarmed while a scan is in flight.
@@ -281,12 +358,12 @@ export function ScanDialog({
       }
       size="xl"
       className={
-        editableProfile || (hasRun && !discoveryOnly)
+        editableProfile || editingDiscovery || (hasRun && !discoveryOnly)
           ? "h-[calc(100dvh-4rem)]"
           : undefined
       }
       scrollBody={false}
-      closeOnEsc={!running}
+      closeOnEsc={!controlsLocked}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="flex shrink-0 flex-wrap items-end gap-3 rounded-md border border-border bg-muted/30 p-3">
@@ -301,12 +378,12 @@ export function ScanDialog({
                   {
                     id: "selected",
                     label: `Selected (${selectedHosts.length})`,
-                    disabled: selectedHosts.length === 0 || running,
+                    disabled: selectedHosts.length === 0 || controlsLocked,
                   },
                   {
                     id: "all",
                     label: `All targets (${rows.length})`,
-                    disabled: running,
+                    disabled: controlsLocked,
                   },
                 ]}
               />
@@ -327,7 +404,7 @@ export function ScanDialog({
                   <Select
                     className="w-40"
                     value={engineName}
-                    disabled={running}
+                    disabled={controlsLocked}
                     options={engines.map((engine) => ({
                       value: engine.name,
                       label: engine.title,
@@ -346,7 +423,7 @@ export function ScanDialog({
                   <Select
                     className="w-52"
                     value={profileName}
-                    disabled={running}
+                    disabled={controlsLocked}
                     options={profiles.map((profile) => ({
                       value: profile.name,
                       label: profile.name,
@@ -358,42 +435,119 @@ export function ScanDialog({
                     {profileName}
                   </span>
                 )}
+                {/* Blast radius before the scan starts. A profile name says
+                    nothing about how much it checks, and "safe" and "app"
+                    differ by four thousand templates. */}
+                <TemplateSummary
+                  preview={preview}
+                  error={previewError}
+                  loading={previewLoading}
+                />
               </label>
+              {/* A run-only tweak is worth keeping often enough that there has
+                  to be a way to keep it — and keeping it must not mean writing
+                  over the profile it started from. */}
+              {editableProfile && profileEdits && (
+                <label className="flex flex-col gap-1 text-xs">
+                  Keep as profile
+                  <span className="flex items-center gap-2">
+                    <input
+                      value={newProfileName}
+                      onChange={(event) =>
+                        setNewProfileName(event.target.value)
+                      }
+                      placeholder="app-deep"
+                      aria-label="New scan profile name"
+                      disabled={controlsLocked || keeping}
+                      className="h-control-h w-40 rounded-md border border-input bg-background px-2 text-sm"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={keeping}
+                      disabled={controlsLocked || keeping || !nameable}
+                      onClick={() => void keepAs()}
+                    >
+                      Save as
+                    </Button>
+                  </span>
+                  <span className="text-muted-foreground">
+                    {nameTaken
+                      ? `${engineName} already has a profile called "${newProfileName}"`
+                      : newProfileName && !PROFILE_NAME.test(newProfileName)
+                        ? "Lowercase letters, digits and dashes only"
+                        : "This run uses these options either way"}
+                  </span>
+                </label>
+              )}
             </>
           )}
+          <span className="flex flex-col gap-1 text-xs">
+            Discovery profiles
+            <Button
+              size="sm"
+              variant="outline"
+              aria-expanded={editingDiscovery}
+              disabled={controlsLocked || !discoveryProfiles.loaded}
+              onClick={() => setEditingDiscovery((current) => !current)}
+            >
+              {editingDiscovery ? "Done editing" : "Edit profiles"}
+            </Button>
+          </span>
           <span className="flex flex-wrap items-center gap-1 pb-1.5 text-xs text-muted-foreground">
             {classCounts.map(([cls, n]) => (
               <span key={cls} className="rounded bg-muted px-1.5 py-0.5">
                 {n} {cls}
               </span>
             ))}
+            {describeSelection(discoveryProfiles).map(({ engine, name }) => (
+              <span key={engine} className="rounded bg-muted px-1.5 py-0.5">
+                {engine} · {name}
+              </span>
+            ))}
+            {discoveryProfiles.edited && (
+              <span className="text-amber-600 dark:text-amber-400">
+                discovery reconfigured for this run only
+              </span>
+            )}
           </span>
           <span className="flex-1" />
-          {running ? (
-            discoveryOnly ? (
-              <Button disabled loading>
-                Rescanning…
-              </Button>
-            ) : (
-              <Button variant="destructive" onClick={() => void stop()}>
-                Cancel scan
-              </Button>
-            )
-          ) : (
-            <Button
-              onClick={() => void start()}
-              loading={starting}
-              disabled={
-                starting || targets.length === 0 || (needsConfirm && !confirmed)
-              }
-            >
-              {discoveryOnly ? "Rescan" : "Scan"} {targets.length} host
-              {targets.length === 1 ? "" : "s"}
+          {discoveryOnly && discovering ? (
+            <Button disabled loading>
+              Rescanning…
             </Button>
+          ) : (
+            <>
+              {!discoveryOnly && scanActive && (
+                <Button variant="destructive" onClick={() => void stop()}>
+                  Cancel active scan
+                </Button>
+              )}
+              <Button
+                onClick={() => void start()}
+                loading={starting}
+                disabled={
+                  starting ||
+                  targets.length === 0 ||
+                  // The run carries the profile's configuration, so it cannot
+                  // start before the catalog it is read from has arrived.
+                  !catalogLoaded ||
+                  (needsConfirm && !confirmed)
+                }
+              >
+                {discoveryOnly
+                  ? "Rescan"
+                  : scanActive
+                    ? "Queue scan"
+                    : "Scan"}{" "}
+                {targets.length} host
+                {targets.length === 1 ? "" : "s"}
+              </Button>
+            </>
           )}
         </div>
 
-        {needsConfirm && !running && (
+        {needsConfirm && !controlsLocked && (
           <label className="flex shrink-0 items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
             <input
               type="checkbox"
@@ -419,12 +573,20 @@ export function ScanDialog({
           </p>
         )}
 
-        {!hasRun &&
+        {editingDiscovery && (
+          <DiscoveryProfiles
+            state={discoveryProfiles}
+            disabled={controlsLocked}
+          />
+        )}
+
+        {!editingDiscovery &&
+          !hasRun &&
           editableProfile &&
           selectedEngine &&
           selectedProfile &&
           runConfig && (
-            <ScanProfileConfig
+            <ProfileConfig
               engine={selectedEngine}
               profile={selectedProfile}
               value={runConfig}
@@ -432,6 +594,7 @@ export function ScanDialog({
               onReset={() =>
                 setRunConfig(structuredClone(selectedProfile.config))
               }
+              note={`Changes here apply to this scan only — the "${profileName}" profile is left as it is. Use "Save as" to keep them.`}
             />
           )}
 

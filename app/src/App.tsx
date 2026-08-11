@@ -3,15 +3,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TaskManagerButton } from "@flanksource/clicky-ui";
 import { useBrowserRouter } from "@flanksource/clicky-ui/rpc";
 import { InventoryView } from "./TargetsView";
-import { ScansView } from "./ScansView";
+import { ScanDetailView, ScansView } from "./ScansView";
 import { ProfilesView } from "./ProfilesView";
 import { TargetView } from "./TargetView";
 import { TasksView } from "./TasksView";
+import { TemplatesView } from "./TemplatesView";
 
 const TABS = [
   { path: "/inventory", label: "Inventory" },
   { path: "/scans", label: "Scans" },
   { path: "/profiles", label: "Profiles" },
+  { path: "/templates", label: "Templates" },
 ];
 
 export function App() {
@@ -30,8 +32,16 @@ function AppContent() {
   }, [router]);
 
   const targetMatch = router.pathname.match(/^\/inventory\/([^/]+)$/);
+  const scanMatch = router.pathname.match(/^\/scans\/([^/]+)$/);
   const taskMatch = router.pathname.match(/^\/tasks(?:\/([^/]+))?$/);
-  const activePath = targetMatch ? "/inventory" : router.pathname;
+  const templateMatch = router.pathname.match(/^\/templates(?:\/([^/]+))?$/);
+  const activePath = targetMatch
+    ? "/inventory"
+    : scanMatch
+      ? "/scans"
+      : templateMatch
+        ? "/templates"
+        : router.pathname;
   const content = taskMatch ? (
     <TasksView
       selectedId={taskMatch[1] ? decodeURIComponent(taskMatch[1]) : undefined}
@@ -39,15 +49,31 @@ function AppContent() {
     />
   ) : targetMatch ? (
     <TargetView host={decodeURIComponent(targetMatch[1])} onBack={() => router.navigate("/inventory")} />
+  ) : scanMatch ? (
+    <ScanDetailView id={decodeURIComponent(scanMatch[1])} onBack={() => router.navigate("/scans")} />
   ) : router.pathname === "/inventory" ? (
     <InventoryView
       onOpenTarget={(host) => router.navigate(`/inventory/${encodeURIComponent(host)}`)}
-      onOpenScan={(file) => router.navigate(`/scans?file=${encodeURIComponent(file)}`)}
+      onOpenScan={(id) => router.navigate(`/scans/${encodeURIComponent(id)}`)}
     />
   ) : router.pathname === "/scans" ? (
-    <ScansView file={new URLSearchParams(window.location.search).get("file")} />
+    <ScansView onOpenScan={(id) => router.navigate(`/scans/${encodeURIComponent(id)}`)} />
   ) : router.pathname === "/profiles" ? (
-    <ProfilesView />
+    <ProfilesView
+      onBrowseTemplates={(profile) =>
+        router.navigate(`/templates/${encodeURIComponent(profile)}`)
+      }
+    />
+  ) : templateMatch ? (
+    // The profile is in the path rather than in component state, so "these are
+    // the templates the k8s profile runs" is a link someone can send — the same
+    // reason a target and a scan are addressable.
+    <TemplatesView
+      profile={templateMatch[1] ? decodeURIComponent(templateMatch[1]) : undefined}
+      onSelectProfile={(profile) =>
+        router.navigate(profile ? `/templates/${encodeURIComponent(profile)}` : "/templates")
+      }
+    />
   ) : router.pathname === "/" ? null : (
     <div className="p-6">
       <h1 className="text-lg font-semibold">Page not found</h1>
