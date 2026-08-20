@@ -20,8 +20,10 @@ import (
 	"time"
 
 	"github.com/flanksource/clicky"
-	"github.com/flanksource/clicky/api"
+	clickyapi "github.com/flanksource/clicky/api"
 	commonshttp "github.com/flanksource/commons/http"
+
+	"github.com/flanksource/recon/internal/api"
 )
 
 // Result is one probe of one URL.
@@ -37,24 +39,30 @@ type Result struct {
 	ResponseTime  time.Duration `json:"response_time"`
 	ResponseSize  int64         `json:"response_size,omitempty"`
 	Error         string        `json:"error,omitempty"`
+
+	// Failure is why Error happened. Reported here as well as folded into the
+	// inventory so `reconctl ping` and the Ping dialog describe a dead host the
+	// same way.
+	Failure api.Failure `json:"failure,omitempty"`
 }
 
-var _ api.TableProvider = Result{}
+var _ clickyapi.TableProvider = Result{}
 
 // Columns renders a probe as the table `reconctl ping` prints.
-func (Result) Columns() []api.ColumnDef {
-	return []api.ColumnDef{
-		api.Column("up").Label("Up").Build(),
-		api.Column("url").Label("URL").Build(),
-		api.Column("final_url").Label("Final URL").Build(),
-		api.Column("ip").Label("IP").Build(),
-		api.Column("tls_cn").Label("TLS CN").Build(),
-		api.Column("response_code").Label("Response Code").Build(),
-		api.Column("content_type").Label("Content Type").Build(),
-		api.Column("content_length").Label("Content Length").Build(),
-		api.Column("response_time").Label("Response Time").Build(),
-		api.Column("response_size").Label("Response Size").Build(),
-		api.Column("error").Label("Error").Build(),
+func (Result) Columns() []clickyapi.ColumnDef {
+	return []clickyapi.ColumnDef{
+		clickyapi.Column("up").Label("Up").Build(),
+		clickyapi.Column("url").Label("URL").Build(),
+		clickyapi.Column("final_url").Label("Final URL").Build(),
+		clickyapi.Column("ip").Label("IP").Build(),
+		clickyapi.Column("tls_cn").Label("TLS CN").Build(),
+		clickyapi.Column("response_code").Label("Response Code").Build(),
+		clickyapi.Column("content_type").Label("Content Type").Build(),
+		clickyapi.Column("content_length").Label("Content Length").Build(),
+		clickyapi.Column("response_time").Label("Response Time").Build(),
+		clickyapi.Column("response_size").Label("Response Size").Build(),
+		clickyapi.Column("failure").Label("Failure").Build(),
+		clickyapi.Column("error").Label("Error").Build(),
 	}
 }
 
@@ -69,15 +77,16 @@ func (r Result) Row() map[string]any {
 		"response_code": r.ResponseCode,
 		"content_type":  r.ContentType,
 		"response_time": clicky.Human(r.ResponseTime),
+		"failure":       string(r.Failure),
 		"error":         r.Error,
 	}
 	if r.ContentLength != nil {
-		row["content_length"] = api.HumanizeBytes(*r.ContentLength)
+		row["content_length"] = clickyapi.HumanizeBytes(*r.ContentLength)
 	} else {
 		row["content_length"] = nil
 	}
 	if r.ResponseCode > 0 {
-		row["response_size"] = api.HumanizeBytes(r.ResponseSize)
+		row["response_size"] = clickyapi.HumanizeBytes(r.ResponseSize)
 	} else {
 		row["response_size"] = nil
 	}
@@ -135,6 +144,9 @@ func URL(ctx context.Context, target string, options Options) (Result, error) {
 		return failed(result, started, fmt.Errorf("close response body: %w", closeErr))
 	}
 	if !Successful(response.StatusCode) {
+		// Classified here rather than by Classify: the endpoint answered, so
+		// there is no transport error to read, and the status is the reason.
+		result.Failure = api.FailureHTTP
 		return failed(result, started, fmt.Errorf("HTTP status %s", response.Status))
 	}
 	result.ResponseTime = time.Since(started)
@@ -188,9 +200,14 @@ func ValidateURL(input string) (string, error) {
 	return parsed.String(), nil
 }
 
+// failed is the one exit every unsuccessful probe takes, which is why the
+// classification happens here: a new failure path cannot forget to carry one.
 func failed(result Result, started time.Time, err error) (Result, error) {
 	result.ResponseTime = time.Since(started)
 	result.Error = err.Error()
+	if result.Failure == api.FailureNone {
+		result.Failure = Classify(err)
+	}
 	return result, fmt.Errorf("probe %s: %w", result.URL, err)
 }
 

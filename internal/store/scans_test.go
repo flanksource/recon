@@ -164,3 +164,143 @@ var _ = Describe("scan execution evidence", Ordered, Label("db"), func() {
 			To(ConsistOf("missing-headers"))
 	})
 })
+
+// Nothing wrote target.scan at all before this: the column, its expression index
+// and the inventory's Last scan and Findings columns all existed and were always
+// empty. Finalizing is the one place that knows both what a run covered and what
+// it found, so it is the one place that stamps.
+var _ = Describe("recording that a run covered a host", Ordered, Label("db"), func() {
+	var (
+		db  *dbtest.DB
+		st  *store.Store
+		ctx context.Context
+	)
+
+	const covered, quiet, untouched = "a.example.test", "b.example.test", "c.example.test"
+
+	BeforeAll(func() {
+		if testing.Short() {
+			Skip("needs a database")
+		}
+		db = dbtest.ForGinkgo(dbtest.Options{
+			Name:        "recon_stamp",
+			Provisioner: schema.NewProvisioner(),
+		})
+		st = store.New(db.Gorm())
+		ctx = context.Background()
+
+		for _, host := range []string{covered, quiet, untouched} {
+			Expect(st.SaveTarget(ctx, target(host, api.ClassNonProd))).To(Succeed(), host)
+		}
+	})
+
+	// finalize runs one scan over hosts and returns when it has been recorded.
+	finalize := func(engine string, at time.Time, hosts []string, count bool, findings []api.Finding) string {
+		GinkgoHelper()
+		selector := map[string]any{"hosts": hosts}
+		row, err := st.CreateScan(ctx, models.Scan{
+			Name:     engine + "-" + at.Format("20060102-150405"),
+			Engine:   engine,
+			Profile:  "safe",
+			Selector: models.Wrap(&selector), EndpointCount: len(hosts),
+			Phase: string(api.PhaseRunning), StartedAt: at,
+		})
+		Expect(err).ToNot(HaveOccurred())
+
+		finished := at.Add(time.Second)
+		row.Phase = string(api.PhaseDone)
+		row.FinishedAt = &finished
+		row.DurationMS = 1000
+		Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
+			Scan: row, Findings: findings, Hosts: hosts, CountFindings: count,
+		})).To(Succeed())
+		return row.ID
+	}
+
+	scanState := func(host string) api.ScanState {
+		GinkgoHelper()
+		document, err := st.GetTarget(ctx, host)
+		Expect(err).ToNot(HaveOccurred())
+		if document.Scan == nil {
+			return api.ScanState{}
+		}
+		return *document.Scan
+	}
+
+	It("stamps every host the run covered, with what was found on each", func() {
+		at := time.Date(2026, 8, 10, 14, 0, 0, 0, time.UTC)
+		// A host that was named but is not in the inventory: it is skipped, not
+		// invented, which is the rule the probe runner already follows.
+		finalize("nuclei", at, []string{covered, quiet, "ghost.example.test"}, true, []api.Finding{
+			{TemplateID: "tls-version", Host: covered, Severity: api.SeverityHigh},
+			{TemplateID: "weak-cipher", Host: covered, Severity: api.SeverityMedium},
+		})
+
+		two := 2
+		Expect(scanState(covered)).To(Equal(api.ScanState{
+			LastScan: "2026-08-10T14:00:01Z", LastFindings: &two,
+		}))
+
+		// The point of stamping the resolved selection rather than the findings:
+		// "scanned and clean" and "never scanned" are different answers, and only
+		// one of them is reassuring.
+		zero := 0
+		Expect(scanState(quiet)).To(Equal(api.ScanState{
+			LastScan: "2026-08-10T14:00:01Z", LastFindings: &zero,
+		}))
+
+		Expect(scanState(untouched)).To(Equal(api.ScanState{}))
+
+		_, err := st.GetTarget(ctx, "ghost.example.test")
+		Expect(store.IsNotFound(err)).To(BeTrue())
+	})
+
+	// A sweep finds nothing by design, so zeroing the count would erase the
+	// result of the last real scan every time someone refreshed liveness.
+	It("moves last scan without discarding what the last real scan found", func() {
+		at := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+		finalize(api.ProbeEngine, at, []string{covered}, false, nil)
+
+		two := 2
+		Expect(scanState(covered)).To(Equal(api.ScanState{
+			LastScan: "2026-08-11T09:00:01Z", LastFindings: &two,
+		}))
+	})
+
+	It("leaves a run that covered nothing alone", func() {
+		at := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+		finalize("nuclei", at, nil, true, nil)
+		Expect(scanState(untouched)).To(Equal(api.ScanState{}))
+	})
+
+	// A sweep produces no findings, so the usual host list would be empty. They
+	// come from its own results instead, which is what sharing the run's id
+	// between the two tables buys.
+	It("lists a liveness sweep's hosts from what it probed", func() {
+		at := time.Date(2026, 8, 11, 11, 0, 0, 0, time.UTC)
+		selector := map[string]any{"hosts": []string{covered, quiet}}
+		probe := models.Probe{
+			Selector: models.Wrap(&selector), Total: 2,
+			Phase: string(api.PhaseRunning), RanAt: at,
+		}
+		Expect(st.CreateProbe(ctx, &probe)).To(Succeed())
+
+		_, err := st.CreateScan(ctx, models.Scan{
+			ID: probe.ID, Name: "probe-liveness-20260811-110000",
+			Engine: api.ProbeEngine, Profile: api.ProbeProfile,
+			Selector: models.Wrap(&selector), EndpointCount: 2,
+			Phase: string(api.PhaseRunning), StartedAt: at,
+		})
+		Expect(err).ToNot(HaveOccurred())
+
+		for _, host := range []string{quiet, covered} {
+			Expect(st.SaveProbeResult(ctx, models.ProbeResultFrom(probe.ID,
+				api.ProbeResult{Host: host, Up: true, StatusCode: 200}, at))).To(Succeed())
+		}
+
+		found, err := st.GetScan(ctx, probe.ID)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(found.Hosts).To(Equal([]string{covered, quiet}))
+		Expect(found.OutputCaptured).To(BeFalse(), "a sweep runs no process")
+	})
+})

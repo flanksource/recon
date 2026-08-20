@@ -13,6 +13,17 @@ export const CLASS_ORDER = [
 ] as const;
 export type TargetClass = (typeof CLASS_ORDER)[number];
 
+// What a target addresses. A host is something on the network with an address
+// and ports; a gcp-project is a cloud account audited through an API, which is
+// why it has neither. Mirrors api.TargetKinds() in internal/api/target.go.
+export const KIND_ORDER = ["host", "gcp-project"] as const;
+export type TargetKind = (typeof KIND_ORDER)[number];
+
+// Absent means host: the server omits the field for one so an existing target
+// document is unchanged by cloud accounts existing.
+export const targetKind = (target: { kind?: TargetKind }): TargetKind =>
+  target.kind ?? "host";
+
 // The profiles a target can opt into are whatever the server has stored, which
 // is no longer a list short enough to keep here: nuclei ships focused profiles
 // alongside its own, and a hardcoded pair would silently hide the rest from
@@ -25,17 +36,35 @@ export const FALLBACK_PROFILES = ["safe", "full"] as const;
 // the value has to survive a round trip.
 export type Identified = { _id?: string };
 
+/**
+ * Why the last probe of a host got no usable answer.
+ *
+ * Classified by the prober rather than pattern-matched out of the message here:
+ * the wording of a Go dial error is not something the browser should have an
+ * opinion about. Mirrors api.Failures() in internal/api/probe.go.
+ */
+export type ProbeFailure =
+  | "dns"
+  | "refused"
+  | "unreachable"
+  | "timeout"
+  | "tls"
+  | "http"
+  | "other";
+
 export type ObservedState = {
   first_observed?: string;
   last_seen?: string;
   last_attempt?: string;
   error?: string;
+  failure?: ProbeFailure;
 };
 
 export type TargetDocument = {
   $schema: "../target.schema.json";
   version: 1;
   host: string;
+  kind?: TargetKind;
   class: TargetClass;
   app?: string;
   cluster?: string;
@@ -223,6 +252,20 @@ export type ScanPhase = "idle" | "queued" | "running" | "done" | "failed" | "can
 
 export const TERMINAL_PHASES: ScanPhase[] = ["done", "failed", "cancelled"];
 
+// What a run put on the wire, counted from the engine's per-request hooks. It
+// covers every request the scan issued, including the overwhelming majority
+// that matched nothing and so left no finding behind.
+export type HTTPStats = {
+  requests: number;
+  responses: number;
+  failed: number;
+  bytes: number;
+  statusCodes: Record<string, number>;
+  protocols: Record<string, number>;
+  errors: Record<string, number>;
+  waf: Record<string, number>;
+};
+
 export type ScanStats = {
   requests: number;
   total: number;
@@ -233,6 +276,22 @@ export type ScanStats = {
   hosts: number;
   templates: number;
   duration: string;
+  // Absent for an engine that does not report its requests individually — which
+  // is not the same as a scan that sent nothing.
+  http?: HTTPStats;
+};
+
+// One file in a run's retained artifact directory.
+export type ScanFile = {
+  name: string;
+  size: number;
+  modified: string;
+};
+
+export type ScanFiles = {
+  scanId: string;
+  path: string;
+  files: ScanFile[];
 };
 
 export type Scan = Identified & {
@@ -257,6 +316,9 @@ export type Scan = Identified & {
   severities: SeverityCounts;
   stats?: ScanStats;
   hosts: string[];
+  // The retained artifact directory on disk. Absent for runs made before
+  // results were kept.
+  resultPath?: string;
   outputCaptured?: boolean;
   stdout?: string;
   stderr?: string;
@@ -321,6 +383,10 @@ export type Engine = Identified & {
   installed: boolean;
   managed: boolean;
   path?: string;
+  // The profile the engine ships with, which is what a picker should open on:
+  // an engine's own idea of its default beats a name hardcoded here, and a
+  // hardcoded one is simply wrong for every engine that does not use it.
+  defaults?: string;
   // The template corpus, for engines that match against one. An in-process
   // engine's binary cannot be missing, so this is the part that can be — and
   // without it every scan matches nothing.
@@ -365,15 +431,33 @@ export type ProbeResult = {
   ip?: string;
   contentType?: string;
   error?: string;
+  /** Why `error` happened. Absent whenever the host answered. */
+  failure?: ProbeFailure;
+  /** When this host finished, which is not when the run started. */
+  probedAt?: string;
+  /** The host's inventory record was rewritten from this result. */
+  updated: boolean;
 };
 
-// One pass of liveness checks. There is no probes table behind it: a probe
-// writes what it saw onto the targets, so this is the response, not a record.
-export type ProbeRun = {
+// One liveness sweep. Unlike before it is a record and not just a response, so
+// it can be followed while it runs and read back afterwards.
+//
+// `id` is also the id of the task group the run drives, so /api/v1/tasks/{id}
+// and /api/v1/probe/{id} address the same sweep.
+export type ProbeRun = Identified & {
+  id: string;
+  selector: StoredSelector;
+  selectorLabel: string;
+  phase: ScanPhase;
   ranAt: string;
+  finishedAt?: string;
   durationMs: number;
+  // How many hosts the run set out to probe. `results` is shorter while it is
+  // still going, and that difference is the progress.
+  total: number;
   live: number;
   updated: number;
+  error?: string;
   results: ProbeResult[];
 };
 
@@ -401,6 +485,9 @@ export type TableRow = TargetRow & {
   last_seen?: string;
   last_scan?: string;
   last_status?: number;
+  /** Set only while the host's last probe failed; clears the moment it answers. */
+  failure?: ProbeFailure;
+  last_error?: string;
   response_time?: string;
   open_ports?: string[];
   known_paths?: string[];

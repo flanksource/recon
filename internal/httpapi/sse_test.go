@@ -185,7 +185,7 @@ var _ = Describe("the scan event stream", func() {
 			// Driven through a writer that blocks inside Write, because a real
 			// socket would swallow small frames into its buffer and never make
 			// the handler wait.
-			Expect(broadcaster.Publish(scan("first", api.PhaseIdle))).To(Succeed())
+			Expect(broadcaster.Publish(scanSnapshot("first", api.PhaseIdle))).To(Succeed())
 
 			writer := newGatedWriter()
 			request := httptest.NewRequest(http.MethodGet, "/api/scan/events", nil)
@@ -204,7 +204,7 @@ var _ = Describe("the scan event stream", func() {
 			Expect(string(<-writer.writes)).To(ContainSubstring(`"name":"first"`))
 
 			for _, name := range []string{"second", "third", "fourth"} {
-				Expect(broadcaster.Publish(scan(name, api.PhaseRunning))).To(Succeed())
+				Expect(broadcaster.Publish(scanSnapshot(name, api.PhaseRunning))).To(Succeed())
 			}
 
 			writer.release <- struct{}{}
@@ -259,10 +259,10 @@ var _ = Describe("the scan event stream", func() {
 
 func ptr[T any](value T) *T { return &value }
 
-// scan is a realistic snapshot from the type the scan runtime will own. The
+// scanSnapshot is a realistic snapshot from the type the scan runtime will own. The
 // broadcaster never names it — this is only here so the specs stream something
 // with the shape and size of the real thing.
-func scan(name string, phase api.Phase) api.Scan {
+func scanSnapshot(name string, phase api.Phase) api.Scan {
 	return api.Scan{
 		ID:            name,
 		Name:          name,

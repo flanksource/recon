@@ -55,6 +55,24 @@ func seen(at string) func(*api.TargetDocument) {
 	return func(d *api.TargetDocument) { d.Observed = &api.Observed{LastSeen: at} }
 }
 
+// failedProbe is a host whose last probe did not get through. It keeps the
+// status code from its last good probe, because ApplyProbe deliberately
+// preserves the previous snapshot — which is what makes such a host a trap for
+// any filter that reads the code alone.
+func failedProbe(kind api.Failure, message string) func(*api.TargetDocument) {
+	return func(d *api.TargetDocument) {
+		d.Observed = &api.Observed{
+			LastSeen: "2026-07-01T00:00:00Z", LastAttempt: "2026-08-11T09:00:00Z",
+			Error: message, Failure: kind,
+		}
+		if d.HTTP == nil {
+			d.HTTP = &api.HTTP{}
+		}
+		down := true
+		d.HTTP.Failed = &down
+	}
+}
+
 var _ = Describe("the target selector", Ordered, Label("db"), func() {
 	var (
 		db  *dbtest.DB
@@ -84,6 +102,9 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 				tags("internal"), ports(22)),
 			target("d.example.test", api.ClassDeactivated,
 				func(d *api.TargetDocument) { d.Reason = "decommissioned" }),
+			target("e.example.test", api.ClassInternal,
+				http(200, "https://e.example.test"),
+				failedProbe(api.FailureDNS, "lookup e.example.test: no such host")),
 		} {
 			Expect(st.SaveTarget(ctx, document)).To(Succeed(), document.Host)
 		}
@@ -100,7 +121,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 	}
 
 	It("returns everything when nothing is selected", func() {
-		Expect(hosts(store.TargetOpts{})).To(HaveLen(4))
+		Expect(hosts(store.TargetOpts{})).To(HaveLen(5))
 	})
 
 	It("filters by class", func() {
@@ -170,9 +191,28 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 		Expect(hosts(store.TargetOpts{Status: []int{403}})).To(Equal([]string{"b.example.test"}))
 	})
 
-	It("filters to hosts that answered", func() {
+	// e.example.test still carries the 200 from its last good probe, so a filter
+	// that only asked for a status code would call a host that no longer resolves
+	// live.
+	It("filters to hosts that answered, excluding one whose last probe failed", func() {
 		Expect(hosts(store.TargetOpts{Live: true})).
 			To(Equal([]string{"a.example.test", "b.example.test"}))
+	})
+
+	It("filters by why the last probe failed", func() {
+		Expect(hosts(store.TargetOpts{Failure: []string{"dns"}})).
+			To(Equal([]string{"e.example.test"}))
+		Expect(hosts(store.TargetOpts{Failure: []string{"refused"}})).To(BeEmpty())
+	})
+
+	It("treats several failure kinds as any-of", func() {
+		Expect(hosts(store.TargetOpts{Failure: []string{"dns", "timeout"}})).
+			To(Equal([]string{"e.example.test"}))
+	})
+
+	It("rejects a failure kind the prober cannot produce", func() {
+		_, err := st.ListTargets(ctx, store.TargetOpts{Failure: []string{"gremlins"}})
+		Expect(err).To(MatchError(ContainSubstring(`unknown failure "gremlins"`)))
 	})
 
 	It("filters by an absolute last-seen time", func() {

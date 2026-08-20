@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
 
+	reconapi "github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/probe"
 )
 
@@ -58,6 +60,7 @@ var _ = Describe("reconctl ping", Ordered, func() {
 			api.Column("content_length").Label("Content Length").Build(),
 			api.Column("response_time").Label("Response Time").Build(),
 			api.Column("response_size").Label("Response Size").Build(),
+			api.Column("failure").Label("Failure").Build(),
 			api.Column("error").Label("Error").Build(),
 		}))
 		Expect(result.Row()).To(Equal(map[string]any{
@@ -71,8 +74,28 @@ var _ = Describe("reconctl ping", Ordered, func() {
 			"content_length": api.HumanizeBytes(contentLength),
 			"response_time":  clicky.Human(1500 * time.Millisecond),
 			"response_size":  api.HumanizeBytes(2048),
+			"failure":        "",
 			"error":          "",
 		}))
+	})
+
+	// The CLI reports what it saw and throws it away, so this column is the only
+	// place a `reconctl ping` user is told why a target did not answer in terms
+	// they can act on rather than a wrapped dial error.
+	It("names why a target did not answer", func() {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		Expect(err).ToNot(HaveOccurred())
+		closed := listener.Addr().String()
+		Expect(listener.Close()).To(Succeed())
+
+		targets, err := pingTargets([]string{"http://" + closed})
+		Expect(err).ToNot(HaveOccurred())
+
+		result, err := probe.URL(context.Background(), targets[0], probe.Options{Timeout: 2 * time.Second})
+		Expect(err).To(HaveOccurred())
+		Expect(result.Up).To(BeFalse())
+		Expect(result.Row()["failure"]).To(Equal(string(reconapi.FailureRefused)))
+		Expect(describeProbe(result)).To(HavePrefix("refused: "))
 	})
 
 	It("normalizes supported targets and rejects invalid input", func() {

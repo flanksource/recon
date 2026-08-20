@@ -24,7 +24,6 @@ func (r *Runtime) supervise(
 	engineRun engines.Run,
 ) {
 	defer run.doneOnce.Do(func() { close(run.done) })
-	defer run.session.Cleanup()
 
 	timer := time.AfterFunc(maxDuration, func() {
 		run.Output.Append(StreamSystem,
@@ -53,6 +52,7 @@ func (r *Runtime) supervise(
 	run.Scan.Severities = api.SeverityCounts(findings)
 	run.Scan.Hosts = hostsOf(findings)
 	run.Scan.Stats = run.Output.Snapshot().Stats
+	run.Scan.Result = run.artifacts.Dir
 	run.Scan.OutputCaptured = true
 	run.Scan.Stdout = captured.Stdout
 	run.Scan.Stderr = captured.Stderr
@@ -87,19 +87,65 @@ func (r *Runtime) supervise(
 	row.Command = run.Scan.Command
 	row.Severities = models.Wrap(&run.Scan.Severities)
 	row.Stats = models.Wrap(run.Scan.Stats)
+	row.ResultPath = &run.artifacts.Dir
 	if run.Scan.Error != "" {
+		row.Error = &run.Scan.Error
+	}
+
+	// The engine wrote its own findings file as it went; these are what recon
+	// knows that the engine does not. Written before the database so a
+	// terminal run's directory is complete whether or not the write below is.
+	if err := run.retainArtifacts(captured); err != nil {
+		run.Scan.Phase = api.PhaseFailed
+		// Appended rather than assigned: a run that both failed and could not
+		// write its evidence has two problems, and the engine's own error is
+		// the one that says why it failed.
+		if run.Scan.Error != "" {
+			run.Scan.Error += "; "
+		}
+		run.Scan.Error += err.Error()
+		row.Phase = string(api.PhaseFailed)
 		row.Error = &run.Scan.Error
 	}
 
 	persist := context.WithoutCancel(ctx)
 	if err := r.Store.FinalizeScan(persist, store.FinalizeScanOptions{
 		Scan: row, Output: captured, Findings: findings,
+		// Every host the selector resolved to, not only the ones with findings:
+		// "this host was scanned and nothing was found" is the answer the
+		// inventory's Last scan column exists to give.
+		Hosts: run.covered, CountFindings: true,
 	}); err != nil {
 		run.Scan.Phase = api.PhaseFailed
 		run.Scan.Error = fmt.Sprintf("persist scan evidence: %v", err)
 	}
 	r.publish()
 	r.mu.Unlock()
+}
+
+// retainArtifacts writes the run's own record alongside the engine's output.
+//
+// The log is stored as a file rather than only in the database because the
+// directory has to stand on its own: someone reading `results/` a month later
+// should not need Postgres running to find out what the scan said.
+func (r *Run) retainArtifacts(captured models.ScanOutput) error {
+	log := captured.Stdout
+	if captured.Stderr != "" {
+		log += captured.Stderr
+	}
+	if err := r.artifacts.WriteFile(LogFile, []byte(log)); err != nil {
+		return fmt.Errorf("retain scan artifacts: %w", err)
+	}
+
+	// The captured streams are dropped from the record: they are the file that
+	// was just written, and embedding a megabyte of console output in the
+	// metadata makes the one file anyone opens by hand the one nobody can read.
+	record := r.Scan
+	record.Stdout, record.Stderr = "", ""
+	if err := r.artifacts.WriteJSON(MetadataFile, record); err != nil {
+		return fmt.Errorf("retain scan artifacts: %w", err)
+	}
+	return nil
 }
 
 // progressInterval is how often a running scan repaints. Fast enough to look

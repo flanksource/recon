@@ -1,4 +1,6 @@
 import { AnsiHtml } from "@flanksource/clicky-ui";
+import { ScanArtifacts } from "./ScanArtifacts";
+import { ScanTraffic } from "./ScanTraffic";
 import type { Scan } from "./types";
 
 function duration(milliseconds: number): string {
@@ -145,6 +147,20 @@ export function ScanExecutionDetails({ scan }: { scan: Scan }) {
           {scan.error}
         </div>
       )}
+
+      <div className="space-y-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Traffic
+        </div>
+        <ScanTraffic http={scan.stats?.http} />
+      </div>
+
+      <div className="space-y-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Artifacts
+        </div>
+        <ScanArtifacts scanId={scan.id} path={scan.resultPath} />
+      </div>
 
       <div className="space-y-1">
         <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

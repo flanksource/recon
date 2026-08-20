@@ -67,6 +67,7 @@ func (r *Runtime) cancelRun(run *Run) error {
 	}
 	scanTask := run.task
 	current := run.session
+	artifacts := run.artifacts
 	if scanTask != nil {
 		scanTask.Cancel()
 	}
@@ -85,10 +86,16 @@ func (r *Runtime) cancelRun(run *Run) error {
 		run.doneOnce.Do(func() { close(run.done) })
 		r.publish()
 	}
+	cancelled := run.Scan
 	r.mu.Unlock()
 
 	if queued {
-		current.Cleanup()
+		// Cancelled before the engine ran, so the only evidence is what the run
+		// was going to be. Recorded rather than deleted: "this scan never
+		// started" is itself worth being able to read back.
+		if err := artifacts.WriteJSON(MetadataFile, cancelled); err != nil {
+			return fmt.Errorf("record cancelled scan %s: %w", cancelled.Name, err)
+		}
 		return nil
 	}
 	return current.Cancel()

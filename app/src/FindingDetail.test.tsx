@@ -118,3 +118,81 @@ describe("FindingDetail", () => {
     expect(screen.getByText("raw")).toBeInTheDocument();
   });
 });
+
+// A failed CIS control as InSpec reports it. Nothing was sent to the account,
+// so there is no request, response or curl — the evidence is the assertion and
+// the reason it did not hold.
+const COMPLIANCE_FINDING: Finding = {
+  _id: "scan-2#1",
+  scanId: "scan-2",
+  lineNo: 1,
+  templateId: "cis-gcp-1.4-iam",
+  name: "[IAM] Ensure that there are only GCP-managed service account keys for each service account",
+  severity: "medium",
+  host: "acme-platform-prod",
+  matchedAt:
+    "[acme-platform-prod] Service Account: builder@acme-platform-prod.iam.gserviceaccount.com should not have user-managed keys",
+  type: "inspec",
+  tags: ["profile:inspec-gcp-cis-benchmark", "cis_gcp:1.4", "cis_level:1"],
+  timestamp: "2026-08-20T09:41:02+02:00",
+  remediation: "Anyone who has access to the keys will be able to access resources.",
+  reference: ["https://www.cisecurity.org/benchmark/google_cloud_computing_platform/"],
+  raw: {
+    profile: "inspec-gcp-cis-benchmark",
+    control: {
+      id: "cis-gcp-1.4-iam",
+      impact: 0.5,
+      code: "control 'cis-gcp-1.4-iam' do\n  impact 'medium'\nend",
+    },
+    result: {
+      status: "failed",
+      code_desc:
+        "[acme-platform-prod] Service Account: builder@acme-platform-prod.iam.gserviceaccount.com should not have user-managed keys",
+      message: 'expected ["USER_MANAGED", "SYSTEM_MANAGED"] not to include "USER_MANAGED"',
+    },
+  },
+};
+
+describe("a compliance finding", () => {
+  afterEach(cleanup);
+
+  it("still offers evidence even though nothing was sent", () => {
+    // Without this the Evidence tab disappears and the only way to see why a
+    // control failed is to read the raw JSON.
+    render(<FindingDetail finding={COMPLIANCE_FINDING} />);
+
+    expect(screen.getByRole("tab", { name: /Evidence/ })).toBeInTheDocument();
+  });
+
+  it("shows the assertion and the reason it did not hold", () => {
+    render(<FindingDetail finding={COMPLIANCE_FINDING} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+
+    expect(screen.getByText("Assertion")).toBeInTheDocument();
+    expect(screen.getByText("Why it failed")).toBeInTheDocument();
+    expect(screen.getByText(/not to include/)).toBeInTheDocument();
+  });
+
+  it("shows the control's own source", () => {
+    // The Ruby says what the control actually asserts, which is the difference
+    // between "this failed" and knowing whether the finding is right.
+    render(<FindingDetail finding={COMPLIANCE_FINDING} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+
+    expect(screen.getByText("Control source")).toBeInTheDocument();
+  });
+
+  it("offers no HTTP evidence panels", () => {
+    // A compliance finding carries no request or response, and labelling its
+    // assertion as one would misrepresent what the engine did.
+    render(<FindingDetail finding={COMPLIANCE_FINDING} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+
+    expect(screen.queryByText("Request")).toBeNull();
+    expect(screen.queryByText("Response")).toBeNull();
+    expect(screen.queryByText("Reproduce (curl)")).toBeNull();
+  });
+});

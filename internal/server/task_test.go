@@ -13,6 +13,38 @@ import (
 	"github.com/flanksource/recon/internal/server"
 )
 
+// Deliberately without a database. net/http panics when two routes claim one
+// method and path, so building the handler at all is the assertion — and it is
+// the one that catches an entity registered twice, which used to be possible
+// for `probe` because it was both a bare command and, later, an entity.
+//
+// The equivalent checks in server_test.go sit behind a suite that needs
+// Postgres, so on a machine that cannot start one they never run. This is what
+// stops a startup panic reaching a release unnoticed.
+var _ = Describe("the generated route surface", func() {
+	It("gives every run-and-history resource one listing and one action", func() {
+		handler := server.Handler(server.Config{
+			Host: "localhost", Root: commandTree(), Registry: cli.EntityRegistry(),
+		})
+
+		spec := httptest.NewRecorder()
+		handler.ServeHTTP(spec, httptest.NewRequest(http.MethodGet, "/api/openapi.json", nil))
+		Expect(spec.Code).To(Equal(http.StatusOK), spec.Body.String())
+
+		var document struct {
+			Paths map[string]map[string]any `json:"paths"`
+		}
+		Expect(json.Unmarshal(spec.Body.Bytes(), &document)).To(Succeed())
+
+		for _, resource := range []string{"scan", "discover", "probe"} {
+			collection := document.Paths["/api/v1/"+resource]
+			Expect(collection).To(HaveKey("get"), resource+" history")
+			Expect(collection).To(HaveKey("post"), resource+" execution")
+			Expect(document.Paths).To(HaveKey("/api/v1/"+resource+"/{id}"), resource)
+		}
+	})
+})
+
 var _ = Describe("the task API", func() {
 	It("lists and expands runs from the process task registry", func() {
 		run := task.StartManagedRun("task API fixture", task.WithKind("test"))

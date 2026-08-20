@@ -8,6 +8,9 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/discovery"
+	"github.com/flanksource/recon/internal/engines"
+	enginescan "github.com/flanksource/recon/internal/engines/scan"
+	"github.com/flanksource/recon/internal/probes"
 	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -18,14 +21,18 @@ import (
 type Runtimes struct {
 	Scans     *scan.Runtime
 	Discovery *discovery.Runner
+	Probes    *probes.Runner
 }
 
 // scanFlags are the run-only choices a scan takes. They are not a profile: the
 // profile stays what it is, and the effective configuration is recorded on the
 // run.
 type scanFlags struct {
-	Engine  string `flag:"engine" help:"Scan engine to run" default:"nuclei"`
-	Profile string `flag:"profile" help:"Stored scan profile for that engine" default:"safe"`
+	Engine string `flag:"engine" help:"Scan engine to run" default:"nuclei"`
+	// Defaulted per engine rather than in the flag tag: "safe" is nuclei's name
+	// for its own default and means nothing to another engine, so a bare
+	// `--engine inspec` would ask for a profile that does not exist.
+	Profile string `flag:"profile" help:"Stored scan profile for that engine; defaults to the engine's own"`
 	// Repeatable, and one per engine: pre-scan discovery runs several engines,
 	// so a bare name sets the default for all of them and `engine=name` picks a
 	// different profile for one.
@@ -87,14 +94,35 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		return api.Scan{}, err
 	}
 
+	if opts.Profile, err = defaultProfile(opts.Engine, opts.Profile); err != nil {
+		return api.Scan{}, err
+	}
+
+	scanConfig, err := scanOverrides(opts.Override)
+	if err != nil {
+		return api.Scan{}, err
+	}
+
+	// Discovery refreshes the host inventory so a scan runs against what is
+	// actually there. An engine that audits cloud accounts scans nothing that
+	// discovery can find — pointing subfinder and naabu at a project id would
+	// resolve a hostname that does not exist and fail the run before it starts.
+	accountScan, err := scansAccounts(opts.Engine)
+	if err != nil {
+		return api.Scan{}, err
+	}
+	if accountScan {
+		selector, err := accountSelector(target)
+		if err != nil {
+			return api.Scan{}, err
+		}
+		return r.startScan(ctx, opts, selector, scanConfig)
+	}
+
 	// Decoded before the sweep starts: a malformed override should cost nothing,
 	// and finding out after discovery has already probed the estate would mean
 	// paying for the traffic twice.
 	sweepOverrides, err := discoveryOverrides(opts.DiscoveryOverride)
-	if err != nil {
-		return api.Scan{}, err
-	}
-	scanConfig, err := scanOverrides(opts.Override)
 	if err != nil {
 		return api.Scan{}, err
 	}
@@ -135,11 +163,70 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		}
 	}
 
+	return r.startScan(ctx, opts, scanSelector, scanConfig)
+}
+
+// accountSelector resolves the run's targeting onto cloud accounts.
+//
+// An explicit --host names accounts directly. For an endpoint scan the same
+// flag feeds discovery, which then reports back which hosts it found; there is
+// no such step here, so the names go straight into the selector.
+func accountSelector(target resolvedTarget) (store.TargetOpts, error) {
+	if !target.explicit() {
+		return target.Inventory, nil
+	}
+	// A domain is enumerated by DNS and a CIDR is swept by port scan. Neither
+	// describes a cloud account, and silently ignoring them would run against
+	// the whole inventory instead of the nothing they actually name.
+	if len(target.Domains) > 0 || len(target.CIDRs) > 0 {
+		return store.TargetOpts{}, fmt.Errorf(
+			"--domain and --cidr enumerate network addresses and cannot name a cloud account: use --host or an inventory filter")
+	}
+	return store.TargetOpts{Hosts: target.Hosts}, nil
+}
+
+// scansAccounts reports whether an engine's subject is cloud accounts rather
+// than the endpoints a selector resolves to.
+func scansAccounts(name string) (bool, error) {
+	engine, err := enginescan.Get(name)
+	if err != nil {
+		return false, err
+	}
+	return engine.Spec().Subject == engines.SubjectAccounts, nil
+}
+
+// defaultProfile fills in the engine's own default when none was named.
+//
+// Each engine ships a profile and says which one it is, so the fallback comes
+// from the engine rather than from a name written into the flag — which would
+// be right for exactly one of them.
+func defaultProfile(engineName, chosen string) (string, error) {
+	if chosen != "" {
+		return chosen, nil
+	}
+	engine, err := enginescan.Get(engineName)
+	if err != nil {
+		return "", err
+	}
+	name := engine.Spec().Defaults.Name
+	if name == "" {
+		return "", fmt.Errorf("engine %s ships no default profile: name one with --profile", engineName)
+	}
+	return name, nil
+}
+
+// startScan queues the run and, unless the caller asked not to, waits for it.
+func (r *Registry) startScan(
+	ctx context.Context,
+	opts scanRunOpts,
+	selector store.TargetOpts,
+	config map[string]any,
+) (api.Scan, error) {
 	started, err := r.Runtimes.Scans.Start(ctx, scan.Request{
 		Engine:    opts.Engine,
 		Profile:   opts.Profile,
-		Selector:  scanSelector,
-		Overrides: scanConfig,
+		Selector:  selector,
+		Overrides: config,
 		Confirmed: opts.Confirm,
 	})
 	if err != nil || !opts.Wait {
@@ -195,6 +282,10 @@ func (r *Registry) inventoryHosts(ctx context.Context, opts store.TargetOpts) ([
 	if err != nil {
 		return nil, err
 	}
+	// Discovery and probe sweeps resolve, connect and enumerate. Only a host
+	// answers to any of that — a project id handed to subfinder or a liveness
+	// probe is a hostname that does not exist.
+	opts.Kind = []string{string(api.KindHost)}
 	targets, err := st.ListTargets(ctx, opts)
 	if err != nil {
 		return nil, err

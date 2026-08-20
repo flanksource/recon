@@ -17,6 +17,7 @@ import (
 	"github.com/flanksource/recon/internal/discovery"
 	"github.com/flanksource/recon/internal/entities"
 	"github.com/flanksource/recon/internal/httpapi"
+	"github.com/flanksource/recon/internal/probes"
 	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -44,6 +45,9 @@ type Config struct {
 	// Sweeps is the discovery runner. Optional, like Scans.
 	Sweeps *discovery.Runner
 
+	// Probes is the liveness runner. Optional, like Scans.
+	Probes *probes.Runner
+
 	// UI is the built web interface. Optional: a test exercising the API does
 	// not need it, and leaving it nil serves the API alone.
 	UI    fs.FS
@@ -64,6 +68,9 @@ func Handler(config Config) http.Handler {
 	config.Registry.SetStore(config.Store)
 	if config.Sweeps != nil {
 		config.Sweeps.Store = config.Store
+	}
+	if config.Probes != nil {
+		config.Probes.Store = config.Store
 	}
 
 	mux := http.NewServeMux()
@@ -103,6 +110,9 @@ func Handler(config Config) http.Handler {
 
 	httpapi.RegisterSchema(mux)
 	httpapi.RegisterTemplatePreview(mux, config.Registry)
+	if config.Store != nil {
+		httpapi.RegisterScanFiles(mux, config.Store)
+	}
 
 	// The interface claims "/", so it is the fallback for everything the API did
 	// not match. Registered last for readability only — net/http resolves by

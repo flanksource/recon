@@ -150,23 +150,46 @@ func engineNames(kinds ...string) values {
 	}
 }
 
+// also adds values a registry cannot know about, keeping the set sorted so the
+// control reads the same however the extras arrived.
+func also(base values, extra ...string) values {
+	return func(ctx context.Context) []string {
+		names := append(base(ctx), extra...)
+		sort.Strings(names)
+		return names
+	}
+}
+
 func (r *Registry) targetFilters() []clicky.Filter[store.TargetOpts] {
 	return []clicky.Filter[store.TargetOpts]{
+		filter[store.TargetOpts]{key: "kind", label: "Kind", values: fixed(targetKindNames()...)},
 		filter[store.TargetOpts]{key: "class", label: "Class", values: fixed(classNames()...)},
 		filter[store.TargetOpts]{key: "tags", label: "Tags", values: r.vocabulary(store.TargetTags)},
 		filter[store.TargetOpts]{key: "profiles", label: "Profiles", values: r.vocabulary(store.TargetProfiles)},
 		filter[store.TargetOpts]{key: "hosts", label: "Host", values: r.vocabulary(store.TargetHosts)},
 		filter[store.TargetOpts]{key: "ports", label: "Port", values: r.vocabulary(store.TargetPorts)},
 		filter[store.TargetOpts]{key: "status", label: "HTTP status", values: r.vocabulary(store.TargetStatus)},
+		filter[store.TargetOpts]{key: "failure", label: "Failure", values: fixed(failureNames()...)},
 	}
 }
 
 func (r *Registry) scanFilters() []clicky.Filter[store.ScanOpts] {
 	return []clicky.Filter[store.ScanOpts]{
-		filter[store.ScanOpts]{key: "engine", label: "Engine", values: engineNames(api.KindScan)},
+		// A liveness sweep records itself in the scans table but is not a
+		// registered engine, so it has to be named here or the runs list offers
+		// no way to filter to (or away from) the pings.
+		filter[store.ScanOpts]{key: "engine", label: "Engine",
+			values: also(engineNames(api.KindScan), api.ProbeEngine)},
 		filter[store.ScanOpts]{key: "profile", label: "Profile", values: r.vocabulary(store.ScanProfiles)},
 		filter[store.ScanOpts]{key: "phase", label: "Phase", values: fixed(phaseNames()...)},
 		filter[store.ScanOpts]{key: "severity", label: "Severity", values: fixed(severityNames()...)},
+	}
+}
+
+func (r *Registry) probeFilters() []clicky.Filter[store.ProbeOpts] {
+	return []clicky.Filter[store.ProbeOpts]{
+		filter[store.ProbeOpts]{key: "phase", label: "Phase", values: fixed(phaseNames()...)},
+		filter[store.ProbeOpts]{key: "host", label: "Host", values: r.vocabulary(store.ProbeHosts)},
 	}
 }
 
@@ -246,6 +269,14 @@ func engineFilters() []clicky.Filter[EngineOpts] {
 	}
 }
 
+func targetKindNames() []string {
+	names := make([]string, 0, len(api.TargetKinds()))
+	for _, kind := range api.TargetKinds() {
+		names = append(names, string(kind))
+	}
+	return names
+}
+
 func classNames() []string {
 	names := make([]string, 0, len(api.Classes()))
 	for _, class := range api.Classes() {
@@ -258,6 +289,14 @@ func severityNames() []string {
 	names := make([]string, 0, len(api.Severities()))
 	for _, severity := range api.Severities() {
 		names = append(names, string(severity))
+	}
+	return names
+}
+
+func failureNames() []string {
+	names := make([]string, 0, len(api.Failures()))
+	for _, failure := range api.Failures() {
+		names = append(names, string(failure))
 	}
 	return names
 }

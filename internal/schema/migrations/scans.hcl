@@ -84,7 +84,7 @@ table "scans" {
   column "result_path" {
     null    = true
     type    = text
-    comment = "raw engine artifact on disk, when still present"
+    comment = "retained artifact directory: results/<engine>/<date>/<name>"
   }
   column "created_at" {
     null    = false

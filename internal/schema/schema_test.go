@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/schema"
 )
 
@@ -75,6 +76,29 @@ var _ = Describe("target schema", func() {
 		Entry("an IPv4 address", "192.0.2.10"),
 		Entry("an IPv6 address", "2001:db8::10"),
 	)
+
+	// observed is `additionalProperties: false` and the failure kinds are an
+	// enum, so the schema has to be taught every kind the prober can produce.
+	// Adding one to api.Failures() and not here rejects the first target it
+	// happens to.
+	It("accepts every failure the prober can classify", func() {
+		for _, failure := range api.Failures() {
+			document := base()
+			document["observed"] = map[string]any{
+				"last_attempt": "2026-01-01T00:00:00Z",
+				"error":        "the host did not answer",
+				"failure":      string(failure),
+			}
+			Expect(schema.ValidateTarget("t.json", document)).
+				To(Succeed(), "validating failure %q", failure)
+		}
+	})
+
+	It("rejects a failure kind the prober cannot produce", func() {
+		document := base()
+		document["observed"] = map[string]any{"failure": "gremlins"}
+		Expect(schema.ValidateTarget("t.json", document)).To(HaveOccurred())
+	})
 
 	// Profiles are rows, not a closed vocabulary: an engine ships dozens and a
 	// user can create more. The schema constrains the shape of a name — the same

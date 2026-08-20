@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"gorm.io/gorm"
 
 	"github.com/flanksource/recon/internal/api"
 )
@@ -16,6 +17,7 @@ import (
 // absent-vs-empty distinction and make an engine upgrade a schema migration.
 type Target struct {
 	Host    string  `gorm:"column:host;primaryKey"`
+	Kind    string  `gorm:"column:kind"`
 	Class   string  `gorm:"column:class"`
 	App     *string `gorm:"column:app"`
 	Cluster *string `gorm:"column:cluster"`
@@ -42,14 +44,30 @@ type Target struct {
 // repoint the model at a different table than the HCL declares.
 func (Target) TableName() string { return "targets" }
 
+// BeforeSave resolves the absent-means-host default for kind.
+//
+// The column's SQL default cannot do this: gorm names every field in its
+// INSERT, so a Target built without a kind writes an empty string rather than
+// falling back — and the CHECK rejects it. Applying it here rather than at each
+// construction site means a row built anywhere is valid, including by code
+// written before cloud accounts existed.
+func (t *Target) BeforeSave(*gorm.DB) error {
+	t.Kind = api.TargetKind(t.Kind).String()
+	return nil
+}
+
 // Document projects the row onto the wire type. $schema and version are
 // synthesised here and never stored: they are constants in the JSON Schema, so
 // persisting them would just be a column that can only hold one value.
 func (t Target) Document() api.TargetDocument {
 	return api.TargetDocument{
-		Schema:   api.TargetSchemaRef,
-		Version:  api.TargetVersion,
-		Host:     t.Host,
+		Schema:  api.TargetSchemaRef,
+		Version: api.TargetVersion,
+		Host:    t.Host,
+		// A host document stays byte-identical to what it was before cloud
+		// accounts existed, which is what keeps the golden fixtures comparing
+		// equal without rewriting all 207 of them.
+		Kind:     kindOf(t.Kind),
 		Class:    api.Class(t.Class),
 		App:      deref(t.App),
 		Cluster:  deref(t.Cluster),
@@ -72,7 +90,10 @@ func (t Target) Document() api.TargetDocument {
 // the machine-owned sections arrive alongside the curated ones.
 func TargetFromDocument(document api.TargetDocument) Target {
 	return Target{
-		Host:     document.Host,
+		Host: document.Host,
+		// String() resolves the absent-means-host default, because the column is
+		// NOT NULL and an empty string is not one of the values it permits.
+		Kind:     document.Kind.String(),
 		Class:    string(document.Class),
 		App:      ref(document.App),
 		Cluster:  ref(document.Cluster),
@@ -115,6 +136,16 @@ type Zone struct {
 func (Zone) TableName() string { return "zones" }
 
 // ---------------------------------------------------------------- conversions
+
+// kindOf maps the stored kind onto the wire. "host" becomes absent rather than
+// explicit: it is the default in the JSON Schema, and emitting it would change
+// every existing target document.
+func kindOf(stored string) api.TargetKind {
+	if stored == "" || stored == string(api.KindHost) {
+		return ""
+	}
+	return api.TargetKind(stored)
+}
 
 // ref maps "" to NULL. Every curated string carries minLength: 1, so an empty
 // value means absent and must not be stored as an empty string — otherwise the

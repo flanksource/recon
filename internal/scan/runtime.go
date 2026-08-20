@@ -9,8 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -73,10 +71,17 @@ type Run struct {
 	Scan   api.Scan
 	Output *Output
 
+	artifacts Artifacts
 	session   *session
 	task      *task.Task
 	queueDone func()
 	row       models.Scan
+
+	// covered is the hosts the selector resolved to, deduplicated: several
+	// endpoints of one host are one host here. Distinct from Scan.Hosts, which
+	// is the hosts the engine found something on — this is what the run set out
+	// to cover, and so what gets stamped as scanned.
+	covered []string
 
 	// done closes when the run reaches a terminal phase. Wait blocks on it.
 	done     chan struct{}
@@ -240,13 +245,9 @@ func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) 
 		return api.Scan{}, err
 	}
 
-	endpoints, err := r.Store.Endpoints(ctx, request.Selector)
+	endpoints, err := r.subjects(ctx, spec, request.Selector)
 	if err != nil {
 		return api.Scan{}, err
-	}
-	if len(endpoints) == 0 {
-		return api.Scan{}, fmt.Errorf(
-			"no endpoints match %s: nothing to scan", request.Selector.Describe())
 	}
 
 	if risk := engine.Risk(config); risk.Intrusive && !request.Confirmed {
@@ -258,6 +259,41 @@ func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) 
 	}
 
 	return r.enqueue(ctx, engine, config, endpoints, request)
+}
+
+// subjects resolves the selector to whatever this engine scans.
+//
+// An engine that audits cloud accounts and one that probes services want
+// different things from the same selector, and neither can use the other's: a
+// project id is not an address, and an endpoint is not an account. The empty
+// case is an error for both — a run against nothing reports no findings, which
+// reads exactly like a clean scan.
+func (r *Runtime) subjects(
+	ctx context.Context,
+	spec engines.Spec,
+	selector store.TargetOpts,
+) ([]store.Endpoint, error) {
+	if spec.Subject == engines.SubjectAccounts {
+		accounts, err := r.Store.Accounts(ctx, selector)
+		if err != nil {
+			return nil, err
+		}
+		if len(accounts) == 0 {
+			return nil, fmt.Errorf(
+				"no cloud accounts match %s: nothing to scan", selector.Describe())
+		}
+		return accounts, nil
+	}
+
+	endpoints, err := r.Store.Endpoints(ctx, selector)
+	if err != nil {
+		return nil, err
+	}
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf(
+			"no endpoints match %s: nothing to scan", selector.Describe())
+	}
+	return endpoints, nil
 }
 
 // resolveConfig layers the run-only overrides over the stored profile and
@@ -311,7 +347,7 @@ func (r *Runtime) enqueue(
 		return api.Scan{}, err
 	}
 
-	dir, err := engines.NewWorkDir(r.Root, "scan", row.ID)
+	artifacts, err := NewArtifacts(r.Root, spec.Name, queuedAt, name)
 	if err != nil {
 		return api.Scan{}, r.failQueuedScan(ctx, row, err)
 	}
@@ -320,29 +356,51 @@ func (r *Runtime) enqueue(
 	for _, endpoint := range endpoints {
 		targets = append(targets, endpoint.URL)
 	}
-	in, err := engines.WriteList(dir, "targets.txt", targets)
+	in, err := engines.WriteList(artifacts.Dir, TargetsFile, targets)
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		artifacts.Remove()
+		return api.Scan{}, r.failQueuedScan(ctx, row, err)
+	}
+	// The effective configuration, not the stored profile: overrides are
+	// run-only and are otherwise lost the moment the run ends.
+	if err := artifacts.WriteJSON(ConfigFile, config); err != nil {
+		artifacts.Remove()
 		return api.Scan{}, r.failQueuedScan(ctx, row, err)
 	}
 
-	out := filepath.Join(dir, "findings.jsonl")
-	engineRun := engines.Run{WorkDir: dir, Config: config, In: in, Out: out}
+	// A spawned engine needs its binary resolved before the run is built; an
+	// in-process one reports a path nothing can exec. Resolving here rather than
+	// at run time means a missing binary fails the request instead of a queued
+	// scan that starts and immediately dies.
+	bin, err := r.Provisioner.Resolve(spec)
+	if err != nil {
+		artifacts.Remove()
+		return api.Scan{}, r.failQueuedScan(ctx, row, err)
+	}
+
+	out := artifacts.Path(FindingsFile)
+	engineRun := engines.Run{Bin: bin, WorkDir: artifacts.Dir, Config: config, In: in, Out: out}
 	output := NewOutput()
-	current := newSession(output, dir, commandOf(engine, engineRun))
+	current := newSession(output, spec.Name, commandOf(engine, engineRun))
 
 	run := &Run{
-		Scan:    row.Document(0, nil, request.Selector.Describe()),
-		Output:  output,
-		session: current,
-		row:     row,
-		done:    make(chan struct{}),
+		Scan:      row.Document(0, nil, request.Selector.Describe()),
+		Output:    output,
+		artifacts: artifacts,
+		session:   current,
+		row:       row,
+		covered:   coveredHosts(endpoints),
+		done:      make(chan struct{}),
 	}
 	run.Scan.Command = current.Command
+	run.Scan.Result = artifacts.Dir
+	// Recorded before the engine starts, so a run that crashes still names the
+	// directory holding whatever it managed to write.
+	row.ResultPath = &artifacts.Dir
 	row.Command = append(row.Command, run.Scan.Command...)
-	run.row.Command = append(run.row.Command, run.Scan.Command...)
+	run.row = row
 	if err := r.Store.UpdateScan(ctx, row); err != nil {
-		current.Cleanup()
+		artifacts.Remove()
 		return api.Scan{}, fmt.Errorf("persist queued scan command: %w", err)
 	}
 	if r.runs == nil {

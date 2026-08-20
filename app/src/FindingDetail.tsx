@@ -234,18 +234,44 @@ function Overview({ finding, raw }: { finding: Finding; raw: Record<string, unkn
 // it exported in `response`, so highlighting either as HTTP misreads it.
 const REQUEST_LANGUAGE: Record<string, string> = { javascript: "javascript", code: "bash" };
 
+// complianceEvidence is what a benchmark control leaves behind.
+//
+// A compliance finding has no request, response or curl — nothing was sent. Its
+// evidence is the assertion that failed and the reason it did, which InSpec
+// reports as code_desc and message on the result. Without this the Evidence tab
+// disappears and the only way to see why a control failed is the raw JSON.
+function complianceEvidence(raw: Record<string, unknown>) {
+  const result = record(raw.result);
+  const codeDesc = text(result.code_desc);
+  const message = text(result.message);
+  const skip = text(result.skip_message);
+  const detail = message || skip;
+
+  return [
+    codeDesc && { title: "Assertion", language: "text", source: codeDesc },
+    detail && { title: "Why it failed", language: "text", source: detail },
+    text(record(raw.control).code) && {
+      title: "Control source",
+      language: "ruby",
+      source: text(record(raw.control).code) as string,
+    },
+  ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
+}
+
 export function FindingDetail({ finding }: { finding: Finding }) {
   const raw = record(finding.raw);
   const requestLanguage = REQUEST_LANGUAGE[finding.type ?? ""] ?? "http";
-  const evidence = [
-    finding.curl && { title: "Reproduce (curl)", language: "bash", source: finding.curl },
-    finding.request && { title: "Request", language: requestLanguage, source: finding.request },
-    finding.response && {
-      title: "Response",
-      language: requestLanguage === "http" ? "http" : "text",
-      source: finding.response,
-    },
-  ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
+  const evidence = finding.type === "inspec"
+    ? complianceEvidence(raw)
+    : [
+        finding.curl && { title: "Reproduce (curl)", language: "bash", source: finding.curl },
+        finding.request && { title: "Request", language: requestLanguage, source: finding.request },
+        finding.response && {
+          title: "Response",
+          language: requestLanguage === "http" ? "http" : "text",
+          source: finding.response,
+        },
+      ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
 
   // Engines that match on a parsed document rather than a transaction (dns,
   // ssl, file) carry no request or response at all — an empty Evidence tab

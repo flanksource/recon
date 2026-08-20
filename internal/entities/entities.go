@@ -81,6 +81,7 @@ func (r *Registry) Register() {
 	r.registerScan()
 	r.registerFinding()
 	r.registerDiscover()
+	r.registerProbe()
 	r.registerProfile()
 	r.registerTemplate()
 	r.registerEngine()
@@ -133,11 +134,11 @@ func (r *Registry) registerTarget() {
 // createTarget adds a curated target directly. Discovery-created targets enter
 // the same inventory as unclassified records and can be updated in place.
 func createTarget(st *store.Store, ctx context.Context, body map[string]any) (api.TargetDocument, error) {
-	host, curated, err := api.TargetFrom(body)
+	target, err := api.TargetFrom(body)
 	if err != nil {
 		return api.TargetDocument{}, err
 	}
-	return st.CreateTarget(ctx, host, curated)
+	return st.CreateTarget(ctx, target)
 }
 
 // updateTarget applies an edit to the curated fields only.
@@ -211,6 +212,30 @@ func (r *Registry) registerDiscover() {
 	if r.Runtimes.Discovery != nil {
 		builder.WithPrimaryAction(entity.PrimaryActionWithContext(discoverRunOpts{}, r.discoverSelection).
 			WithShort("Discover domains, networks, hosts or selected inventory targets"))
+	}
+	builder.Register()
+}
+
+// registerProbe exposes liveness sweeps.
+//
+// A probe used to be a bare command with no history: it folded what it saw into
+// the targets and the run was the response. It is an entity now for the same
+// reason a scan is one — "what did the last sweep find" has to outlive the
+// request that ran it.
+//
+// Unlike `reconctl ping` this is served over HTTP, which is safe because a probe
+// can only reach hosts already in the inventory; a free-form prober would be a
+// way to reach anything the server can.
+func (r *Registry) registerProbe() {
+	builder := clicky.NewEntity[api.ProbeRun, store.ProbeOpts, api.ProbeRun]("probe").
+		Aliases("probes").
+		ToolGroup("inventory").
+		ListWithContext(bind(r, (*store.Store).ListProbes)).
+		GetWithContext(bind(r, (*store.Store).GetProbe)).
+		Filters(r.probeFilters()...)
+	if r.Runtimes.Probes != nil {
+		builder.WithPrimaryAction(entity.PrimaryActionWithContext(probeRunOpts{}, r.ProbeTargets).
+			WithShort("Probe inventory targets and refresh their liveness"))
 	}
 	builder.Register()
 }

@@ -69,7 +69,7 @@ func newServeCommand() *cobra.Command {
 func serve(cmd *cobra.Command, st *store.Store, host string, port int, dev bool) error {
 	config := server.Config{
 		Host: host, Port: port,
-		Root: cmd.Root(), Registry: registry, Store: st, Scans: scans, Sweeps: sweeps,
+		Root: cmd.Root(), Registry: registry, Store: st, Scans: scans, Sweeps: sweeps, Probes: liveness,
 		UI: recon.UI, UIDir: recon.UIDir,
 	}
 

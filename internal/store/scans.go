@@ -69,7 +69,7 @@ func (s *Store) ListScans(ctx context.Context, opts ScanOpts) ([]api.Scan, error
 		if err != nil {
 			return nil, err
 		}
-		hosts, err := s.scanHosts(ctx, row.ID)
+		hosts, err := s.scanHosts(ctx, row)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +92,7 @@ func (s *Store) GetScan(ctx context.Context, id string) (api.Scan, error) {
 	if err != nil {
 		return api.Scan{}, err
 	}
-	hosts, err := s.scanHosts(ctx, row.ID)
+	hosts, err := s.scanHosts(ctx, row)
 	if err != nil {
 		return api.Scan{}, err
 	}
@@ -139,13 +139,20 @@ func (s *Store) findingCount(ctx context.Context, scanID string) (int, error) {
 	return int(count), nil
 }
 
-func (s *Store) scanHosts(ctx context.Context, scanID string) ([]string, error) {
+// scanHosts lists the hosts a run has something to say about.
+//
+// For an engine that reports findings that is the hosts it found something on,
+// which is what the runs list means by "affected". A liveness sweep finds
+// nothing by design, so its hosts are the ones it probed — read from the sweep's
+// own results, which share the run's id.
+func (s *Store) scanHosts(ctx context.Context, row models.Scan) ([]string, error) {
 	var hosts []string
-	err := s.DB(ctx).Model(&models.Finding{}).
-		Where("scan_id = ?", scanID).
-		Distinct().Order("host").Pluck("host", &hosts).Error
-	if err != nil {
-		return nil, fmt.Errorf("hosts for scan %s: %w", scanID, err)
+	query := s.DB(ctx).Model(&models.Finding{}).Where("scan_id = ?", row.ID)
+	if row.Engine == api.ProbeEngine {
+		query = s.DB(ctx).Model(&models.ProbeResult{}).Where("probe_id = ?", row.ID)
+	}
+	if err := query.Distinct().Order("host").Pluck("host", &hosts).Error; err != nil {
+		return nil, fmt.Errorf("hosts for scan %s: %w", row.ID, err)
 	}
 	return hosts, nil
 }
@@ -218,6 +225,16 @@ type FinalizeScanOptions struct {
 	Scan     models.Scan
 	Output   models.ScanOutput
 	Findings []api.Finding
+
+	// Hosts is what the run covered — the selection it resolved at the start,
+	// not only the hosts that produced findings. Each one's scan.last_scan is
+	// stamped, which is the only thing that writes that field.
+	Hosts []string
+
+	// CountFindings stamps each host's scan.last_findings from this run. False
+	// for a run that cannot produce any: a liveness sweep leaves the count from
+	// the last real scan alone rather than zeroing it.
+	CountFindings bool
 }
 
 func (s *Store) FinalizeScan(ctx context.Context, options FinalizeScanOptions) error {
@@ -239,7 +256,16 @@ func (s *Store) FinalizeScan(ctx context.Context, options FinalizeScanOptions) e
 		if err := updateScan(tx, options.Scan); err != nil {
 			return err
 		}
+		if err := stampScanned(tx, options); err != nil {
+			return err
+		}
 
+		// Skipped for a run with nothing to capture: an engine that runs in this
+		// process leaves no streams, and an empty row would make the API report
+		// captured output that does not exist.
+		if options.Output == (models.ScanOutput{}) {
+			return nil
+		}
 		options.Output.ScanID = options.Scan.ID
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "scan_id"}},
@@ -251,6 +277,57 @@ func (s *Store) FinalizeScan(ctx context.Context, options FinalizeScanOptions) e
 		}
 		return nil
 	})
+}
+
+// stampScanned records on every target the run covered that it was covered, and
+// by how much.
+//
+// One statement rather than a read-modify-write per host: a full-estate scan
+// covers hundreds of targets, and the count comes from the findings this run
+// just wrote inside the same transaction. A named host that is not in the
+// inventory is simply not updated — the same rule the probe runner applies, and
+// inventing a record is discovery's job.
+// stampScannedSQL is at package scope so a test can render it without a
+// database — see scans_sql_test.go, which is the only guard against the named
+// parameters silently becoming literal text.
+//
+// CAST(@x AS type) rather than @x::type: gorm ends a named parameter at a space,
+// comma, bracket or quote and not at a colon, so `@at::text` is read as a
+// parameter literally called "at::text", matches nothing, and is emitted
+// verbatim into the SQL.
+const stampScannedSQL = `
+UPDATE targets AS t
+SET scan = COALESCE(t.scan, '{}'::jsonb)
+        || jsonb_build_object('last_scan', CAST(@at AS text))
+        || CASE WHEN CAST(@count AS boolean)
+                THEN jsonb_build_object('last_findings', COALESCE(c.n, 0))
+                ELSE '{}'::jsonb END,
+    updated_at = now()
+FROM unnest(CAST(@hosts AS text[])) AS sel(host)
+LEFT JOIN (
+    SELECT host, COUNT(*) AS n FROM findings WHERE scan_id = @scan GROUP BY host
+) AS c ON c.host = sel.host
+WHERE t.host = sel.host`
+
+func stampScanned(db *gorm.DB, options FinalizeScanOptions) error {
+	if len(options.Hosts) == 0 {
+		return nil
+	}
+
+	err := db.Exec(stampScannedSQL,
+		map[string]any{
+			// RFC3339 because that is what the target schema declares and what
+			// ApplyProbe writes into the sibling observed timestamps.
+			"at":    options.Scan.FinishedAt.Format(time.RFC3339),
+			"count": options.CountFindings,
+			"hosts": stringArray(options.Hosts),
+			"scan":  options.Scan.ID,
+		},
+	).Error
+	if err != nil {
+		return fmt.Errorf("stamp scan %s onto its targets: %w", options.Scan.ID, err)
+	}
+	return nil
 }
 
 func saveFindings(db *gorm.DB, scanID string, findings []api.Finding) error {

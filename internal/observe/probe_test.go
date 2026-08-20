@@ -84,7 +84,16 @@ var _ = Describe("folding a liveness probe into a target", func() {
 	Describe("a probe that failed", func() {
 		failed := observe.Probe{
 			Host: "api.example.test", Failed: true, Error: "connection refused",
+			Failure: api.FailureRefused,
 		}
+
+		// The status code below stays at its last good value, so this is the only
+		// thing on the row that says the host is not answering right now.
+		It("classifies the failure so the inventory can badge and filter it", func() {
+			updated, err := observe.ApplyProbe(discovered(), failed, now)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(updated.Observed.Failure).To(Equal(api.FailureRefused))
+		})
 
 		It("records the attempt and the error without moving last seen", func() {
 			updated, err := observe.ApplyProbe(discovered(), failed, now)
@@ -105,21 +114,27 @@ var _ = Describe("folding a liveness probe into a target", func() {
 			Expect(updated.Network.OpenPorts).To(Equal([]int{443, 8443}))
 		})
 
+		// An unexplained failure still has to be one: leaving the kind empty would
+		// send the row back to rendering its last good status code, which is the
+		// state this whole classification exists to end.
 		It("names a failure the prober did not explain", func() {
 			updated, err := observe.ApplyProbe(discovered(),
 				observe.Probe{Host: "api.example.test", Failed: true}, now)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(updated.Observed.Error).To(Equal(observe.FailedProbeError))
+			Expect(updated.Observed.Failure).To(Equal(api.FailureOther))
 		})
 	})
 
 	It("clears an error left by an earlier failure once the host answers", func() {
 		target := discovered()
 		target.Observed.Error = "connection refused"
+		target.Observed.Failure = api.FailureRefused
 
 		updated, err := observe.ApplyProbe(target, live, now)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(updated.Observed.Error).To(BeEmpty())
+		Expect(updated.Observed.Failure).To(Equal(api.FailureNone))
 	})
 
 	It("refuses an observation of a different host", func() {

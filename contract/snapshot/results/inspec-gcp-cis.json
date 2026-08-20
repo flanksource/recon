@@ -1,0 +1,161 @@
+{
+  "platform": { "name": "gcp", "release": "v1.5.0", "target_id": "" },
+  "profiles": [
+    {
+      "name": "inspec-gcp-cis-benchmark",
+      "title": "InSpec GCP CIS 4.0 Benchmark",
+      "maintainer": "Google Cloud Platform",
+      "copyright": "(c) 2022, Google, Inc.",
+      "license": "Apache-2.0",
+      "summary": "Inspec Google Cloud Platform Center for Internet Security Benchmark v4.0 Profile",
+      "version": "4.0.0-0",
+      "supports": [{ "platform": "gcp" }],
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "attributes": [],
+      "groups": [
+        { "id": "controls/1.04-iam.rb", "controls": ["cis-gcp-1.4-iam"] },
+        { "id": "controls/2.02-logging.rb", "controls": ["cis-gcp-2.2-logging"] },
+        { "id": "controls/3.01-networking.rb", "controls": ["cis-gcp-3.1-networking"] },
+        { "id": "controls/4.01-vms.rb", "controls": ["cis-gcp-4.1-vms"] },
+        { "id": "controls/6.01-databases.rb", "controls": ["cis-gcp-6.1-databases"] }
+      ],
+      "controls": [
+        {
+          "id": "cis-gcp-1.4-iam",
+          "title": "[IAM] Ensure that there are only GCP-managed service account keys for each service account",
+          "desc": "User managed service account should not have user managed keys.",
+          "descriptions": [
+            { "label": "default", "data": "User managed service account should not have user managed keys." },
+            { "label": "rationale", "data": "Anyone who has access to the keys will be able to access resources through the service account." }
+          ],
+          "impact": 0.5,
+          "refs": [
+            { "ref": "CIS Benchmark", "url": "https://www.cisecurity.org/benchmark/google_cloud_computing_platform/" },
+            { "ref": "GCP Docs", "url": "https://cloud.google.com/iam/docs/understanding-service-accounts" },
+            { "ref": "CIS Benchmark", "url": "https://www.cisecurity.org/benchmark/google_cloud_computing_platform/" }
+          ],
+          "tags": {
+            "cis_scored": true,
+            "cis_level": 1,
+            "cis_gcp": "1.4",
+            "cis_version": "4.0",
+            "project": "example-project",
+            "nist": ["AC-2", "AC-3"]
+          },
+          "code": "control 'cis-gcp-1.4-iam' do\n  impact 'medium'\nend",
+          "source_location": { "ref": "controls/1.04-iam.rb", "line": 24 },
+          "results": [
+            {
+              "status": "failed",
+              "code_desc": "[example-project] Service Account: builder@example-project.iam.gserviceaccount.com should not have user-managed keys",
+              "message": "expected [\"USER_MANAGED\", \"SYSTEM_MANAGED\"] not to include \"USER_MANAGED\"",
+              "run_time": 0.412,
+              "start_time": "2026-08-20T09:41:02+02:00",
+              "resource": "google_service_account_keys"
+            },
+            {
+              "status": "passed",
+              "code_desc": "[example-project] Service Account: runner@example-project.iam.gserviceaccount.com should not have user-managed keys",
+              "run_time": 0.201,
+              "start_time": "2026-08-20T09:41:03+02:00"
+            }
+          ]
+        },
+        {
+          "id": "cis-gcp-2.2-logging",
+          "title": "[LOGGING] Ensure that sinks are configured for all log entries",
+          "desc": "It is recommended to create a sink that will export copies of all the log entries.",
+          "descriptions": [
+            { "label": "default", "data": "It is recommended to create a sink that will export copies of all the log entries." },
+            { "label": "fix", "data": "Create an aggregated export sink at the organization level with an empty filter." }
+          ],
+          "impact": 0.7,
+          "refs": [{ "uri": "https://cloud.google.com/logging/docs/export" }],
+          "tags": { "cis_gcp": "2.2", "cis_level": 1, "cis_scored": false },
+          "code": "control 'cis-gcp-2.2-logging' do\n  impact 'high'\nend",
+          "source_location": { "ref": "controls/2.02-logging.rb", "line": 30 },
+          "results": [
+            {
+              "status": "failed",
+              "code_desc": "[example-project] Log sinks should include a sink with an empty filter",
+              "message": "expected [] not to be empty",
+              "run_time": 1.104,
+              "start_time": "2026-08-20T09:41:05+02:00"
+            }
+          ]
+        },
+        {
+          "id": "cis-gcp-3.1-networking",
+          "title": "[NETWORKING] Ensure the default network does not exist in a project",
+          "desc": "To prevent use of default network, a project should not have a default network.",
+          "descriptions": [
+            { "label": "default", "data": "To prevent use of default network, a project should not have a default network." }
+          ],
+          "impact": 0.9,
+          "refs": [{ "ref": "https://cloud.google.com/vpc/docs/vpc" }],
+          "tags": { "cis_gcp": "3.1", "cis_level": 2, "nist": ["SC-7"] },
+          "code": "control 'cis-gcp-3.1-networking' do\n  impact 'critical'\nend",
+          "source_location": { "ref": "controls/3.01-networking.rb", "line": 28 },
+          "results": [
+            {
+              "status": "error",
+              "code_desc": "[example-project] Compute networks",
+              "message": "Google::Apis::ClientError: forbidden: Required 'compute.networks.list' permission",
+              "exception": "Google::Apis::ClientError",
+              "backtrace": ["lib/google/apis/core/http_command.rb:229"],
+              "run_time": 0.09,
+              "start_time": "2026-08-20T09:41:06+02:00"
+            }
+          ]
+        },
+        {
+          "id": "cis-gcp-4.1-vms",
+          "title": "[VMS] Ensure that instances are not configured to use the default service account",
+          "desc": "It is recommended to configure your instance to not use the default Compute Engine service account.",
+          "descriptions": [
+            { "label": "default", "data": "It is recommended to configure your instance to not use the default Compute Engine service account." }
+          ],
+          "impact": 0.3,
+          "refs": [],
+          "tags": { "cis_gcp": "4.1", "cis_level": 1 },
+          "code": "control 'cis-gcp-4.1-vms' do\n  impact 'low'\nend",
+          "source_location": { "ref": "controls/4.01-vms.rb", "line": 26 },
+          "results": [
+            {
+              "status": "skipped",
+              "code_desc": "No compute instances found in the project",
+              "skip_message": "No compute instances found in the project",
+              "run_time": 0.001,
+              "start_time": "2026-08-20T09:41:07+02:00",
+              "resource": "google_compute_instances"
+            }
+          ]
+        },
+        {
+          "id": "cis-gcp-6.1-databases",
+          "title": "[DATABASES] Ensure that a MySQL database instance does not allow anyone to connect",
+          "desc": "Informational inventory of Cloud SQL instances.",
+          "descriptions": [
+            { "label": "default", "data": "Informational inventory of Cloud SQL instances." }
+          ],
+          "impact": 0.0,
+          "refs": [],
+          "tags": { "cis_gcp": "6.1" },
+          "code": "control 'cis-gcp-6.1-databases' do\n  impact 'none'\nend",
+          "source_location": { "ref": "controls/6.01-databases.rb", "line": 22 },
+          "results": [
+            {
+              "status": "failed",
+              "code_desc": "[example-project] Cloud SQL instances should be inventoried",
+              "message": "expected 0 to be > 0",
+              "run_time": 0.05,
+              "start_time": "2026-08-20T09:41:08+02:00"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "statistics": { "duration": 12.884 },
+  "version": "7.1.7"
+}

@@ -16,11 +16,33 @@ import (
 	"github.com/flanksource/deps/pkg/types"
 )
 
+// Subject is what a scan engine's input list holds.
+//
+// It lives on the Spec rather than the Engine interface because it is a fixed
+// property of the engine, not a decision it makes per run — and putting it here
+// means the existing engines need no new method and Spec.Validate can check it.
+type Subject string
+
+const (
+	// SubjectEndpoints is the default: the host:port list the selector resolves
+	// to. Everything that tests a service over the network wants this.
+	SubjectEndpoints Subject = ""
+
+	// SubjectAccounts is a list of cloud accounts. An engine that audits an
+	// account's configuration through an API has no endpoint to contact, and
+	// handing it one would misrepresent what it scanned.
+	SubjectAccounts Subject = "accounts"
+)
+
 // Spec describes an engine: what it is, how to install it, and which options its
 // profiles may set.
 type Spec struct {
 	// Name is the stable identifier used in profiles, runs and the API.
 	Name string
+
+	// Subject is what this engine's input list holds. Zero value is endpoints,
+	// which is what every network scanner wants.
+	Subject Subject
 
 	// Binary is the executable name. Usually Name, but not always.
 	Binary string
@@ -92,6 +114,12 @@ func (s Spec) ValidateConfig(config map[string]any) error {
 func (s Spec) Validate() error {
 	if s.Name == "" {
 		return fmt.Errorf("engine spec: name is required")
+	}
+
+	switch s.Subject {
+	case SubjectEndpoints, SubjectAccounts:
+	default:
+		return fmt.Errorf("engine %s: unknown subject %q", s.Name, s.Subject)
 	}
 
 	// A linked-in engine has nothing to provision, so the binary contract does

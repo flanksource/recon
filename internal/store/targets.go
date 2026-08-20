@@ -89,9 +89,10 @@ func (s *Store) SaveTarget(ctx context.Context, document api.TargetDocument) err
 // sees but never classifies it, because a class is a judgement about what a
 // host is for. An existing host is refused rather than overwritten — a create
 // that silently replaced a curated record would discard someone's work.
-func (s *Store) CreateTarget(ctx context.Context, host string, curated api.Curated) (api.TargetDocument, error) {
-	row := models.Target{Host: host}
-	row.ApplyCurated(curated)
+func (s *Store) CreateTarget(ctx context.Context, target api.NewTarget) (api.TargetDocument, error) {
+	host := target.Host
+	row := models.Target{Host: host, Kind: target.Kind.String()}
+	row.ApplyCurated(target.Curated)
 
 	document := row.Document()
 	if err := validate(document); err != nil {

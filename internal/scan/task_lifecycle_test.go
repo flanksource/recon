@@ -138,7 +138,7 @@ var _ = Describe("scan task lifecycle", func() {
 		start := make(chan struct{})
 		release := make(chan struct{})
 		var stops atomic.Int32
-		current := newSession(NewOutput(), GinkgoT().TempDir(),
+		current := newSession(NewOutput(), "nuclei",
 			[]string{"nuclei", "-list", "targets.txt", "-severity", "high"})
 		scanState := api.Scan{
 			ID: "scan-2", Engine: "nuclei", Profile: "safe", Phase: api.PhaseRunning,

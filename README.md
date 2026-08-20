@@ -34,9 +34,18 @@ nuclei/
   hack/                     discovery and report helpers
   app/                      Vite + clicky-ui inventory admin UI
   .agents/skills/           reconctl inventory maintenance skill
-  results/                  scan output (gitignored)
+  results/                  retained scan artifacts (gitignored)
+    <engine>/<date>/<run>/  targets.txt, findings.jsonl, config.json,
+                            scan.json, output.log
   .gen/                     rendered target lists (gitignored)
 ```
+
+Every run keeps its own directory under `results/`, partitioned by engine and by
+the day it started. The directory holds the endpoint list the selector resolved
+to, the engine's own output in the engine's own format, the effective
+configuration (the profile with the run's overrides already applied), the run's
+terminal record, and the engine log. Each run records the path, and the Scans
+tab links to every file in it.
 
 ## Quick start
 
@@ -65,16 +74,19 @@ task app:dev                      # admin UI: tag/bulk-edit targets, see observe
 `task app:dev` (or `make nuclei-app`) opens a local Vite + clicky-ui UI at
 `localhost:5280` with three tabs:
 
-- **Inventory** — filter and bulk-edit targets, or open `/inventory/:host` for a
+- **Inventory** — filter and bulk-edit targets by kind and class, or open `/inventory/:host` for a
   preview-first detail page. Edit mode is driven by `target.schema.json`; host identity
   and machine-owned observation fields remain read-only. **Discover targets** runs
   NS/MX resolution, subfinder, Naabu, and httpx. Newly observed identities are added as
   `unclassified` with the `safe` profile so they are visible immediately without losing
   any curated fields on targets that already exist.
-- **Scans** — browse every `results/*.jsonl` run (severity breakdown per run) and drill
-  into its findings, grouped by result type with the affected domains on each group
-  header (regroup by severity/domain/none); expand a finding for remediation, references,
-  reproduce-curl and the raw request.
+- **Scans** — browse every run (severity breakdown per run) and drill into its
+  findings, grouped by result type with the affected domains on each group header
+  (regroup by severity/domain/none); expand a finding for remediation, references,
+  reproduce-curl and the raw request. The **Execution** tab adds what the run put on
+  the wire — requests, responses, bytes, and breakdowns by status code, protocol,
+  error kind and detected WAF — alongside the retained artifact directory, with a
+  link to every file in it.
 - **Profiles** — edit the tracked Nuclei, Naabu, and httpx discovery profiles
   through a clicky-ui JSON Schema form backed by the upstream CLI options. Saves are
   type-checked and written directly to `config/*.yaml`.
@@ -88,6 +100,43 @@ JSON document contains both curated definition fields and machine-owned `observe
 `network`, `http`, `tech`, `tls`, and `scan` sections. Discovery updates successful
 observations and creates conservative `unclassified` records for new targets; clean
 scans update `last_scan` and `last_findings` in the same document.
+
+## Compliance benchmarks
+
+Alongside the outside-in scanning, recon runs **CIS benchmarks against cloud
+accounts** with [CINC Auditor](https://cinc.sh/start/auditor/) — the
+license-free build of Chef InSpec. Where nuclei asks what an unauthenticated
+attacker can see, this asks whether the account behind it is configured
+correctly, by reading the provider's own APIs with credentials.
+
+```bash
+reconctl engine install inspec           # installs system-wide; prompts for sudo
+reconctl target create host=my-project kind=gcp-project class=prod profiles=gcp-cis
+reconctl scan --engine inspec --host my-project
+```
+
+A cloud account is an inventory target like any other — classified, tagged and
+filterable — but with `kind: gcp-project` rather than `host`. It has no address
+and no ports, so discovery, liveness probes and endpoint-driven scans skip it;
+`reconctl target list --kind gcp-project` lists them.
+
+Findings land in the same table as everything else. Only failed and errored
+controls become findings: a benchmark produces a few hundred results of which
+most pass, and recording those would bury the ones worth acting on. The complete
+report is retained per account as `inspec-<project>.json` in the run's artifact
+directory, passes included.
+
+The `gcp-cis` profile pins the
+[GCP CIS 4.0 benchmark](https://github.com/GoogleCloudPlatform/inspec-gcp-cis-benchmark)
+to a commit — its releases are years behind its default branch, so a tag would
+pin a benchmark four major versions out of date. Authentication is Application
+Default Credentials (`gcloud auth application-default login`); recon passes the
+project id and never handles the credentials itself.
+
+`cinc-auditor` installs system-wide to `/opt/cinc-auditor` and needs sudo. That
+is inherent to the package rather than a choice: an omnibus build links that
+prefix into its interpreter's dylib paths and its `$LOAD_PATH`, so a copy
+unpacked into `.bin/` cannot run.
 
 ## Target classes
 
@@ -152,13 +201,19 @@ reconctl discover list
 
 reconctl scan --host api.flanksource.com --profile safe
 reconctl scan --selector 'env=prod' --profile safe
+reconctl scan --engine inspec --kind gcp-project
 reconctl scan list
 ```
 
 Explicit `--host`, `--domain`, and `--cidr` values can be combined, but cannot be
-combined with `--selector` or the other inventory filters. A scan always completes
-discovery first and stops if discovery fails. With no input, discovery uses the
+combined with `--selector` or the other inventory filters. `--profile` defaults to
+whichever profile the chosen engine ships. With no input, discovery uses the
 configured zones and scan targets the whole inventory.
+
+A scan with an endpoint-driven engine completes discovery first and stops if
+discovery fails. A compliance scan skips it: discovery resolves and probes
+network addresses, and a cloud account has none — `--domain` and `--cidr` are
+refused there for the same reason.
 
 The API mirrors those commands: `POST /api/v1/discover` and `POST /api/v1/scan`
 execute, while `GET /api/v1/discover` and `GET /api/v1/scan` list history. Request

@@ -31,6 +31,12 @@ type Invocation struct {
 	// nil.
 	Stdout, Stderr io.Writer
 
+	// Env adds to the process environment rather than replacing it. An engine
+	// that authenticates against a cloud provider reads its credentials from
+	// there, and a replaced environment would lose the PATH and HOME the
+	// provider's own SDK needs to find them.
+	Env map[string]string
+
 	mu      sync.Mutex
 	process *exec.Process
 }
@@ -85,6 +91,10 @@ func (i *Invocation) Run(ctx context.Context) Result {
 	process := exec.NewExec(i.Bin, i.Args...).
 		WithCwd(i.WorkDir).
 		WithProcessGroup()
+
+	if len(i.Env) > 0 {
+		process = process.WithEnv(i.Env)
+	}
 
 	if i.Stdout != nil || i.Stderr != nil {
 		process = process.Stream(i.Stdout, i.Stderr)

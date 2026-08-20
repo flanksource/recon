@@ -83,7 +83,10 @@ var _ = Describe("execution resources", func() {
 		choices := map[string][]string{
 			"scan":     {"engine", "profile", "override", "discovery-engine", "discovery-profile", "discovery-override"},
 			"discover": {"engine", "profile", "override"},
-			"probe":    {"host", "class", "selector", "timeout", "concurrency", "follow-redirects"},
+			// --wait is load-bearing over HTTP, not a convenience: the dialog sends
+			// wait=false and follows the run by id, because a sweep of the estate
+			// outlasts any sensible request timeout.
+			"probe": {"host", "class", "selector", "timeout", "concurrency", "follow-redirects", "wait"},
 		}
 
 		root := cli.New()

@@ -3,7 +3,13 @@ import {
   type DataTableColumn,
   type BadgeStatus,
 } from "@flanksource/clicky-ui";
-import type { TableRow, TargetClass } from "./types";
+import type {
+  ProbeFailure,
+  TableRow,
+  TargetClass,
+  TargetKind,
+} from "./types";
+import { targetKind } from "./types";
 
 const CLASS_STYLES: Record<TargetClass, string> = {
   public: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
@@ -24,6 +30,19 @@ function classPill(cls: TargetClass) {
   );
 }
 
+const KIND_LABELS: Record<TargetKind, string> = {
+  host: "Host",
+  "gcp-project": "GCP project",
+};
+
+function kindPill(kind: TargetKind) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-slate-500/15 px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+      {KIND_LABELS[kind] ?? kind}
+    </span>
+  );
+}
+
 function httpStatus(raw: unknown): BadgeStatus | null {
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!n) return null;
@@ -33,12 +52,44 @@ function httpStatus(raw: unknown): BadgeStatus | null {
   return "success";
 }
 
-export function HttpStatusBadge({ value }: { value: unknown }) {
+function HttpStatusBadge({ value }: { value: unknown }) {
   const status = httpStatus(value);
   return status ? (
     <Badge variant="status" status={status} value={String(value)} />
   ) : (
     "—"
+  );
+}
+
+// Short enough to sit in a narrow column and still name the problem. "http" is
+// absent: a served error status is a status, and the code itself says more than
+// the word would.
+const FAILURE_LABELS: Record<Exclude<ProbeFailure, "http">, string> = {
+  dns: "DNS",
+  refused: "refused",
+  unreachable: "unreachable",
+  timeout: "timeout",
+  tls: "TLS",
+  other: "error",
+};
+
+/**
+ * What the Status column shows for a host whose last probe did not get through.
+ *
+ * A failed probe deliberately keeps the status code from the host's last good
+ * probe, so without this the row of a host that no longer resolves still reads
+ * as a green 200 — which was the whole problem.
+ */
+export function TargetStatusBadge({
+  failure,
+  value,
+}: {
+  failure?: ProbeFailure;
+  value: unknown;
+}) {
+  if (!failure || failure === "http") return <HttpStatusBadge value={value} />;
+  return (
+    <Badge variant="status" status="error" value={FAILURE_LABELS[failure]} />
   );
 }
 
@@ -66,6 +117,17 @@ export const columns: DataTableColumn<TableRow>[] = [
         ) : null}
       </div>
     ),
+  },
+  {
+    key: "kind",
+    label: "Kind",
+    sortable: true,
+    filterable: true,
+    // Read through targetKind rather than the raw value: the server omits the
+    // field for a host, so filtering on the cell would offer an empty option
+    // for every host in the inventory.
+    render: (_value, row) => kindPill(targetKind(row)),
+    filterValue: (_value, row) => targetKind(row),
   },
   {
     key: "class",
@@ -98,13 +160,32 @@ export const columns: DataTableColumn<TableRow>[] = [
     shrink: true,
     align: "center",
     sortable: true,
-    render: (value) => <HttpStatusBadge value={value} />,
+    render: (value, row) => (
+      <TargetStatusBadge failure={row.failure} value={value} />
+    ),
   },
   {
     key: "response_time",
     label: "Response",
     shrink: true,
     sortable: true,
+  },
+  {
+    key: "last_error",
+    label: "Error",
+    grow: true,
+    hideable: true,
+    render: (value) =>
+      value ? (
+        // Truncated with the whole message on hover: a wrapped dial error is
+        // several lines long and would set the height of every row in the table.
+        <span
+          className="block truncate text-xs text-destructive"
+          title={String(value)}
+        >
+          {String(value)}
+        </span>
+      ) : null,
   },
   {
     key: "open_ports",

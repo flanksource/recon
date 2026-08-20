@@ -74,7 +74,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 	Describe("the generated OpenAPI description", func() {
 		It("gives every entity a list and a get", func() {
 			paths, _ := spec["paths"].(map[string]any)
-			for _, entity := range []string{"target", "scan", "finding", "discover", "profile", "engine"} {
+			for _, entity := range []string{"target", "scan", "finding", "discover", "probe", "profile", "engine"} {
 				Expect(paths).To(HaveKey("/api/v1/"+entity), entity)
 				Expect(paths).To(HaveKey("/api/v1/"+entity+"/{id}"), entity)
 			}
@@ -307,7 +307,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 		})
 
 		It("gives every listing something to narrow by", func() {
-			for _, entity := range []string{"target", "scan", "finding", "discover", "profile", "engine"} {
+			for _, entity := range []string{"target", "scan", "finding", "discover", "probe", "profile", "engine"} {
 				Expect(lookup(suite.URL+"/api/v1/"+entity, "")).ToNot(BeEmpty(), entity)
 			}
 		})

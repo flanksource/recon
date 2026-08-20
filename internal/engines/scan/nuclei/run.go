@@ -55,9 +55,16 @@ func (Engine) Run(ctx context.Context, run engines.Run, sink scan.Sink) error {
 	}
 	defer func() { _ = results.Close() }()
 
+	// Traffic is counted for every scan rather than behind nuclei's -http-stats
+	// flag. That flag is read by nuclei's own command-line runner, which recon
+	// does not go through, so honouring it would mean carrying an option that
+	// only ever switched on a panel the scan page shows unconditionally.
+	traffic := newHTTPStats()
+
 	engine, err := nuclei.NewNucleiEngineCtx(ctx,
 		nuclei.WithOptions(opts),
-		nuclei.UseStatsWriter(newProgress(sink)),
+		nuclei.UseStatsWriter(newProgress(sink, traffic)),
+		nuclei.UseOutputWriter(traffic),
 		nuclei.WithLogger(sinkLogger(sink)),
 		// A scan must never rewrite the templates underneath itself: the preview
 		// the user approved was computed against what is on disk now.

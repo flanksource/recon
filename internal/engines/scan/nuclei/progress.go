@@ -20,6 +20,7 @@ import (
 // instead of showing an empty bar until the first stats tick.
 type progressWriter struct {
 	sink scan.Sink
+	http *httpStats
 
 	mu        sync.Mutex
 	started   time.Time
@@ -29,12 +30,23 @@ type progressWriter struct {
 	requests  uint64
 	matched   int64
 	errors    int64
+
+	// The traffic breakdown is refreshed on a clock rather than on every
+	// callback. Copying four maps per request would cost more than issuing it.
+	httpSnapshot   *api.HTTPStats
+	httpSnapshotAt time.Time
 }
+
+// httpSnapshotInterval is how stale the traffic breakdown may be while a scan
+// runs. It matches the UI's own repaint interval, so a shorter one would buy
+// nothing anyone could see. Stop refreshes it unconditionally, so the numbers
+// recorded against a finished run are exact.
+const httpSnapshotInterval = time.Second
 
 var _ nucleiprogress.Progress = (*progressWriter)(nil)
 
-func newProgress(sink scan.Sink) *progressWriter {
-	return &progressWriter{sink: sink, started: time.Now()}
+func newProgress(sink scan.Sink, http *httpStats) *progressWriter {
+	return &progressWriter{sink: sink, http: http, started: time.Now()}
 }
 
 // Init supplies the totals. It deliberately does not restart the clock: nuclei
@@ -94,11 +106,15 @@ func (p *progressWriter) IncrementFailedRequestsBy(count int64) {
 	p.report()
 }
 
-func (p *progressWriter) Stop() { p.report() }
+// Stop is nuclei's last call. It forces a fresh traffic breakdown so the run is
+// recorded with the numbers it finished on rather than the last sampled ones.
+func (p *progressWriter) Stop() { p.publish(true) }
 
 // report publishes a consistent snapshot. Every counter method calls it, so the
 // UI sees the latest numbers without a polling interval of its own.
-func (p *progressWriter) report() {
+func (p *progressWriter) report() { p.publish(false) }
+
+func (p *progressWriter) publish(final bool) {
 	p.mu.Lock()
 	stats := api.ScanStats{
 		Requests:  float64(p.requests),
@@ -109,6 +125,11 @@ func (p *progressWriter) report() {
 		Templates: float64(p.templates),
 	}
 	elapsed := time.Since(p.started)
+	if p.http != nil && (final || time.Since(p.httpSnapshotAt) >= httpSnapshotInterval) {
+		p.httpSnapshot = p.http.Snapshot()
+		p.httpSnapshotAt = time.Now()
+	}
+	stats.HTTP = p.httpSnapshot
 	p.mu.Unlock()
 
 	if stats.Total > 0 {

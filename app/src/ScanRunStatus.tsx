@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type RefObject } from "react";
 import { AnsiHtml, Button, ProgressBar } from "@flanksource/clicky-ui";
 import { fetchFindings } from "./api";
 import { boundedScanPercent } from "./scanProgress";
+import { formatBytes } from "./format";
 import { severityBadge, SEVERITY_RANK } from "./scanColumns";
 import {
   SEVERITIES,
@@ -209,6 +210,15 @@ export function ScanRunStatus({
               <Stat label="matched" value={status.stats?.matched ?? 0} />
               <Stat label="rps" value={status.stats?.rps ?? "—"} />
               <Stat label="errors" value={status.stats?.errors ?? 0} />
+              {/* Live traffic: the engine's progress counters say how far
+                  through the templates it is, these say whether anything is
+                  answering. A scan at 60% with zero responses is not working. */}
+              {status.stats?.http && (
+                <>
+                  <Stat label="responses" value={status.stats.http.responses} />
+                  <Stat label="received" value={formatBytes(status.stats.http.bytes)} />
+                </>
+              )}
             </>
           )}
           <Stat

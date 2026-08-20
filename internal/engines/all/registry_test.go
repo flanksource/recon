@@ -10,6 +10,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	// Imported for its init, which registers every manager: the roster this
+	// checks engine specs against is only populated once they have registered.
+	_ "github.com/flanksource/deps/pkg/installer"
+	depsmanager "github.com/flanksource/deps/pkg/manager"
+
 	"github.com/flanksource/recon/internal/engines"
 	_ "github.com/flanksource/recon/internal/engines/all"
 	"github.com/flanksource/recon/internal/engines/discovery"
@@ -53,7 +58,7 @@ var _ = Describe("the engine registries", func() {
 		for _, spec := range scan.Specs() {
 			scanNames = append(scanNames, spec.Name)
 		}
-		Expect(scanNames).To(Equal([]string{"nuclei"}))
+		Expect(scanNames).To(Equal([]string{"inspec", "nuclei"}))
 	})
 
 	// Register panics on a malformed spec, so reaching this point already proves
@@ -72,19 +77,50 @@ var _ = Describe("the engine registries", func() {
 			}
 
 			By(spec.Name)
-			Expect(spec.Install.Manager).To(Equal("github_release"))
-			Expect(spec.Install.Repo).ToNot(BeEmpty())
+			Expect(depsmanager.GetGlobalRegistry().List()).To(ContainElement(spec.Install.Manager),
+				"%s names a manager deps does not have", spec.Name)
 			Expect(spec.Install.VersionCommand).ToNot(BeEmpty())
 			Expect(spec.Install.VersionRegex).ToNot(BeEmpty())
 			Expect(spec.Install.PreInstalled).To(ContainElement(spec.Binary),
 				"an already-installed binary must be honoured rather than re-downloaded")
 
+			// Asset patterns and a checksum file are how a github_release
+			// package names its artifact. A manager that resolves the artifact
+			// and its checksum from an API — omnitruck does — has neither, and
+			// requiring them would be requiring metadata nothing reads.
+			if spec.Install.Manager != "github_release" {
+				continue
+			}
+
+			Expect(spec.Install.Repo).ToNot(BeEmpty())
 			for _, platform := range []string{"darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"} {
 				Expect(spec.Install.AssetPatterns).To(HaveKey(platform),
 					"%s cannot be installed on %s", spec.Name, platform)
 			}
 			Expect(spec.Install.ChecksumFile).ToNot(BeEmpty(),
 				"a download with no checksum is not verifiable")
+		}
+	})
+
+	It("verifies every download, whichever manager resolves it", func() {
+		// The github_release packages name a checksum file; omnitruck returns
+		// the checksum with the URL. Either way an unverified download must not
+		// be possible, so this states the requirement once rather than leaving
+		// it implied by each manager's own metadata.
+		for _, spec := range allSpecs() {
+			if spec.InProcess {
+				continue
+			}
+			By(spec.Name)
+			switch spec.Install.Manager {
+			case "github_release":
+				Expect(spec.Install.ChecksumFile).ToNot(BeEmpty())
+			case "omnitruck":
+				// Omnitruck's metadata endpoint returns sha256 alongside the
+				// URL, and the manager refuses a response without one.
+			default:
+				Fail("no checksum story for manager " + spec.Install.Manager)
+			}
 		}
 	})
 

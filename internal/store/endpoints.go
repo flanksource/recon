@@ -50,10 +50,71 @@ func (s *Store) Endpoints(ctx context.Context, opts TargetOpts) ([]Endpoint, err
 	return endpoints, nil
 }
 
+// Accounts resolves a selector to the cloud accounts a scan would audit.
+//
+// The sibling of Endpoints, for engines whose subject is an account rather than
+// an address. It returns Endpoints rather than a type of its own so the risk
+// gate, the covered-host stamping and the rendered input list all keep working
+// unchanged — what differs is how the subject was found, not what a run does
+// with it.
+//
+// The selector is narrowed to the cloud kinds rather than the caller having to
+// remember: asking for accounts and getting hosts back would put hostnames in
+// front of an engine that would try to audit them as projects.
+func (s *Store) Accounts(ctx context.Context, opts TargetOpts) ([]Endpoint, error) {
+	opts.Kind = accountKinds()
+
+	targets, err := s.ListTargets(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	accounts := make([]Endpoint, 0, len(targets))
+	for _, target := range targets {
+		accounts = append(accounts, Endpoint{
+			Host:   target.Host,
+			Scheme: schemeOfKind(target.Kind),
+			URL:    schemeOfKind(target.Kind) + "://" + target.Host,
+			Class:  target.Class,
+		})
+	}
+
+	// ListTargets already orders by host; sorting again would be redundant.
+	return accounts, nil
+}
+
+// accountKinds lists the kinds that are cloud accounts rather than addresses.
+func accountKinds() []string {
+	var kinds []string
+	for _, kind := range api.TargetKinds() {
+		if !kind.Addressable() {
+			kinds = append(kinds, string(kind))
+		}
+	}
+	return kinds
+}
+
+// schemeOfKind is the transport scheme an account is reached through — the
+// same vocabulary InSpec's `-t` takes, so the rendered input list is something
+// someone can paste into the tool by hand.
+func schemeOfKind(kind api.TargetKind) string {
+	if kind == api.KindGCPProject {
+		return "gcp"
+	}
+	return ""
+}
+
 // endpointsOf resolves one target. The known URL wins: it is what actually
 // answered, redirects and all. Failing that, the observed open ports and the
 // curated ports are used, in that order.
 func endpointsOf(target api.TargetDocument, only []int) []Endpoint {
+	// A cloud account has no address to contact. The schema and a CHECK both
+	// forbid ports on one, but this is the guard that matters: it is what stops
+	// a project id from being handed to a network scanner as a hostname.
+	if !target.Kind.Addressable() {
+		return nil
+	}
+
 	wanted := map[int]bool{}
 	for _, port := range only {
 		wanted[port] = true

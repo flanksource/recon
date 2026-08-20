@@ -12,5 +12,6 @@ import (
 	_ "github.com/flanksource/recon/internal/engines/discovery/naabu"
 	_ "github.com/flanksource/recon/internal/engines/discovery/subfinder"
 	_ "github.com/flanksource/recon/internal/engines/discovery/tlsx"
+	_ "github.com/flanksource/recon/internal/engines/scan/inspec"
 	_ "github.com/flanksource/recon/internal/engines/scan/nuclei"
 )

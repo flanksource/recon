@@ -15,6 +15,12 @@
       ],
       "readOnly": true
     },
+    "kind": {
+      "description": "What this target addresses. A host is something on the network with an address and ports; a gcp-project is a cloud account audited through an API. Absent means host.",
+      "type": "string",
+      "enum": ["host", "gcp-project"],
+      "default": "host"
+    },
     "class": {
       "type": "string",
       "enum": ["public", "prod", "non-prod", "internal", "unclassified", "deactivated"]
@@ -49,7 +55,11 @@
         "first_observed": { "type": "string", "format": "date-time" },
         "last_seen": { "type": "string", "format": "date-time" },
         "last_attempt": { "type": "string", "format": "date-time" },
-        "error": { "$ref": "#/$defs/nonEmptyString" }
+        "error": { "$ref": "#/$defs/nonEmptyString" },
+        "failure": {
+          "description": "Why the last probe failed, classified. Absent when the host answered.",
+          "enum": ["dns", "refused", "unreachable", "timeout", "tls", "http", "other"]
+        }
       }
     },
     "network": {
@@ -176,6 +186,13 @@
         "required": ["class"]
       },
       "then": { "not": { "properties": { "reason": true }, "required": ["reason"] } }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "not": { "const": "host" } } },
+        "required": ["kind"]
+      },
+      "then": { "not": { "properties": { "ports": true }, "required": ["ports"] } }
     }
   ],
   "$defs": {

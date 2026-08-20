@@ -28,6 +28,8 @@ const (
 	FindingTemplates Vocabulary = "finding.template"
 	FindingTags      Vocabulary = "finding.tag"
 
+	ProbeHosts Vocabulary = "probe.host"
+
 	ProfileNames Vocabulary = "profile.name"
 )
 
@@ -78,6 +80,12 @@ var vocabularies = map[Vocabulary]string{
 	FindingHosts:     `SELECT DISTINCT host COLLATE "C" AS value FROM findings ORDER BY value`,
 	FindingTemplates: `SELECT DISTINCT template_id AS value FROM findings ORDER BY template_id`,
 	FindingTags:      `SELECT DISTINCT unnest(tags) AS value FROM findings ORDER BY value`,
+
+	// Every host any sweep has probed, not just the ones in the inventory now: a
+	// probe's history outlives the target it was taken of, and filtering it by a
+	// vocabulary that had already forgotten the host would hide exactly the runs
+	// that explain why it went away.
+	ProbeHosts: `SELECT DISTINCT host COLLATE "C" AS value FROM probe_results ORDER BY value`,
 
 	ProfileNames: `SELECT DISTINCT name AS value FROM engine_profiles ORDER BY name`,
 }

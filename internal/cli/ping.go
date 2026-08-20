@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,22 +101,40 @@ func probeTargets(ctx context.Context, targets []string, options pingOptions) ([
 	// WORKAROUND(clicky-worker-pool): SetGlobalMaxConcurrency updates the semaphore but does not grow Clicky's four initialized workers.
 	// Correct fix: resize the global task worker pool when max concurrency changes.
 	// Ref: gavel todo c7f7cd43-1a44-4127-8de9-105efb07304a
+	//
+	// Resizing a process-global semaphore is defensible here and nowhere else:
+	// this command owns the process, runs once and exits. The inventory sweep in
+	// internal/probes deliberately does not, because doing it from inside an HTTP
+	// request would silently re-gate concurrent scans.
 	clicky.SetGlobalMaxConcurrency(options.Concurrency)
-	group := clicky.StartGroup[PingResult]("ping targets", task.WithKind("ping"), task.WithConcurrency(options.Concurrency))
+	group := clicky.StartGroup[PingResult]("ping targets",
+		task.WithKind("ping"),
+		task.WithLabels(map[string]string{"targets": strconv.Itoa(len(targets))}),
+		task.WithConcurrency(options.Concurrency))
 	handles := make([]task.TypedTask[PingResult], 0, len(targets))
 	for _, target := range targets {
 		target := target
-		handles = append(handles, group.Add(pingTaskName(target), func(taskCtx flanksourceContext.Context, _ *task.Task) (PingResult, error) {
+		handles = append(handles, group.Add(pingTaskName(target), func(taskCtx flanksourceContext.Context, t *task.Task) (PingResult, error) {
 			probeCtx, cancel := context.WithCancel(taskCtx)
 			stop := context.AfterFunc(ctx, cancel)
 			defer func() {
 				stop()
 				cancel()
 			}()
-			return probe.URL(probeCtx, target, probe.Options{
+			result, err := probe.URL(probeCtx, target, probe.Options{
 				Timeout:         time.Duration(options.Timeout),
 				FollowRedirects: options.FollowRedirects,
 			})
+			t.SetDescription(describeProbe(result))
+			// A target that did not answer is the answer, not a failed task —
+			// finding them is what the command is for. Returning the error here
+			// painted a run of a dead estate entirely red, and made ping and the
+			// inventory sweep disagree about what "failed" means.
+			if !result.Up {
+				t.Warning()
+				return result, nil
+			}
+			return result, err
 		}, task.WithTaskTimeout(time.Duration(options.Timeout)), task.WithRetryConfig(task.RetryConfig{})))
 	}
 	group.WaitFor()
@@ -136,6 +155,26 @@ func probeTargets(ctx context.Context, targets []string, options pingOptions) ([
 		results[i] = result
 	}
 	return results, failures
+}
+
+// describeProbe renders the one-line summary the task tree shows, in the same
+// shape internal/probes uses so the two runs read alike.
+//
+// The kind leads the message: a tree of wrapped dial errors is a wall of text
+// where the one word that says which team owns the problem is buried at the end.
+func describeProbe(result PingResult) string {
+	if result.Up {
+		return fmt.Sprintf("%d in %dms", result.ResponseCode, result.ResponseTime.Milliseconds())
+	}
+	switch {
+	case result.Failure != "" && result.Error != "":
+		return fmt.Sprintf("%s: %s", result.Failure, result.Error)
+	case result.Failure != "":
+		return string(result.Failure)
+	case result.Error != "":
+		return result.Error
+	}
+	return "no answer"
 }
 
 func pingTaskName(target string) string {

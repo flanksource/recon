@@ -14,6 +14,47 @@ const (
 	TargetVersion   = 1
 )
 
+// TargetKind is what a target addresses.
+//
+// It is separate from Class because the two answer different questions: Class
+// is how exposed a target is, TargetKind is what kind of thing it is — a GCP
+// project can be production or a sandbox exactly as a host can. Spelled out in
+// full because Kind already names the two engine registries.
+type TargetKind string
+
+const (
+	// KindHost is something on the network with an address and ports. Every
+	// discovery engine and every endpoint-driven scan works on these.
+	KindHost TargetKind = "host"
+
+	// KindGCPProject is a Google Cloud project, audited through the Google APIs
+	// rather than contacted over the network. It has no address and no ports.
+	KindGCPProject TargetKind = "gcp-project"
+)
+
+// TargetKinds lists every valid kind in schema order.
+func TargetKinds() []TargetKind {
+	return []TargetKind{KindHost, KindGCPProject}
+}
+
+// Addressable reports whether a target of this kind can be reached over the
+// network — which is what decides whether it resolves to endpoints, and so
+// whether discovery, probes and endpoint-driven scans see it at all.
+func (k TargetKind) Addressable() bool {
+	// An empty kind means host: it is the column default, and the only rows
+	// that predate the column are hosts.
+	return k == KindHost || k == ""
+}
+
+// String renders the kind, resolving the absent-means-host default so callers
+// storing or displaying it never have to.
+func (k TargetKind) String() string {
+	if k == "" {
+		return string(KindHost)
+	}
+	return string(k)
+}
+
 // Class is the curated classification that decides whether a target is in scope
 // for a scan and whether an intrusive scan needs confirmation.
 type Class string
@@ -55,15 +96,19 @@ type TargetDocument struct {
 	Version int    `json:"version"`
 	Host    string `json:"host"`
 
-	Class    Class    `json:"class"`
-	App      string   `json:"app,omitempty"`
-	Cluster  string   `json:"cluster,omitempty"`
-	Source   string   `json:"source,omitempty"`
-	Profiles []string `json:"profiles"`
-	Ports    []int    `json:"ports,omitempty"`
-	Tags     []string `json:"tags"`
-	Notes    string   `json:"notes,omitempty"`
-	Reason   string   `json:"reason,omitempty"`
+	// Kind is omitempty so a host document is byte-identical to what it was
+	// before cloud accounts existed — which is what keeps contract/golden/
+	// comparing equal without rewriting every fixture.
+	Kind     TargetKind `json:"kind,omitempty"`
+	Class    Class      `json:"class"`
+	App      string     `json:"app,omitempty"`
+	Cluster  string     `json:"cluster,omitempty"`
+	Source   string     `json:"source,omitempty"`
+	Profiles []string   `json:"profiles"`
+	Ports    []int      `json:"ports,omitempty"`
+	Tags     []string   `json:"tags"`
+	Notes    string     `json:"notes,omitempty"`
+	Reason   string     `json:"reason,omitempty"`
 
 	Observed *Observed  `json:"observed,omitempty"`
 	Network  *Network   `json:"network,omitempty"`
@@ -112,6 +157,11 @@ type Observed struct {
 	LastSeen      string `json:"last_seen,omitempty"`
 	LastAttempt   string `json:"last_attempt,omitempty"`
 	Error         string `json:"error,omitempty"`
+
+	// Failure classifies Error so the inventory can badge and filter on it. The
+	// message says what happened to one request; this says which kind of problem
+	// the host has.
+	Failure Failure `json:"failure,omitempty"`
 }
 
 // Network is the resolved addressing and edge metadata.

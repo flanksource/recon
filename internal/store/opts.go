@@ -22,6 +22,7 @@ import (
 // Every list-valued field means "any of", matching how the filter chips read.
 type TargetOpts struct {
 	Selector string   `json:"selector,omitempty" flag:"selector" help:"Kubernetes label selector over target tags"`
+	Kind     []string `json:"kind,omitempty" flag:"kind" help:"Only these target kinds (host, gcp-project)"`
 	Class    []string `json:"class,omitempty" flag:"class" help:"Only these classes (public, prod, non-prod, internal, unclassified, deactivated)"`
 	Tags     []string `json:"tags,omitempty" flag:"tags" help:"Only targets carrying any of these tags; prefix ! to exclude"`
 	Profiles []string `json:"profiles,omitempty" flag:"profiles" help:"Only targets assigned any of these scan profiles"`
@@ -29,17 +30,18 @@ type TargetOpts struct {
 	Ports    []int    `json:"ports,omitempty" flag:"ports" help:"Only targets with any of these ports, curated or discovered"`
 	Status   []int    `json:"status,omitempty" flag:"status" help:"Only targets whose last HTTP status was one of these"`
 
-	LastSeen string `json:"lastSeen,omitempty" flag:"last-seen" help:"Only targets seen since this time (RFC3339 or a duration such as 168h)"`
-	Live     bool   `json:"live,omitempty" flag:"live" help:"Only targets that answered over HTTP the last time they were probed"`
+	LastSeen string   `json:"lastSeen,omitempty" flag:"last-seen" help:"Only targets seen since this time (RFC3339 or a duration such as 168h)"`
+	Live     bool     `json:"live,omitempty" flag:"live" help:"Only targets that answered over HTTP the last time they were probed"`
+	Failure  []string `json:"failure,omitempty" flag:"failure" help:"Only targets whose last probe failed this way (dns, refused, unreachable, timeout, tls, http, other)"`
 }
 
 // Empty reports whether the selector constrains anything. A scan against an
 // empty selector targets the whole inventory, which is worth saying out loud
 // before it runs.
 func (o TargetOpts) Empty() bool {
-	return o.Selector == "" && len(o.Class) == 0 && len(o.Tags) == 0 && len(o.Profiles) == 0 &&
-		len(o.Hosts) == 0 && len(o.Ports) == 0 && len(o.Status) == 0 &&
-		o.LastSeen == "" && !o.Live
+	return o.Selector == "" && len(o.Kind) == 0 && len(o.Class) == 0 && len(o.Tags) == 0 &&
+		len(o.Profiles) == 0 && len(o.Hosts) == 0 && len(o.Ports) == 0 && len(o.Status) == 0 &&
+		o.LastSeen == "" && !o.Live && len(o.Failure) == 0
 }
 
 // Describe renders the selector as the phrase used in confirmation prompts and
@@ -54,6 +56,7 @@ func (o TargetOpts) Describe() string {
 			parts = append(parts, label+" "+strings.Join(values, ","))
 		}
 	}
+	add("kind", o.Kind)
 	add("class", o.Class)
 	if o.Selector != "" {
 		parts = append(parts, "selector "+o.Selector)
@@ -73,6 +76,7 @@ func (o TargetOpts) Describe() string {
 	if o.Live {
 		parts = append(parts, "live")
 	}
+	add("failure", o.Failure)
 	return strings.Join(parts, ", ")
 }
 
@@ -81,6 +85,16 @@ func (o TargetOpts) Describe() string {
 func (o TargetOpts) Validate() error {
 	if _, err := labels.Parse(o.Selector); err != nil {
 		return fmt.Errorf("invalid selector %q: %w", o.Selector, err)
+	}
+	kinds := map[string]bool{}
+	for _, kind := range api.TargetKinds() {
+		kinds[string(kind)] = true
+	}
+	for _, kind := range o.Kind {
+		if !kinds[kind] {
+			return fmt.Errorf("unknown kind %q: expected one of %s",
+				kind, strings.Join(kindNames(), ", "))
+		}
 	}
 	valid := map[string]bool{}
 	for _, class := range api.Classes() {
@@ -97,6 +111,16 @@ func (o TargetOpts) Validate() error {
 			return fmt.Errorf("port %d out of range", port)
 		}
 	}
+	failures := map[string]bool{}
+	for _, failure := range api.Failures() {
+		failures[string(failure)] = true
+	}
+	for _, failure := range o.Failure {
+		if !failures[failure] {
+			return fmt.Errorf("unknown failure %q: expected one of %s",
+				failure, strings.Join(failureNames(), ", "))
+		}
+	}
 	if o.LastSeen != "" {
 		if _, err := parseSince(o.LastSeen); err != nil {
 			return err
@@ -105,10 +129,26 @@ func (o TargetOpts) Validate() error {
 	return nil
 }
 
+func kindNames() []string {
+	names := make([]string, 0, len(api.TargetKinds()))
+	for _, kind := range api.TargetKinds() {
+		names = append(names, string(kind))
+	}
+	return names
+}
+
 func classNames() []string {
 	names := make([]string, 0, len(api.Classes()))
 	for _, class := range api.Classes() {
 		names = append(names, string(class))
+	}
+	return names
+}
+
+func failureNames() []string {
+	names := make([]string, 0, len(api.Failures()))
+	for _, failure := range api.Failures() {
+		names = append(names, string(failure))
 	}
 	return names
 }
@@ -138,6 +178,9 @@ func (o TargetOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	if len(o.Kind) > 0 {
+		db = db.Where("kind = ANY(?)", pq.StringArray(o.Kind))
+	}
 	if len(o.Class) > 0 {
 		db = db.Where("class = ANY(?)", pq.StringArray(o.Class))
 	}
@@ -176,9 +219,15 @@ func (o TargetOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 		db = db.Where("(observed ->> 'last_seen') >= ?", since.Format(time.RFC3339))
 	}
 	if o.Live {
-		// A target that answered has a status code; one whose last probe failed
-		// carries observed.error and no http section at all.
-		db = db.Where("(http ->> 'status_code') IS NOT NULL")
+		// Both halves are needed. A target that has never been probed has no
+		// status code, and one whose last probe failed keeps the code from its
+		// last good probe — ApplyProbe deliberately preserves the previous
+		// snapshot — so the code alone reports a dead host as live.
+		db = db.Where("(http ->> 'status_code') IS NOT NULL").
+			Where("COALESCE(http ->> 'failed', 'false') <> 'true'")
+	}
+	if len(o.Failure) > 0 {
+		db = db.Where("(observed ->> 'failure') = ANY(?)", pq.StringArray(o.Failure))
 	}
 	return db, nil
 }

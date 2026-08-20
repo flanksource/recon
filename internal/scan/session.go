@@ -2,7 +2,6 @@ package scan
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 
@@ -24,12 +23,15 @@ import (
 // It implements enginescan.Sink, so the engine writes here directly and the
 // runtime reads the same object.
 type session struct {
-	// Command is the equivalent `nuclei` invocation. Nothing runs it; it is
-	// recorded so a run can be reproduced by hand.
+	// Command is the equivalent command-line invocation. Nothing runs it for an
+	// in-process engine; it is recorded so a run can be reproduced by hand.
 	Command []string
 
-	output  *Output
-	workDir string
+	// engine names what is running, for the task console to label a run whose
+	// engine describes no equivalent command line.
+	engine string
+
+	output *Output
 
 	mu       sync.Mutex
 	findings []api.Finding
@@ -42,8 +44,8 @@ type session struct {
 
 var _ enginescan.Sink = (*session)(nil)
 
-func newSession(output *Output, workDir string, command []string) *session {
-	return &session{output: output, workDir: workDir, Command: command, status: "pending"}
+func newSession(output *Output, engine string, command []string) *session {
+	return &session{output: output, engine: engine, Command: command, status: "pending"}
 }
 
 // Finding records one result. Findings are kept in memory for the duration of
@@ -121,13 +123,6 @@ func (s *session) Cancel() error {
 	return nil
 }
 
-// Cleanup removes the scratch directory.
-func (s *session) Cleanup() {
-	if s.workDir != "" {
-		_ = os.RemoveAll(s.workDir)
-	}
-}
-
 // OutputSnapshot feeds clicky's task console.
 func (s *session) OutputSnapshot() task.OutputSnapshot {
 	return task.OutputSnapshot{Stdout: s.output.Snapshot().Log}
@@ -142,7 +137,7 @@ func (s *session) TaskDetails() clickyexec.ExecTaskDetails {
 	defer s.mu.Unlock()
 
 	details := clickyexec.ExecTaskDetails{
-		Command: "nuclei",
+		Command: s.engine,
 		Status:  s.status,
 	}
 	if !s.started.IsZero() {

@@ -3,11 +3,13 @@ import {
   Button,
   DataTable,
   Modal,
+  ProgressBar,
   SegmentedControl,
   type DataTableColumn,
 } from "@flanksource/clicky-ui";
 import { probeTargets } from "./api";
-import type { ProbeResult, ProbeRun, TargetRow } from "./types";
+import { useProbeRun } from "./useProbeRun";
+import { TERMINAL_PHASES, type ProbeResult, type TargetRow } from "./types";
 
 type Scope = "selected" | "all";
 
@@ -59,8 +61,11 @@ type Props = {
   onClose: () => void;
   rows: TargetRow[];
   selectedHosts: string[];
-  /** Reloads the inventory, because a probe rewrites what the table shows. */
-  onProbed: () => void;
+  /**
+   * Refreshes the inventory rows for hosts the sweep has just finished. Called
+   * repeatedly as a run progresses, not once at the end.
+   */
+  onProbed: (hosts: string[]) => void;
 };
 
 export function PingDialog({
@@ -71,16 +76,21 @@ export function PingDialog({
   onProbed,
 }: Props) {
   const [scope, setScope] = useState<Scope>("selected");
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ProbeRun | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The run is followed rather than awaited: the POST returns as soon as the
+  // sweep is recorded, and this is what fills the table while it works.
+  const { run, error: pollError } = useProbeRun(runId, onProbed);
+  const running = starting || (run !== null && !TERMINAL_PHASES.includes(run.phase));
 
   // Scope is defaulted when the dialog opens, not re-derived while it is open:
   // a selection changing underneath would silently widen the run.
   useEffect(() => {
     if (!open) return;
     setScope(selectedHosts.length ? "selected" : "all");
-    setResult(null);
+    setRunId(null);
     setError(null);
   }, [open, selectedHosts.length]);
 
@@ -91,19 +101,19 @@ export function PingDialog({
   }, [rows, scope, selectedHosts]);
 
   const ping = useCallback(async () => {
-    setRunning(true);
+    setStarting(true);
     setError(null);
     try {
-      setResult(await probeTargets({ host: hosts }));
-      // The inventory now holds what the probe saw, so the table behind this
-      // dialog is stale until it reloads.
-      onProbed();
+      setRunId((await probeTargets({ host: hosts })).id);
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
-      setRunning(false);
+      setStarting(false);
     }
-  }, [hosts, onProbed]);
+  }, [hosts]);
+
+  const result = run;
+  const probed = result?.results.length ?? 0;
 
   return (
     <Modal
@@ -145,20 +155,39 @@ export function PingDialog({
           </Button>
         </div>
 
-        {error && (
+        {(error ?? pollError) && (
           <p
             className="shrink-0 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive"
             role="alert"
           >
-            {error}
+            {error ?? pollError}
           </p>
+        )}
+
+        {/* Progress against the hosts the run set out to probe, not against the
+            ones it has finished — dividing by the latter would sit at 100% from
+            the first answer. */}
+        {result && running && (
+          <div className="shrink-0 space-y-1">
+            <ProgressBar
+              height="h-2"
+              total={result.total || 1}
+              segments={[
+                { count: result.live, color: "bg-emerald-500", label: "answered" },
+                { count: probed - result.live, color: "bg-destructive", label: "no answer" },
+              ]}
+            />
+            <p className="text-sm text-muted-foreground">
+              Probing {result.selectorLabel || "selected hosts"} — {probed} of{" "}
+              {result.total} checked, {result.live} answered
+            </p>
+          </div>
         )}
 
         {result && !running && (
           <p className="shrink-0 text-sm text-muted-foreground">
-            {result.live} of {result.results.length} answered ·{" "}
-            {result.updated} target{result.updated === 1 ? "" : "s"} updated ·{" "}
-            {result.durationMs}ms
+            {result.live} of {probed} answered · {result.updated} target
+            {result.updated === 1 ? "" : "s"} updated · {result.durationMs}ms
           </p>
         )}
 
@@ -173,7 +202,10 @@ export function PingDialog({
               showGlobalFilter
               globalFilterPlaceholder="Search probed hosts…"
               defaultSort={{ key: "host" }}
-              loading={running}
+              // Only while there is nothing to show: once hosts start landing the
+              // table renders them, and a spinner over a filling list would hide
+              // exactly the thing this change exists to show.
+              loading={running && probed === 0}
               loadingMessage="Probing hosts…"
               emptyMessage="No hosts probed."
             />
@@ -185,7 +217,8 @@ export function PingDialog({
             Probes each host over HTTPS then HTTP and records what answered —
             liveness, status code, response time and address. Technology, TLS
             and open ports are left as discovery found them; use Discover
-            targets to refresh those.
+            targets to refresh those. The sweep runs on the server, so closing
+            this dialog does not stop it.
           </p>
         )}
       </div>

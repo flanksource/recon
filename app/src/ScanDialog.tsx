@@ -144,19 +144,25 @@ export function ScanDialog({
       .then((list) => {
         if (cancelled) return;
         setProfiles(list);
+        // The engine's own default first: "safe" is nuclei's name for it and
+        // means nothing to a compliance engine, so preferring it would open
+        // the picker on whichever profile happened to sort first.
+        const preferred =
+          engines.find((engine) => engine.name === engineName)?.defaults ??
+          DEFAULT_PROFILE;
         setProfileName((current) =>
           list.some((profile) => profile.name === current)
             ? current
-            : (list.find((profile) => profile.name === DEFAULT_PROFILE)?.name ??
+            : (list.find((profile) => profile.name === preferred)?.name ??
               list[0]?.name ??
-              DEFAULT_PROFILE),
+              preferred),
         );
       })
       .catch((cause) => !cancelled && setError((cause as Error).message));
     return () => {
       cancelled = true;
     };
-  }, [open, discoveryOnly, engineName]);
+  }, [open, discoveryOnly, engineName, engines]);
 
   const selectedEngine = useMemo(
     () => engines.find((engine) => engine.name === engineName) ?? null,

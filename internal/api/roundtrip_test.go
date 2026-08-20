@@ -122,6 +122,29 @@ var _ = Describe("TargetDocument", func() {
 			Expect(encoded).To(MatchJSON(document))
 		})
 
+		// observed is `additionalProperties: false`, so a field added to the Go
+		// struct and not to the schema makes every probed target invalid the
+		// moment the first failure is recorded.
+		It("preserves a classified probe failure", func() {
+			const document = `{
+				"$schema": "../target.schema.json", "version": 1, "host": "a.example.test",
+				"class": "non-prod", "profiles": ["safe"], "tags": [],
+				"observed": {
+					"last_attempt": "2026-01-01T00:00:00Z",
+					"error": "lookup a.example.test: no such host",
+					"failure": "dns"
+				}
+			}`
+
+			var target api.TargetDocument
+			Expect(json.Unmarshal([]byte(document), &target)).To(Succeed())
+			Expect(target.Observed.Failure).To(Equal(api.FailureDNS))
+
+			encoded, err := json.Marshal(target)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(encoded).To(MatchJSON(document))
+		})
+
 		It("emits required arrays as [] rather than null", func() {
 			// A nil Go slice marshals to null, which would break the editor's
 			// array controls and violate the schema's `required`.

@@ -29,12 +29,14 @@ func (r *recorder) last() api.ScanStats {
 var _ = Describe("scan progress", func() {
 	var (
 		sink     *recorder
+		traffic  *httpStats
 		progress *progressWriter
 	)
 
 	BeforeEach(func() {
 		sink = &recorder{}
-		progress = newProgress(sink)
+		traffic = newHTTPStats()
+		progress = newProgress(sink, traffic)
 	})
 
 	// The clock is pinned rather than slept on: these assert arithmetic, and a
@@ -90,6 +92,33 @@ var _ = Describe("scan progress", func() {
 
 		Expect(sink.last().Percent).To(Equal(float64(0)))
 		Expect(sink.last().Requests).To(Equal(float64(1)))
+	})
+
+	// The traffic breakdown rides along with the progress counters rather than
+	// on a channel of its own, so everything already built for progress — the
+	// event stream, the task bar, the stats column on the scan row — carries it
+	// without further plumbing.
+	It("publishes the traffic breakdown alongside the progress counters", func() {
+		traffic.Request("headers.yaml", "https://a.example.test", "http", nil)
+		traffic.RequestStatsLog("301", "HTTP/1.1 301 Moved Permanently\r\n\r\n")
+		progress.Init(1, 10, 100)
+
+		Expect(sink.last().HTTP).ToNot(BeNil())
+		Expect(sink.last().HTTP.Responses).To(Equal(1))
+		Expect(sink.last().HTTP.StatusCodes).To(Equal(map[string]int{"301": 1}))
+	})
+
+	// Copying four maps per request would cost more than issuing it, so the
+	// breakdown is sampled — except at the end, where the numbers recorded
+	// against the finished run have to be the ones it finished on.
+	It("refreshes the breakdown unconditionally when nuclei stops", func() {
+		progress.Init(1, 10, 100)
+		traffic.RequestStatsLog("500", "HTTP/1.1 500 Internal Server Error\r\n\r\n")
+		progress.IncrementRequests()
+		Expect(sink.last().HTTP.Responses).To(Equal(0), "a mid-run tick is allowed to be stale")
+
+		progress.Stop()
+		Expect(sink.last().HTTP.Responses).To(Equal(1))
 	})
 
 	DescribeTable("renders elapsed time the way the stats line did",

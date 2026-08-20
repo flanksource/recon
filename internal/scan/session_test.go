@@ -28,7 +28,7 @@ var _ = Describe("a scan session", func() {
 	var current *session
 
 	BeforeEach(func() {
-		current = newSession(NewOutput(), GinkgoT().TempDir(), []string{"nuclei"})
+		current = newSession(NewOutput(), "nuclei", []string{"nuclei"})
 	})
 
 	It("reports a run that finished as neither cancelled nor failed", func() {

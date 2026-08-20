@@ -84,6 +84,28 @@ export function InventoryView({
     void load();
   }, [load]);
 
+  // Refreshes the rows a probe has just finished, rather than reloading the
+  // estate for each batch of hosts a running sweep reports.
+  //
+  // Refetched rather than patched from the probe result: the server merges a
+  // probe into a target — clearing a stale error, stamping last_seen, setting
+  // the address, leaving technology and TLS as discovery found them — and
+  // reimplementing that merge here is exactly the drift that keeping one prober
+  // in the codebase exists to prevent. `edits` is laid back over the top by the
+  // `rows` memo, so unsaved typing survives.
+  const refreshHosts = useCallback(async (hosts: string[]) => {
+    if (hosts.length === 0) return;
+    try {
+      const refreshed = await fetchTargets({ hosts: hosts.join(",") });
+      const byHost = new Map(refreshed.map((row) => [row.host, row]));
+      setServed((current) =>
+        current.map((row) => byHost.get(row.host) ?? row),
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
   useEffect(() => {
     const url = new URL(window.location.href);
     if (query) url.searchParams.set("q", query);
@@ -115,6 +137,11 @@ export function InventoryView({
         last_seen: r.observed?.last_seen,
         last_scan: r.scan?.last_scan,
         last_status: r.http?.status_code,
+        // The status code is kept across a failed probe — the last good snapshot
+        // is still the best thing known about the host — so these two are what
+        // say the host is not answering *now*.
+        failure: r.observed?.failure,
+        last_error: r.observed?.error,
         response_time: r.http?.response_time,
         open_ports: r.network?.open_ports?.map(String),
         known_paths: r.http?.known_paths,
@@ -258,7 +285,7 @@ export function InventoryView({
         onClose={() => setPingOpen(false)}
         rows={tableRows}
         selectedHosts={selectedIds}
-        onProbed={() => void load()}
+        onProbed={refreshHosts}
       />
 
       {scanOpen && (

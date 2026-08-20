@@ -24,6 +24,7 @@ type Probe struct {
 	ResponseTime time.Duration
 	Failed       bool
 	Error        string
+	Failure      api.Failure
 }
 
 // ApplyProbe folds a liveness check into a target.
@@ -53,6 +54,13 @@ func ApplyProbe(target api.TargetDocument, observation Probe, timestamp string) 
 		if observed.Error == "" {
 			observed.Error = FailedProbeError
 		}
+		// A failure the prober could not place is still a failure: leaving this
+		// empty would make the inventory show the host's last good status code as
+		// if nothing had happened.
+		observed.Failure = observation.Failure
+		if observed.Failure == api.FailureNone {
+			observed.Failure = api.FailureOther
+		}
 		target.Observed = &observed
 		target.HTTP = probedHTTP(target.HTTP, observation, true)
 		return target, nil
@@ -65,6 +73,7 @@ func ApplyProbe(target api.TargetDocument, observation Probe, timestamp string) 
 	// Cleared rather than left behind: the host answered, so an error from an
 	// earlier attempt is no longer true.
 	observed.Error = ""
+	observed.Failure = api.FailureNone
 	target.Observed = &observed
 	target.HTTP = probedHTTP(target.HTTP, observation, false)
 

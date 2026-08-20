@@ -13,6 +13,7 @@ import type {
   Profile,
   ProbeRun,
   Scan,
+  ScanFiles,
   ScanStatus,
   Target,
   TargetDocument,
@@ -305,6 +306,18 @@ export function fetchScan(id: string): Promise<Scan> {
   return request<Scan>(`${API}/scan/${encodeURIComponent(id)}`);
 }
 
+// A run's retained artifacts: the engine's own findings file, the target list,
+// the effective configuration and the log. Served from the directory the run
+// recorded rather than rebuilt from the database, so what a download returns is
+// byte-for-byte what the engine wrote.
+export function fetchScanFiles(id: string): Promise<ScanFiles> {
+  return request<ScanFiles>(`/api/scan/${encodeURIComponent(id)}/files`);
+}
+
+export function scanFileUrl(id: string, name: string): string {
+  return `/api/scan/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`;
+}
+
 // Findings are queried rather than read out of a result file, so the same call
 // drills into one scan or compares a template across every run.
 export function fetchFindings(params: {
@@ -419,10 +432,29 @@ function overrideFields(
 // Re-probes inventory targets and refreshes their liveness, status code and
 // response time. Unlike `reconctl ping` this takes a selector rather than a
 // URL — the server will only reach hosts the inventory already knows.
+// `wait` is false so the call returns as soon as the run is recorded: a sweep of
+// the estate takes longer than any sensible request timeout, and the browser
+// follows it by id from there.
 export function probeTargets(
   target: RunTarget & { timeout?: string; concurrency?: number } = {},
 ): Promise<ProbeRun> {
-  return request<ProbeRun>(`${API}/probe`, json("POST", target));
+  return request<ProbeRun>(`${API}/probe`, json("POST", { ...target, wait: false }));
+}
+
+// One sweep, with everything it has seen so far. Polled while a run is going —
+// this is the database rather than the task manager, so it still answers after
+// clicky has garbage-collected the finished run from memory.
+export function fetchProbe(id: string): Promise<ProbeRun> {
+  return request<ProbeRun>(`${API}/probe/${encodeURIComponent(id)}`);
+}
+
+export function fetchProbes(params?: {
+  host?: string;
+  phase?: string;
+  since?: string;
+  limit?: number;
+}): Promise<ProbeRun[]> {
+  return request<ProbeRun[]>(`${API}/probe${query(params)}`);
 }
 
 export function runDiscovery(

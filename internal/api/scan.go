@@ -1,9 +1,6 @@
 package api
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "encoding/json"
 
 // Phase is where a run has got to. The vocabulary is the UI's, not clicky's:
 // the task manager supervises the process, but what the Scans tab renders comes
@@ -122,44 +119,6 @@ type Discover struct {
 	Log        string `json:"log"`
 
 	Hosts []DiscoveredHost `json:"hosts"`
-}
-
-// ProbeResult is what a liveness check saw for one host.
-type ProbeResult struct {
-	Host           string `json:"host"`
-	URL            string `json:"url,omitempty"`
-	Up             bool   `json:"up"`
-	StatusCode     int    `json:"statusCode,omitempty"`
-	ResponseTimeMs int64  `json:"responseTimeMs"`
-	IP             string `json:"ip,omitempty"`
-	ContentType    string `json:"contentType,omitempty"`
-	Error          string `json:"error,omitempty"`
-}
-
-// ProbeRun is one pass of liveness checks over selected inventory targets.
-//
-// There is no probes table behind this: a probe writes what it saw onto the
-// targets themselves, and the run is the response rather than a record. What
-// happened to a host is answered by that host's observed state, which is where
-// anyone would look for it.
-type ProbeRun struct {
-	RanAt      string `json:"ranAt"`
-	DurationMs int    `json:"durationMs"`
-
-	// Live counts the hosts that answered, and Updated the ones whose inventory
-	// record was rewritten — they differ when a host is probed but not stored.
-	Live    int `json:"live"`
-	Updated int `json:"updated"`
-
-	Results []ProbeResult `json:"results"`
-}
-
-// GetID identifies a run by when it started.
-func (p ProbeRun) GetID() string { return p.RanAt }
-
-// GetName summarises what the run found.
-func (p ProbeRun) GetName() string {
-	return fmt.Sprintf("%d of %d host(s) answered", p.Live, len(p.Results))
 }
 
 // DiscoveredHost is one host a sweep observed.

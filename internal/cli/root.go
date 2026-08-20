@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"regexp"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/flanksource/recon/internal/discovery"
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/entities"
+	"github.com/flanksource/recon/internal/probes"
 	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -67,14 +69,12 @@ func New() *cobra.Command {
 	provisioner := engines.NewProvisioner(binDir)
 	scans = &scan.Runtime{Provisioner: provisioner, Root: root}
 	sweeps = &discovery.Runner{Provisioner: provisioner, Root: root}
+	liveness = &probes.Runner{}
 	registry = &entities.Registry{
 		Provisioner: provisioner,
-		Runtimes:    entities.Runtimes{Scans: scans, Discovery: sweeps},
+		Runtimes:    entities.Runtimes{Scans: scans, Discovery: sweeps, Probes: liveness},
 	}
 	registry.Register()
-	// Served over HTTP as well, unlike `ping` above: a probe can only reach the
-	// inventory, so publishing it does not hand a caller an arbitrary fetcher.
-	registry.AddProbeCommand(cmd)
 	registerEngineCommands()
 	clicky.GenerateCLI(cmd)
 
@@ -96,6 +96,15 @@ func New() *cobra.Command {
 		registry.SetStore(st)
 		scans.Store = st
 		sweeps.Store = st
+		liveness.Store = st
+
+		// Seeded here as well as in serve: without an import step this is the
+		// only source of a working configuration, and a CLI-only user who never
+		// starts the server would otherwise be told every engine's own profile
+		// does not exist. It never overwrites, so an edited profile survives.
+		if _, err := st.SeedDefaultProfiles(cmd.Context()); err != nil {
+			return fmt.Errorf("seed built-in profiles: %w", err)
+		}
 		return nil
 	}
 
@@ -116,12 +125,14 @@ var (
 	registry *entities.Registry
 	scans    *scan.Runtime
 	sweeps   *discovery.Runner
+	liveness *probes.Runner
 	opened   *db.Handle
 )
 
-// Runtimes returns the scan and discovery runtimes the command tree built, so
-// the server can serve their streaming and action routes. Valid only after New.
-func Runtimes() (*scan.Runtime, *discovery.Runner) { return scans, sweeps }
+// Runtimes returns the scan, discovery and probe runtimes the command tree
+// built, so the server can serve their streaming and action routes. Valid only
+// after New.
+func Runtimes() (*scan.Runtime, *discovery.Runner, *probes.Runner) { return scans, sweeps, liveness }
 
 // EntityRegistry returns the registry the command tree registered, so a test
 // can serve the same entities against its own database. Valid only after New.

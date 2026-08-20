@@ -127,7 +127,6 @@ var options = map[string]setter{
 
 	// --- runtime -------------------------------------------------------------
 	"stats-interval":     number(func(o *nucleitypes.Options, v int) { o.StatsInterval = v }),
-	"http-stats":         boolean(func(o *nucleitypes.Options, v bool) { o.HTTPStats = v }),
 	"metrics-port":       number(func(o *nucleitypes.Options, v int) { o.MetricsPort = v }),
 	"honeypot-detect":    boolean(func(o *nucleitypes.Options, v bool) { o.HoneypotDetection = v }),
 	"honeypot-threshold": number(func(o *nucleitypes.Options, v int) { o.HoneypotThreshold = v }),
@@ -147,6 +146,12 @@ var runtimeKeys = map[string]string{
 	// is enabled through the SDK, and template auto-upgrade is a callback.
 	"stats":                "enables the SDK stats writer",
 	"disable-update-check": "disables the SDK template auto-upgrade",
+
+	// nuclei's own field is read by its command-line runner, which recon does
+	// not go through. Run wires the traffic counters into the SDK's output
+	// writer instead, for every scan — so there is nothing left for a profile to
+	// switch on.
+	"http-stats": "traffic statistics are always collected in-process",
 }
 
 // Options translates a validated profile into nuclei's options.

@@ -18,6 +18,19 @@ table "targets" {
     null = false
     type = text
   }
+  // What kind of thing this row addresses. A host is something on the network
+  // with an address and ports; a gcp-project is a cloud account audited through
+  // an API. They share this table because they share everything that makes a
+  // target a target — curation, classification, tags, profiles, scan history —
+  // and differ only in how a scan reaches them.
+  //
+  // Defaulted rather than nullable: every existing row is a host, and a target
+  // whose kind is unknown is one nothing can decide how to scan.
+  column "kind" {
+    null    = false
+    type    = text
+    default = "host"
+  }
   column "app" {
     null = true
     type = text
@@ -118,9 +131,25 @@ table "targets" {
   check "targets_ports_bounded" {
     expr = "ports IS NULL OR (cardinality(ports) >= 1 AND 1 <= ALL (ports) AND 65535 >= ALL (ports))"
   }
+  // The kind enum from target.schema.json.
+  check "targets_kind" {
+    expr = "kind IN ('host', 'gcp-project')"
+  }
+  // A cloud account has no ports, and a port on one would resolve to an
+  // endpoint that does not exist — pointing a network scanner at a project id
+  // as though it were a hostname.
+  check "targets_cloud_has_no_ports" {
+    expr = "kind = 'host' OR ports IS NULL"
+  }
 
   index "targets_class_idx" {
     columns = [column.class]
+  }
+  // Every host-facing selector filters on kind, and the cloud accounts are a
+  // handful of rows among thousands of hosts, so this is what keeps the common
+  // case from scanning the whole table.
+  index "targets_kind_idx" {
+    columns = [column.kind]
   }
   index "targets_tags_idx" {
     type    = GIN
@@ -148,6 +177,11 @@ table "targets" {
   index "targets_status_idx" {
     on {
       expr = "(http ->> 'status_code')"
+    }
+  }
+  index "targets_failure_idx" {
+    on {
+      expr = "(observed ->> 'failure')"
     }
   }
 }

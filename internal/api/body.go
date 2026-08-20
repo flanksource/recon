@@ -13,25 +13,50 @@ import (
 // them. Silently dropping `host` from an edit would look like a successful
 // rename.
 
-// TargetFrom decodes the body of a create: the host, which is the target's
-// identity and so is settable only here, plus the curated fields.
+// NewTarget is the body of a create: the fields fixed when a target comes into
+// existence, and the curated fields that are not.
+type NewTarget struct {
+	// Host is the target's identity.
+	Host string
+
+	// Kind is how a scan reaches it. Settable only here, for the same reason
+	// Host is: changing it would repoint every future run at something else.
+	Kind TargetKind
+
+	Curated Curated
+}
+
+// TargetFrom decodes the body of a create: the identity fields, which are
+// settable only here, plus the curated fields.
 //
 // The host arrives as `host` from a JSON body and as `id` from the entity
 // framework's flag mapping; both name the same thing and disagreeing about
 // which is authoritative would make one of the two surfaces silently create
 // nothing.
-func TargetFrom(body map[string]any) (string, Curated, error) {
+func TargetFrom(body map[string]any) (NewTarget, error) {
 	host, _ := body["host"].(string)
 	if host == "" {
 		host, _ = body["id"].(string)
 	}
 	if host == "" {
-		return "", Curated{}, fmt.Errorf("host is required: it is the target's identity")
+		return NewTarget{}, fmt.Errorf("host is required: it is the target's identity")
+	}
+
+	kind := KindHost
+	if value, present := body["kind"]; present {
+		text, ok := value.(string)
+		if !ok {
+			return NewTarget{}, fmt.Errorf("kind must be a string")
+		}
+		kind = TargetKind(text)
+		if !validKind(kind) {
+			return NewTarget{}, fmt.Errorf("unknown kind %q: expected one of %s", text, joinKinds())
+		}
 	}
 
 	rest := make(map[string]any, len(body))
 	for key, value := range body {
-		if key == "host" || key == "id" {
+		if key == "host" || key == "id" || key == "kind" {
 			continue
 		}
 		rest[key] = value
@@ -39,15 +64,42 @@ func TargetFrom(body map[string]any) (string, Curated, error) {
 
 	curated, err := CuratedFrom(rest)
 	if err != nil {
-		return "", Curated{}, err
+		return NewTarget{}, err
 	}
-	return host, curated, nil
+	if !kind.Addressable() && len(curated.Ports) > 0 {
+		return NewTarget{}, fmt.Errorf(
+			"a %s has no ports: it is audited through an API rather than contacted over the network", kind)
+	}
+	return NewTarget{Host: host, Kind: kind, Curated: curated}, nil
+}
+
+func validKind(kind TargetKind) bool {
+	for _, known := range TargetKinds() {
+		if kind == known {
+			return true
+		}
+	}
+	return false
+}
+
+func joinKinds() string {
+	names := make([]string, 0, len(TargetKinds()))
+	for _, kind := range TargetKinds() {
+		names = append(names, string(kind))
+	}
+	return strings.Join(names, ", ")
 }
 
 // CuratedFrom decodes an edit to a target's curated fields.
 func CuratedFrom(body map[string]any) (Curated, error) {
 	if _, present := body["host"]; present {
 		return Curated{}, fmt.Errorf("host is not editable: it is the target's identity")
+	}
+	// Kind decides how a scan reaches a target, so changing it would silently
+	// repoint every future run — and a "full curated-field replacement" update
+	// that omitted it would turn a cloud account back into a hostname.
+	if _, present := body["kind"]; present {
+		return Curated{}, fmt.Errorf("kind is not editable: it is fixed when the target is created")
 	}
 	for _, machine := range []string{"observed", "network", "http", "tech", "tls", "scan"} {
 		if _, present := body[machine]; present {

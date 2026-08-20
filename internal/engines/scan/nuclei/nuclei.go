@@ -228,6 +228,10 @@ func (Engine) Command(run engines.Run) []string {
 		"-silent",
 		"-no-color",
 		"-disable-update-check",
+		// Recon collects the traffic breakdown for every run, so the equivalent
+		// command line has to ask for it too; without this the reproduction would
+		// report fewer statistics than the run it reproduces.
+		"-http-stats",
 	}
 	args = append(args, engines.ConfigArgs(run.Config)...)
 	return append(args, "-exclude-tags", strings.Join(excludedTags, ","))

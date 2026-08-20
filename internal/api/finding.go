@@ -73,18 +73,3 @@ type Finding struct {
 
 	Raw map[string]any `json:"raw,omitempty"`
 }
-
-// ScanStats is an engine's progress report. Every field is optional: engines
-// that report nothing leave it zero, and the UI shows no progress bar rather
-// than a misleading one.
-type ScanStats struct {
-	Requests  float64 `json:"requests"`
-	Total     float64 `json:"total"`
-	Percent   float64 `json:"percent"`
-	RPS       float64 `json:"rps"`
-	Matched   float64 `json:"matched"`
-	Errors    float64 `json:"errors"`
-	Hosts     float64 `json:"hosts"`
-	Templates float64 `json:"templates"`
-	Duration  string  `json:"duration,omitempty"`
-}
