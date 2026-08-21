@@ -7,11 +7,24 @@ import "strconv"
 // path and a CLI argument carry, so it has to be the thing a person would
 // actually type.
 
-// GetID returns the host, which is the target's primary key.
-func (t TargetDocument) GetID() string { return t.Host }
+// GetID returns the stable inventory identity. Directly constructed legacy host
+// values resolve to their address so observation code can build one before it
+// reaches the store.
+func (t TargetDocument) GetID() string {
+	if t.ID != "" {
+		return t.ID
+	}
+	return t.Host
+}
 
-// GetName returns the host: there is nothing friendlier to show.
-func (t TargetDocument) GetName() string { return t.Host }
+// GetName returns the address for a host and the stable name for a provider
+// context, which has no network address.
+func (t TargetDocument) GetName() string {
+	if t.Host != "" {
+		return t.Host
+	}
+	return t.ID
+}
 
 // GetID returns the run's ulid.
 func (s Scan) GetID() string { return s.ID }
@@ -82,6 +95,12 @@ type EngineSpec struct {
 	DocsURL     string `json:"docsUrl,omitempty"`
 	Binary      string `json:"binary"`
 
+	// Subject is what this engine's input list holds — an address, or a
+	// provider-native scope. Absent means endpoints. It is what tells a caller
+	// which targets an engine's profiles can be assigned to at all: a profile
+	// that audits a cloud account means nothing against a hostname.
+	Subject string `json:"subject,omitempty"`
+
 	// Accepts and Emits are empty for scan engines, which do not chain.
 	Accepts string `json:"accepts,omitempty"`
 	Emits   string `json:"emits,omitempty"`
@@ -104,19 +123,53 @@ type EngineSpec struct {
 	// install. Nil for engines that carry no catalogue.
 	Templates *EngineTemplates `json:"templates,omitempty"`
 
-	// Sections is the option catalog the profile form renders. It is an opaque
-	// ordered structure here because its order is meaningful.
-	Sections any `json:"sections,omitempty"`
+	// Options contains the typed profile schemas the profile form renders.
+	Options EngineOptions `json:"options"`
 
 	// Defaults names the profile shipped with the engine.
 	Defaults string `json:"defaults,omitempty"`
 }
 
+// EngineOptions is the provider-aware option catalog exposed by an engine.
+type EngineOptions struct {
+	Discriminator string                `json:"discriminator,omitempty"`
+	Variants      []EngineOptionVariant `json:"variants"`
+}
+
+// EngineOptionVariant contains inline schemas for runtime consumers and
+// component references for generated API documentation.
+type EngineOptionVariant struct {
+	ID                    string      `json:"id"`
+	Title                 string      `json:"title"`
+	Schema                JSONSchema  `json:"schema"`
+	ContextSchema         *JSONSchema `json:"contextSchema,omitempty"`
+	CredentialSchema      *JSONSchema `json:"credentialSchema,omitempty"`
+	SchemaRef             string      `json:"schemaRef,omitempty"`
+	ContextSchemaRef      string      `json:"contextSchemaRef,omitempty"`
+	CredentialSchemaRef   string      `json:"credentialSchemaRef,omitempty"`
+	CLIArgumentsSchemaRef string      `json:"cliArgumentsSchemaRef,omitempty"`
+}
+
+// JSONSchema is a Draft 2020-12 schema document carried as API data.
+type JSONSchema map[string]any
+
+// JSONSchema describes schema documents to Clicky's OpenAPI reflector without
+// pretending that every engine/provider has one static property shape.
+func (JSONSchema) JSONSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"description":          "Draft 2020-12 JSON Schema document",
+		"additionalProperties": true,
+	}
+}
+
 // EngineTemplates describes an installed template corpus.
 type EngineTemplates struct {
-	Version string `json:"version,omitempty"`
-	Count   int    `json:"count"`
-	Path    string `json:"path,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Count        int    `json:"count"`
+	Path         string `json:"path,omitempty"`
+	ItemLabel    string `json:"itemLabel,omitempty"`
+	ProfileLabel string `json:"profileLabel,omitempty"`
 	// Problem says why the corpus could not be read, rather than reporting a
 	// count of zero as if the engine simply had nothing to run.
 	Problem string `json:"problem,omitempty"`

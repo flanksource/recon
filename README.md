@@ -138,6 +138,29 @@ is inherent to the package rather than a choice: an omnibus build links that
 prefix into its interpreter's dylib paths and its `$LOAD_PATH`, so a copy
 unpacked into `.bin/` cannot run.
 
+### Prowler source and CLI
+
+Prowler's provider, compliance and check metadata is pinned as a shallow Git submodule at `third_party/prowler`. Initialize it after cloning recon:
+
+```bash
+git submodule update --init --depth 1 third_party/prowler
+```
+
+The matching CLI is Prowler 5.40.0 built from the same upstream commit. Install it as a PATH-managed application with a Python 3.10–3.13 interpreter:
+
+```bash
+pipx install "git+https://github.com/prowler-cloud/prowler.git@ba564af4f46fd7c4908d34798687eda36b88398c"
+prowler --version
+```
+
+If Prowler is already installed, replace it with the pinned build:
+
+```bash
+pipx install --force "git+https://github.com/prowler-cloud/prowler.git@ba564af4f46fd7c4908d34798687eda36b88398c"
+```
+
+When updating Prowler, move the submodule gitlink and PATH install specification to the same reviewed commit, then regenerate and verify the derived catalogue. The upstream version, gitlink and generated catalogue must stay in sync.
+
 ## Target classes
 
 | Class         | Meaning                                                    | In default scan |

@@ -15,16 +15,19 @@ import (
 type Vocabulary string
 
 const (
-	TargetTags     Vocabulary = "target.tags"
-	TargetProfiles Vocabulary = "target.profiles"
-	TargetHosts    Vocabulary = "target.hosts"
-	TargetPorts    Vocabulary = "target.ports"
-	TargetStatus   Vocabulary = "target.status"
+	TargetTags      Vocabulary = "target.tags"
+	TargetProfiles  Vocabulary = "target.profiles"
+	TargetIDs       Vocabulary = "target.ids"
+	TargetHosts     Vocabulary = "target.hosts"
+	TargetProviders Vocabulary = "target.providers"
+	TargetPorts     Vocabulary = "target.ports"
+	TargetStatus    Vocabulary = "target.status"
 
 	ScanNames    Vocabulary = "scan.name"
 	ScanProfiles Vocabulary = "scan.profile"
 
 	FindingHosts     Vocabulary = "finding.host"
+	FindingTargets   Vocabulary = "finding.target"
 	FindingTemplates Vocabulary = "finding.template"
 	FindingTags      Vocabulary = "finding.tag"
 
@@ -43,10 +46,12 @@ const (
 var vocabularies = map[Vocabulary]string{
 	TargetTags:     `SELECT DISTINCT unnest(tags) AS value FROM targets ORDER BY value`,
 	TargetProfiles: `SELECT DISTINCT unnest(profiles) AS value FROM targets ORDER BY value`,
+	TargetIDs:      `SELECT id AS value FROM targets ORDER BY id COLLATE "C"`,
 	// COLLATE "C" for the same reason the listing uses it: byte order is the
 	// order the hosts were captured in, and it must not drift with the
 	// database's default collation.
-	TargetHosts: `SELECT host AS value FROM targets ORDER BY host COLLATE "C"`,
+	TargetHosts:     `SELECT host AS value FROM targets WHERE host IS NOT NULL ORDER BY host COLLATE "C"`,
+	TargetProviders: `SELECT DISTINCT provider AS value FROM targets WHERE provider IS NOT NULL ORDER BY provider`,
 
 	// A port is offerable wherever it is known — curated by hand, found by
 	// naabu, or the one that answered over HTTP — matching what the selector
@@ -78,6 +83,7 @@ var vocabularies = map[Vocabulary]string{
 	// The collation is inside the select list because DISTINCT requires every
 	// ORDER BY expression to be there.
 	FindingHosts:     `SELECT DISTINCT host COLLATE "C" AS value FROM findings ORDER BY value`,
+	FindingTargets:   `SELECT DISTINCT target_id COLLATE "C" AS value FROM findings WHERE target_id IS NOT NULL ORDER BY value`,
 	FindingTemplates: `SELECT DISTINCT template_id AS value FROM findings ORDER BY template_id`,
 	FindingTags:      `SELECT DISTINCT unnest(tags) AS value FROM findings ORDER BY value`,
 

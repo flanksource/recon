@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/flanksource/commons-db/dbtest"
@@ -21,7 +22,7 @@ func target(host string, class api.Class, build ...func(*api.TargetDocument)) ap
 		Host: host, Class: class,
 		// The schema requires at least one profile, so every target has one
 		// unless a spec overrides it.
-		Profiles: []string{"safe"}, Tags: []string{},
+		Profiles: []string{"scan:nuclei:safe"}, Tags: []string{},
 	}
 	for _, apply := range build {
 		apply(&document)
@@ -33,8 +34,33 @@ func tags(values ...string) func(*api.TargetDocument) {
 	return func(d *api.TargetDocument) { d.Tags = values }
 }
 
+// A flag's help text is a struct tag, so it cannot be computed from the
+// vocabulary it describes — and it had already drifted once, telling everyone
+// there were two kinds after a third existed. The tag is the only place the CLI
+// says what --kind accepts, so this is what keeps it true.
+var _ = Describe("the kind flag's help text", func() {
+	It("names every kind the filter actually accepts", func() {
+		field, found := reflect.TypeOf(store.TargetOpts{}).FieldByName("Kind")
+		Expect(found).To(BeTrue())
+
+		help := field.Tag.Get("help")
+		for _, kind := range api.TargetKinds() {
+			Expect(help).To(ContainSubstring(string(kind)),
+				"--kind help does not mention %s", kind)
+		}
+	})
+})
+
 func profiles(values ...string) func(*api.TargetDocument) {
-	return func(d *api.TargetDocument) { d.Profiles = values }
+	// Never nil, so that profiles() means "none" rather than "null": the wire
+	// type declares a required array, and a nil slice marshals to null, which
+	// the schema rejects for a reason unrelated to how many profiles there are.
+	return func(d *api.TargetDocument) {
+		d.Profiles = make([]string, len(values))
+		for i, value := range values {
+			d.Profiles[i] = "scan:nuclei:" + value
+		}
+	}
 }
 
 func ports(values ...int) func(*api.TargetDocument) {
@@ -147,7 +173,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 	// depending on which listing it is on.
 	It("excludes a tag prefixed with !", func() {
 		Expect(hosts(store.TargetOpts{Tags: []string{"!http"}})).
-			To(Equal([]string{"c.example.test", "d.example.test"}))
+			To(Equal([]string{"c.example.test", "d.example.test", "e.example.test"}))
 	})
 
 	It("drops a target carrying an excluded tag even when another tag was included", func() {
@@ -174,7 +200,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 	})
 
 	It("filters by assigned profile", func() {
-		Expect(hosts(store.TargetOpts{Profiles: []string{"full"}})).
+		Expect(hosts(store.TargetOpts{Profiles: []string{"scan:nuclei:full"}})).
 			To(Equal([]string{"b.example.test"}))
 	})
 
@@ -217,7 +243,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 
 	It("filters by an absolute last-seen time", func() {
 		Expect(hosts(store.TargetOpts{LastSeen: "2026-06-01T00:00:00Z"})).
-			To(Equal([]string{"a.example.test"}))
+			To(Equal([]string{"a.example.test", "e.example.test"}))
 	})
 
 	It("names an exact set of hosts", func() {
@@ -230,6 +256,14 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 		// is the wrong conclusion to hand someone about to run a scan.
 		_, err := st.ListTargets(ctx, store.TargetOpts{Class: []string{"staging"}})
 		Expect(err).To(MatchError(ContainSubstring(`unknown class "staging"`)))
+	})
+
+	It("rejects malformed stable IDs and provider names", func() {
+		_, err := st.ListTargets(ctx, store.TargetOpts{IDs: []string{"gcp/project"}})
+		Expect(err).To(MatchError(ContainSubstring("invalid target id")))
+
+		_, err = st.ListTargets(ctx, store.TargetOpts{Provider: []string{"GCP"}})
+		Expect(err).To(MatchError(ContainSubstring("invalid provider")))
 	})
 
 	It("rejects an impossible port", func() {

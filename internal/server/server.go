@@ -6,6 +6,7 @@
 package server
 
 import (
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -15,9 +16,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/flanksource/recon/internal/discovery"
+	prowlerschema "github.com/flanksource/recon/internal/engines/scan/prowler/schema"
 	"github.com/flanksource/recon/internal/entities"
 	"github.com/flanksource/recon/internal/httpapi"
 	"github.com/flanksource/recon/internal/probes"
+	"github.com/flanksource/recon/internal/runtimecontext"
 	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -26,6 +29,10 @@ import (
 type Config struct {
 	Host string
 	Port int
+
+	// Namespace is the default Kubernetes namespace for runtime secret
+	// references and metadata catalogs.
+	Namespace string
 
 	// Root is the command tree the REST surface is generated from. Every entity
 	// must already be registered on it: the OpenAPI spec is built on the first
@@ -36,6 +43,14 @@ type Config struct {
 	Registry *entities.Registry
 
 	Store *store.Store
+
+	// ContextFactory supplies commons-db contexts carrying the database and
+	// namespace. When omitted, Handler derives one from Store and Namespace.
+	ContextFactory runtimecontext.Factory
+
+	// OnePassword overrides the public commons-db metadata catalog. Production
+	// leaves it nil; tests can provide a catalog without invoking the op CLI.
+	OnePassword OnePasswordCatalog
 
 	// Scans is the scan runtime. Optional: a test that only exercises the
 	// entity routes does not need one, and the streaming route is left
@@ -72,12 +87,29 @@ func Handler(config Config) http.Handler {
 	if config.Probes != nil {
 		config.Probes.Store = config.Store
 	}
+	contextFactory := config.ContextFactory
+	if contextFactory == nil && config.Store != nil {
+		namespace := config.Namespace
+		if namespace == "" {
+			namespace = "default"
+		}
+		contextFactory = runtimecontext.New(config.Store, namespace)
+	}
 
 	mux := http.NewServeMux()
 	task.RegisterHandlers(mux, "/api/v1")
+	if contextFactory != nil {
+		registerSecretCatalogs(mux, secretCatalogOptions{
+			Context: contextFactory, OnePassword: config.OnePassword,
+		})
+	}
 
 	if config.Scans != nil {
+		if contextFactory == nil {
+			panic("scan runtime context requires a store or context factory")
+		}
 		config.Scans.Store = config.Store
+		config.Scans.ContextFactory = contextFactory
 		// Hand-written, not clicky's task SSE handler: that one writes named
 		// events, and the browser's EventSource.onmessage fires only for
 		// unnamed ones, so every frame would be silently discarded.
@@ -91,14 +123,15 @@ func Handler(config Config) http.Handler {
 		config.Scans.PublishCurrent()
 	}
 
+	serveConfig := &rpc.ServeConfig{
+		Host:        config.Host,
+		Port:        config.Port,
+		Title:       "recon",
+		Description: "Attack-surface inventory, discovery and scanning",
+		Executor:    &rpc.ExecutorConfig{Enabled: true, PathPrefix: "/api/v1"},
+	}
 	swagger := rpc.NewSwaggerServer(
-		&rpc.ServeConfig{
-			Host:        config.Host,
-			Port:        config.Port,
-			Title:       "recon",
-			Description: "Attack-surface inventory, discovery and scanning",
-			Executor:    &rpc.ExecutorConfig{Enabled: true, PathPrefix: "/api/v1"},
-		},
+		serveConfig,
 		config.Root,
 		nil,
 	)
@@ -106,7 +139,21 @@ func Handler(config Config) http.Handler {
 	// Registering panics on a duplicate pattern, which is the behaviour we want:
 	// two routes claiming one path is a wiring bug, and it should stop the
 	// process at startup rather than serve whichever won.
-	swagger.RegisterRoutes(mux)
+	components, err := prowlerschema.OpenAPIComponents()
+	if err != nil {
+		panic(fmt.Sprintf("load Prowler OpenAPI components: %v", err))
+	}
+	openAPI, err := newOpenAPIPublisher(config.Root, swagger.ConverterConfig(), components)
+	if err != nil {
+		panic(fmt.Sprintf("build OpenAPI document: %v", err))
+	}
+	mux.HandleFunc("/api/openapi.json", openAPI.serveJSON)
+	mux.HandleFunc("/api/openapi.yaml", openAPI.serveYAML)
+	mux.HandleFunc("/api/entities", swagger.HandleEntities)
+	if !serveConfig.SkipHealth {
+		mux.HandleFunc("/health", swagger.HandleHealth)
+	}
+	swagger.RegisterExecutionRoutes(mux)
 
 	httpapi.RegisterSchema(mux)
 	httpapi.RegisterTemplatePreview(mux, config.Registry)

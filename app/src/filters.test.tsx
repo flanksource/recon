@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FilterBarFilter, FilterBarMultiFilterMode } from "@flanksource/clicky-ui";
+import type { FilterBarFilter, FilterBarMultiFilterMode } from "@flanksource/clicky-ui/components";
 import { selectionQuery, useEntityFilters } from "./filters";
 
 function jsonResponse(body: unknown): Response {

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
-  DataTable,
   Modal,
+} from "@flanksource/clicky-ui/components";
+import {
+  DataTable,
   type DataTableColumn,
-} from "@flanksource/clicky-ui";
+} from "@flanksource/clicky-ui/data";
 import { fetchLatestDiscovery, runDiscovery } from "./api";
 import {
   DiscoveryProfiles,

@@ -1,0 +1,97 @@
+[
+  {
+    "activity_id": 1,
+    "finding_info": {
+      "desc": "The project allows primitive roles.",
+      "title": "Ensure primitive roles are not used",
+      "uid": "gcp_iam_primitive_roles"
+    },
+    "time_dt": "2026-08-20T10:00:00Z",
+    "remediation": {
+      "desc": "Replace primitive roles with predefined roles.",
+      "references": ["https://example.com/gcp/iam"]
+    },
+    "severity": "High",
+    "status": "New",
+    "status_code": "FAIL",
+    "status_detail": "roles/editor is granted to user@example.com",
+    "risk_details": "Primitive roles grant broad permissions.",
+    "resources": [
+      {
+        "name": "user@example.com",
+        "uid": "projects/example-project/roles/editor",
+        "group": {"name": "iam"},
+        "type": "IAMPolicy"
+      }
+    ],
+    "metadata": {
+      "event_code": "gcp_iam_primitive_roles",
+      "product": {"name": "Prowler", "version": "5.40.0"}
+    },
+    "cloud": {
+      "account": {"name": "example-project", "uid": "example-project"},
+      "provider": "gcp"
+    },
+    "unmapped": {
+      "categories": ["identity", "privilege"],
+      "compliance": {"CIS": ["1.3"]},
+      "provider": "gcp",
+      "provider_uid": "example-project"
+    }
+  },
+  {
+    "finding_info": {
+      "desc": "Audit logging is enabled.",
+      "title": "Ensure audit logging is enabled",
+      "uid": "gcp_logging_enabled"
+    },
+    "time_dt": "2026-08-20T10:00:01Z",
+    "severity": "Informational",
+    "status": "New",
+    "status_code": "PASS",
+    "resources": [{"uid": "example-project", "group": {"name": "logging"}}],
+    "metadata": {"event_code": "gcp_logging_enabled"},
+    "cloud": {"account": {"uid": "example-project"}, "provider": "gcp"},
+    "unmapped": {"provider": "gcp", "provider_uid": "example-project"}
+  },
+  {
+    "finding_info": {
+      "desc": "Review the cluster's admission policy manually.",
+      "title": "Review admission policy",
+      "uid": "k8s_manual_admission_policy"
+    },
+    "time_dt": "2026-08-20T10:00:02Z",
+    "severity": "Medium",
+    "status": "New",
+    "status_code": "MANUAL",
+    "resources": [
+      {
+        "name": "production",
+        "uid": "production",
+        "group": {"name": "apiserver"},
+        "type": "Cluster"
+      }
+    ],
+    "metadata": {"event_code": "k8s_manual_admission_policy"},
+    "unmapped": {
+      "categories": ["cluster-security"],
+      "provider": "kubernetes",
+      "provider_uid": "production"
+    }
+  },
+  {
+    "finding_info": {
+      "desc": "Muted finding.",
+      "title": "Muted finding",
+      "uid": "gcp_muted"
+    },
+    "time_dt": "2026-08-20T10:00:03Z",
+    "severity": "Critical",
+    "status": "Suppressed",
+    "status_code": "FAIL",
+    "resources": [{"uid": "example-project", "group": {"name": "iam"}}],
+    "metadata": {"event_code": "gcp_muted"},
+    "cloud": {"account": {"uid": "example-project"}, "provider": "gcp"},
+    "unmapped": {"provider": "gcp", "provider_uid": "example-project"}
+  }
+]

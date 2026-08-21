@@ -234,7 +234,7 @@ func (r *Runner) finish(
 	// Findings are not counted: a sweep cannot produce any, and zeroing every
 	// covered host would erase what the last real scan found.
 	if err := r.Store.FinalizeScan(ctx, store.FinalizeScanOptions{
-		Scan: scan, Hosts: hosts,
+		Scan: scan, TargetIDs: hosts,
 	}); err != nil {
 		// Appended rather than assigned, and reported on the probe rather than
 		// swallowed: nothing above this is still listening, and a run whose

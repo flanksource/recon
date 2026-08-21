@@ -14,15 +14,82 @@ function writeInventory(target: Record<string, unknown>): void {
   mkdirSync(resolve(INVENTORY_DIR, "targets"), { recursive: true });
   writeJson(resolve(INVENTORY_DIR, "inventory.json"), {
     $schema: "./inventory.schema.json",
-    version: 1,
+    version: 3,
     zones: ["example.com"],
   });
-  writeJson(resolve(INVENTORY_DIR, "targets", `${target.host}.json`), target);
+  const id = String(target.id ?? target.host);
+  const profiles = (target.profiles as string[]).map((profile) =>
+    profile.startsWith("scan:") ? profile : `scan:nuclei:${profile}`,
+  );
+  writeJson(resolve(INVENTORY_DIR, "targets", `${id}.json`), {
+    ...target,
+    version: 3,
+    id,
+    profiles,
+  });
 }
 
 describe("inventory store", () => {
   beforeEach(() => rmSync(TEST_ROOT, { recursive: true, force: true }));
   afterEach(() => rmSync(TEST_ROOT, { recursive: true, force: true }));
+
+  it("keys targets by stable id while network operations use only host addresses", () => {
+    mkdirSync(resolve(INVENTORY_DIR, "targets"), { recursive: true });
+    writeJson(resolve(INVENTORY_DIR, "inventory.json"), {
+      $schema: "./inventory.schema.json",
+      version: 3,
+      zones: ["example.com"],
+    });
+    writeJson(resolve(INVENTORY_DIR, "targets", "web-production.json"), {
+      $schema: "../target.schema.json",
+      version: 3,
+      id: "web-production",
+      host: "api.example.com",
+      class: "prod",
+      profiles: ["scan:nuclei:safe"],
+      tags: ["api"],
+    });
+    writeJson(resolve(INVENTORY_DIR, "targets", "gcp-production.json"), {
+      $schema: "../target.schema.json",
+      version: 3,
+      id: "gcp-production",
+      kind: "provider-context",
+      provider: "gcp",
+      credentialMode: "ambient",
+      arguments: { "project-ids": ["example-prod"] },
+      class: "prod",
+      profiles: ["scan:prowler:gcp-cis-5-0"],
+      tags: ["cloud"],
+    });
+    const store = createInventoryStore({
+      inventoryDir: INVENTORY_DIR,
+      now: () => new Date("2026-08-09T09:00:00.000Z"),
+    });
+    const outputDir = resolve(TEST_ROOT, ".gen");
+    const resultPath = resolve(TEST_ROOT, "result.jsonl");
+    writeFileSync(
+      resultPath,
+      `${JSON.stringify({ host: "https://api.example.com", "template-id": "headers" })}\n`,
+      "utf8",
+    );
+
+    expect(store.list().rows.map((target) => target.id)).toEqual([
+      "gcp-production",
+      "web-production",
+    ]);
+    expect(store.get("web-production").host).toBe("api.example.com");
+
+    store.render({ outputDir });
+    store.recordScan({ hosts: ["api.example.com"], resultPath });
+
+    expect(readFileSync(resolve(outputDir, "all.txt"), "utf8")).toBe(
+      "api.example.com\n",
+    );
+    expect(store.get("web-production").scan).toEqual({
+      last_scan: "2026-08-09T09:00:00.000Z",
+      last_findings: 1,
+    });
+  });
 
   it("validates and lists canonical target documents", () => {
     writeInventory({
@@ -37,7 +104,7 @@ describe("inventory store", () => {
     const inventory = createInventoryStore({ inventoryDir: INVENTORY_DIR }).list();
 
     expect(inventory).toEqual({
-      version: 1,
+      version: 3,
       zones: ["example.com"],
       tagVocabulary: ["api"],
       rows: [expect.objectContaining({ host: "api.example.com", class: "prod" })],
@@ -91,20 +158,94 @@ describe("inventory store", () => {
     const store = createInventoryStore({ inventoryDir: INVENTORY_DIR });
 
     const updated = store.updateCurated({
-      host: "api.example.com",
-      curated: { class: "prod", profiles: ["safe", "full"], tags: ["api", "external"] },
+      id: "api.example.com",
+      curated: {
+        class: "prod",
+        profiles: ["scan:nuclei:safe", "scan:nuclei:full"],
+        tags: ["api", "external"],
+      },
     });
 
     expect(updated).toEqual(
       expect.objectContaining({
         host: "api.example.com",
-        profiles: ["safe", "full"],
+        profiles: ["scan:nuclei:safe", "scan:nuclei:full"],
         tags: ["api", "external"],
         observed: { first_observed: "2026-08-01T00:00:00.000Z" },
         http: { status_code: 200, title: "API" },
       }),
     );
     expect(updated).not.toHaveProperty("notes");
+  });
+
+  it("redacts inline credentials and applies preserve, replace, and clear updates", () => {
+    writeInventory({
+      $schema: "../target.schema.json",
+      id: "cloudflare-production",
+      kind: "provider-context",
+      provider: "cloudflare",
+      credentialMode: "configured",
+      class: "prod",
+      profiles: ["scan:prowler:cloudflare-production"],
+      tags: [],
+      credentials: {
+        envVars: [{ name: "API_TOKEN", value: "stored-secret" }],
+      },
+    });
+    const store = createInventoryStore({ inventoryDir: INVENTORY_DIR });
+
+    expect(store.get("cloudflare-production").credentials).toEqual({
+      envVars: [{ name: "API_TOKEN", configured: true }],
+    });
+    store.updateCurated({
+      id: "cloudflare-production",
+      curated: {
+        class: "prod",
+        profiles: ["scan:prowler:cloudflare-production"],
+        tags: [],
+      },
+    });
+    expect(
+      JSON.parse(
+        readFileSync(resolve(INVENTORY_DIR, "targets", "cloudflare-production.json"), "utf8"),
+      ),
+    ).toHaveProperty("credentials.envVars.0.value", "stored-secret");
+
+    const replaced = store.updateCurated({
+      id: "cloudflare-production",
+      curated: {
+        class: "prod",
+        profiles: ["scan:prowler:cloudflare-production"],
+        tags: [],
+        credentials: {
+          envVars: [
+            {
+              name: "API_TOKEN",
+              valueFrom: { secretKeyRef: { name: "scanner", key: "token" } },
+            },
+          ],
+        },
+      },
+    });
+    expect(replaced.credentials).toEqual({
+      envVars: [
+        {
+          name: "API_TOKEN",
+          valueFrom: { secretKeyRef: { name: "scanner", key: "token" } },
+        },
+      ],
+    });
+
+    const cleared = store.updateCurated({
+      id: "cloudflare-production",
+      curated: {
+        class: "prod",
+        profiles: ["scan:prowler:cloudflare-production"],
+        tags: [],
+        credentials: null,
+      },
+    });
+    expect(cleared).not.toHaveProperty("credentials");
   });
 
   it("normalizes a successful httpx observation into typed machine fields", () => {
@@ -172,7 +313,7 @@ describe("inventory store", () => {
     );
   });
 
-  it("rejects host traversal and host renames", () => {
+  it("rejects target-id traversal and identity edits", () => {
     writeInventory({
       $schema: "../target.schema.json",
       version: 1,
@@ -183,18 +324,29 @@ describe("inventory store", () => {
     });
     const store = createInventoryStore({ inventoryDir: INVENTORY_DIR });
 
-    expect(() => store.get("../state")).toThrow(/invalid host/i);
+    expect(() => store.get("../state")).toThrow(/invalid target id/i);
     expect(() =>
       store.updateCurated({
-        host: "api.example.com",
+        id: "api.example.com",
         curated: {
           host: "renamed.example.com",
           class: "prod",
-          profiles: ["safe"],
+          profiles: ["scan:nuclei:safe"],
           tags: [],
         } as never,
       }),
     ).toThrow(/host is immutable/i);
+    expect(() =>
+      store.updateCurated({
+        id: "api.example.com",
+        curated: {
+          id: "renamed",
+          class: "prod",
+          profiles: ["scan:nuclei:safe"],
+          tags: [],
+        } as never,
+      }),
+    ).toThrow(/id is immutable/i);
   });
 
   it("renders deterministic scan lists and records per-host findings", () => {

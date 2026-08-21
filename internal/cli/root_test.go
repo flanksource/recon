@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/flanksource/clicky/rpc"
@@ -131,5 +132,52 @@ var _ = Describe("execution resources", func() {
 		Expect(root.ExecuteContext(context.Background())).To(MatchError(
 			"scan concurrency must be at least 1, got 0",
 		))
+	})
+
+	It("resolves the serve namespace from the flag, environment, and default in order", func() {
+		originalNamespace, hadNamespace := os.LookupEnv("NAMESPACE")
+		originalPodNamespace, hadPodNamespace := os.LookupEnv("POD_NAMESPACE")
+		DeferCleanup(func() {
+			if hadNamespace {
+				Expect(os.Setenv("NAMESPACE", originalNamespace)).To(Succeed())
+			} else {
+				Expect(os.Unsetenv("NAMESPACE")).To(Succeed())
+			}
+			if hadPodNamespace {
+				Expect(os.Setenv("POD_NAMESPACE", originalPodNamespace)).To(Succeed())
+			} else {
+				Expect(os.Unsetenv("POD_NAMESPACE")).To(Succeed())
+			}
+		})
+
+		Expect(os.Setenv("NAMESPACE", "tenant-primary")).To(Succeed())
+		Expect(os.Setenv("POD_NAMESPACE", "tenant-pod")).To(Succeed())
+		root := cli.New()
+		serve, _, err := root.Find([]string{"serve"})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(serve.Flag("namespace").DefValue).To(Equal("tenant-primary"))
+
+		Expect(serve.ParseFlags([]string{"--namespace=tenant-explicit"})).To(Succeed())
+		resolved, err := serve.Flags().GetString("namespace")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(resolved).To(Equal("tenant-explicit"))
+
+		Expect(os.Unsetenv("NAMESPACE")).To(Succeed())
+		root = cli.New()
+		serve, _, err = root.Find([]string{"serve"})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(serve.Flag("namespace").DefValue).To(Equal("tenant-pod"))
+
+		Expect(os.Unsetenv("POD_NAMESPACE")).To(Succeed())
+		root = cli.New()
+		serve, _, err = root.Find([]string{"serve"})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(serve.Flag("namespace").DefValue).To(Equal("default"))
+	})
+
+	It("rejects an explicitly empty serve namespace before opening the database", func() {
+		root := cli.New()
+		root.SetArgs([]string{"serve", "--namespace="})
+		Expect(root.ExecuteContext(context.Background())).To(MatchError("namespace must not be empty"))
 	})
 })

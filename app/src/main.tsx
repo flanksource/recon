@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
-import { ErrorWrapper, setFallbackIconProvider } from "@flanksource/clicky-ui";
+import { ErrorWrapper } from "@flanksource/clicky-ui/components";
+import { setFallbackIconProvider } from "@flanksource/clicky-ui/data";
 import { clickyIconProvider } from "@flanksource/clicky-ui/icons";
 import { App } from "./App";
 import "@flanksource/clicky-ui/styles.css";

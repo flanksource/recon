@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, JsonSchemaForm } from "@flanksource/clicky-ui";
-import { sameConfig, sectionSchema } from "./ProfileConfig";
-import { useProfileFilterPairs } from "./ProfileFilterPairs";
+import { Button } from "@flanksource/clicky-ui/components";
+import { EngineConfigForm, sameConfig } from "./EngineConfigForm";
+import { ProfileTree } from "./ProfileTree";
 import { TemplatePreviewPanel, usePreview } from "./TemplatePreview";
 import { fetchEngines, fetchProfiles, saveProfile } from "./api";
 import { profileId } from "./types";
@@ -19,10 +19,8 @@ export function ProfilesView({ onBrowseTemplates }: Props = {}) {
     {},
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sectionId, setSectionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { pre, post, hiddenKeys } = useProfileFilterPairs();
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -57,17 +55,30 @@ export function ProfilesView({ onBrowseTemplates }: Props = {}) {
     (name: string) => engines.find((engine) => engine.name === name)?.title ?? name,
     [engines],
   );
+  const providerTitle = useCallback(
+    (engineName: string, provider: string) => {
+      const title = engines
+        .find((engine) => engine.name === engineName)
+        ?.options.variants.find((variant) => variant.id === provider)?.title;
+      if (!title) {
+        throw new Error(`${engineName} does not define provider variant "${provider}"`);
+      }
+      return title;
+    },
+    [engines],
+  );
 
   const selected = useMemo(
     () => profiles.find((profile) => profileId(profile) === selectedId) ?? null,
     [profiles, selectedId],
   );
-  const sections = useMemo(
-    () => (selected ? (engines.find((engine) => engine.name === selected.engine)?.sections ?? []) : []),
+  const selectedEngine = useMemo(
+    () =>
+      selected
+        ? (engines.find((engine) => engine.name === selected.engine) ?? null)
+        : null,
     [selected, engines],
   );
-  const activeSection =
-    sections.find((section) => section.id === sectionId) ?? sections[0];
   const draft = selected ? (drafts[profileId(selected)] ?? selected.config) : {};
   const dirty = selected ? !sameConfig(draft, selected.config) : false;
 
@@ -79,13 +90,12 @@ export function ProfilesView({ onBrowseTemplates }: Props = {}) {
     error: previewError,
     loading: previewLoading,
   } = usePreview(
-    selected && selected.kind === "scan" ? draft : null,
+    selected?.engine === "nuclei" ? draft : null,
     selected?.engine ?? "nuclei",
   );
 
   const selectProfile = (profile: Profile) => {
     setSelectedId(profileId(profile));
-    setSectionId(null);
   };
 
   const reloadSelected = () => {
@@ -125,43 +135,21 @@ export function ProfilesView({ onBrowseTemplates }: Props = {}) {
             Schema-driven scan and discovery configuration
           </p>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-          {profiles.map((profile) => (
-            <button
-              key={profileId(profile)}
-              type="button"
-              aria-label={`${profile.name} ${engineTitle(profile.engine)}`}
-              onClick={() => selectProfile(profile)}
-              className={`rounded-md border p-3 text-left transition-colors ${
-                selected && profileId(selected) === profileId(profile)
-                  ? "border-primary bg-primary/5"
-                  : "border-border bg-background hover:bg-accent"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <span className="font-medium">{profile.name}</span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {engineTitle(profile.engine)}
-                </span>
-                {!sameConfig(
-                  drafts[profileId(profile)] ?? profile.config,
-                  profile.config,
-                ) && (
-                  <span
-                    className="ml-auto h-2 w-2 rounded-full bg-amber-500"
-                    title="Unsaved changes"
-                  />
-                )}
-              </span>
-              <code className="mt-1 block text-[11px] text-muted-foreground">
-                {profileId(profile)}
-              </code>
-            </button>
-          ))}
-          {!busy && profiles.length === 0 && (
-            <p className="text-sm text-muted-foreground">No profiles found.</p>
-          )}
-        </div>
+        {!busy || profiles.length > 0 ? (
+          <ProfileTree
+            profiles={profiles}
+            selectedId={selectedId}
+            engineTitle={engineTitle}
+            providerTitle={providerTitle}
+            isDirty={(profile) =>
+              !sameConfig(
+                drafts[profileId(profile)] ?? profile.config,
+                profile.config,
+              )
+            }
+            onSelect={selectProfile}
+          />
+        ) : null}
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
@@ -212,83 +200,28 @@ export function ProfilesView({ onBrowseTemplates }: Props = {}) {
           )}
         </header>
 
-        {selected && activeSection && (
+        {selected && selectedEngine && (
           <div className="flex min-h-0 flex-1">
-            <nav className="w-56 shrink-0 space-y-1 overflow-y-auto border-r border-border p-3">
-              {sections.map((section) => (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => setSectionId(section.id)}
-                  className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                    section.id === activeSection.id
-                      ? "bg-accent font-medium text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                  }`}
-                >
-                  {section.title}
-                </button>
-              ))}
-            </nav>
-
             <main className="min-w-0 flex-1 overflow-y-auto p-5">
-              <div className="mb-5 max-w-4xl">
-                <div className="flex items-start gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold">
-                      {activeSection.title}
-                    </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {activeSection.description}
-                    </p>
-                  </div>
-                  {activeSection.sourceUrl && (
-                    <a
-                      href={activeSection.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-auto shrink-0 text-xs text-primary hover:underline"
-                    >
-                      Upstream flags ↗
-                    </a>
-                  )}
-                </div>
-              </div>
-              <div className="max-w-6xl rounded-lg border border-border bg-background p-5 shadow-sm">
-                <JsonSchemaForm
-                  key={`${profileId(selected)}:${activeSection.id}`}
-                  idPrefix={`${selected.engine}-${selected.name}-${activeSection.id}`}
-                  schema={sectionSchema(activeSection)}
-                  value={draft}
-                  onChange={(next) =>
-                    setDrafts((current) => ({
-                      ...current,
-                      [profileId(selected)]: next,
-                    }))
-                  }
-                  pre={pre}
-                  post={post}
-                  hiddenKeys={hiddenKeys}
-                  layout={{
-                    mode: "stacked",
-                    help: "hover",
-                    valueMaxWidth: "100%",
-                  }}
-                  size="sm"
-                  preferencesStorageKey="nuclei-profile-form-preferences"
-                />
-              </div>
-              <p className="mt-4 max-w-4xl text-xs text-muted-foreground">
-                Profile changes are saved to the server. Keep credentials,
-                bearer tokens, and private keys in external secret files
-                rather than these fields.
-              </p>
+              <EngineConfigForm
+                engine={selectedEngine}
+                identity={profileId(selected)}
+                value={draft}
+                onChange={(next) =>
+                  setDrafts((current) => ({
+                    ...current,
+                    [profileId(selected)]: next,
+                  }))
+                }
+                note="Profile changes are saved to the server. Keep credentials, bearer tokens, and private keys in external secret files rather than these fields."
+                preferencesStorageKey="engine-profile-form-preferences"
+              />
             </main>
 
             {/* The form describes the configuration; this says what it does.
                 Without it the only way to learn what a tag change selected was
                 to save the profile and run a scan. */}
-            {selected.kind === "scan" && (
+            {selected.engine === "nuclei" && (
               <aside
                 aria-label="Templates this profile runs"
                 className="w-80 shrink-0 overflow-y-auto border-l border-border bg-muted/20 p-4"
@@ -299,7 +232,7 @@ export function ProfilesView({ onBrowseTemplates }: Props = {}) {
                   error={previewError}
                   loading={previewLoading}
                   onBrowse={
-                    onBrowseTemplates ? () => onBrowseTemplates(selected.name) : undefined
+                    onBrowseTemplates ? () => onBrowseTemplates(profileId(selected)) : undefined
                   }
                 />
               </aside>

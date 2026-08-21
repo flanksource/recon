@@ -38,7 +38,14 @@ type Registry struct {
 // SetStore supplies the open database. Every handler fails loudly until it is
 // called, rather than returning an empty result that reads like an empty
 // inventory.
-func (r *Registry) SetStore(st *store.Store) { r.st = st }
+func (r *Registry) SetStore(st *store.Store) {
+	if st != nil {
+		st.SetProviderContextValidator(func(ctx context.Context, target api.TargetDocument) error {
+			return validateProviderContext(ctx, st, target)
+		})
+	}
+	r.st = st
+}
 
 func (r *Registry) store() (*store.Store, error) {
 	if r.st == nil {
@@ -46,6 +53,11 @@ func (r *Registry) store() (*store.Store, error) {
 	}
 	return r.st, nil
 }
+
+// Store exposes the open database to the hand-written commands, which reach the
+// same tables as the generated ones but are not entity operations. It fails the
+// same way rather than handing back a nil store.
+func (r *Registry) Store() (*store.Store, error) { return r.store() }
 
 // bind adapts a store method to an entity handler, resolving the store at call
 // time. Used with a method expression — bind(r, (*store.Store).ListTargets) —
@@ -127,13 +139,31 @@ func (r *Registry) registerTarget() {
 		GetWithContext(bind(r, (*store.Store).GetTarget)).
 		CreateWithContext(bind(r, createTarget)).
 		UpdateWithContext(bind2(r, updateTarget)).
+		DeleteWithContext(deleteTarget(r)).
 		Filters(r.targetFilters()...).
 		Register()
+}
+
+// deleteTarget removes a target. Like deleteZone it has no result to return, so
+// it does not fit bind.
+func deleteTarget(r *Registry) func(context.Context, string) error {
+	return func(ctx context.Context, host string) error {
+		st, err := r.store()
+		if err != nil {
+			return err
+		}
+		return st.DeleteTarget(ctx, host)
+	}
 }
 
 // createTarget adds a curated target directly. Discovery-created targets enter
 // the same inventory as unclassified records and can be updated in place.
 func createTarget(st *store.Store, ctx context.Context, body map[string]any) (api.TargetDocument, error) {
+	var err error
+	body, err = requestBody(ctx, body)
+	if err != nil {
+		return api.TargetDocument{}, err
+	}
 	target, err := api.TargetFrom(body)
 	if err != nil {
 		return api.TargetDocument{}, err
@@ -141,17 +171,24 @@ func createTarget(st *store.Store, ctx context.Context, body map[string]any) (ap
 	return st.CreateTarget(ctx, target)
 }
 
-// updateTarget applies an edit to the curated fields only.
+// updateTarget applies an atomic edit to curated fields and mutable provider
+// context configuration.
 //
 // The machine-owned sections are not editable through this path at all: they
 // are discovery's output, and letting an edit overwrite them would mean a
 // correction survives exactly until the next sweep.
-func updateTarget(st *store.Store, ctx context.Context, host string, body map[string]any) (api.TargetDocument, error) {
-	curated, err := api.CuratedFrom(body)
+func updateTarget(st *store.Store, ctx context.Context, id string, body map[string]any) (api.TargetDocument, error) {
+	var err error
+	body, err = requestBody(ctx, body)
 	if err != nil {
 		return api.TargetDocument{}, err
 	}
-	return st.UpdateCurated(ctx, host, curated)
+	delete(body, "id")
+	update, err := api.TargetUpdateFrom(body)
+	if err != nil {
+		return api.TargetDocument{}, err
+	}
+	return st.UpdateTarget(ctx, id, update)
 }
 
 func (r *Registry) registerScan() {

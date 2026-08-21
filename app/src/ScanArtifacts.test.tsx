@@ -47,6 +47,31 @@ describe("ScanArtifacts", () => {
     expect(screen.getByText("The engine's own output, one result per line")).toBeInTheDocument();
   });
 
+  it("preserves nested artifact paths while encoding every path segment", async () => {
+    mockFetch(200, {
+      scanId: "scan-1",
+      path: DIR,
+      files: [
+        {
+          name: "prowler/gcp reports/workload #1.html",
+          size: 4096,
+          modified: "2026-08-12T09:31:00Z",
+        },
+      ],
+    });
+
+    render(<ScanArtifacts scanId="scan-1" path={DIR} />);
+
+    expect(
+      await screen.findByRole("link", {
+        name: "prowler/gcp reports/workload #1.html",
+      }),
+    ).toHaveAttribute(
+      "href",
+      "/api/scan/scan-1/files/prowler/gcp%20reports/workload%20%231.html",
+    );
+  });
+
   it("does not ask the server about a run that kept nothing", () => {
     const fetchMock = mockFetch(200, {});
 
@@ -93,6 +118,22 @@ describe("ScanArtifacts", () => {
     expect(
       await screen.findByText(/Full InSpec report for acme-platform-prod/),
     ).toBeInTheDocument();
+  });
+
+  // An artifact run writes one report per target. Its name is escaped, so the
+  // target id is not recoverable from it and the description does not claim to.
+  it("describes a per-target artifact report", async () => {
+    mockFetch(200, {
+      scanId: "scan-1",
+      path: DIR,
+      files: [
+        { name: "trivy-ghcr.io_2facme_2fapi_3a1.4.json", size: 918_000, modified: "2026-08-20T09:41:12Z" },
+      ],
+    });
+
+    render(<ScanArtifacts scanId="scan-1" path={DIR} />);
+
+    expect(await screen.findByText(/Full Trivy report for one target/)).toBeInTheDocument();
   });
 
   it("still lists a file it has no description for", async () => {

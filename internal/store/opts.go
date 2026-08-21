@@ -3,6 +3,8 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,11 @@ import (
 	"github.com/flanksource/recon/internal/api"
 )
 
+var (
+	targetIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
+	providerPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+)
+
 // TargetOpts selects targets. It is the one selector in the system: the same
 // struct is the CLI's flags, the REST query string, the UI's filter bar and —
 // once resolved to endpoints — what a scan runs against. A scan records the
@@ -22,7 +29,9 @@ import (
 // Every list-valued field means "any of", matching how the filter chips read.
 type TargetOpts struct {
 	Selector string   `json:"selector,omitempty" flag:"selector" help:"Kubernetes label selector over target tags"`
-	Kind     []string `json:"kind,omitempty" flag:"kind" help:"Only these target kinds (host, gcp-project)"`
+	IDs      []string `json:"ids,omitempty" flag:"id" help:"Only these stable target IDs"`
+	Kind     []string `json:"kind,omitempty" flag:"kind" help:"Only these target kinds (host, provider-context)"`
+	Provider []string `json:"provider,omitempty" flag:"provider" help:"Only provider contexts for these providers"`
 	Class    []string `json:"class,omitempty" flag:"class" help:"Only these classes (public, prod, non-prod, internal, unclassified, deactivated)"`
 	Tags     []string `json:"tags,omitempty" flag:"tags" help:"Only targets carrying any of these tags; prefix ! to exclude"`
 	Profiles []string `json:"profiles,omitempty" flag:"profiles" help:"Only targets assigned any of these scan profiles"`
@@ -39,7 +48,7 @@ type TargetOpts struct {
 // empty selector targets the whole inventory, which is worth saying out loud
 // before it runs.
 func (o TargetOpts) Empty() bool {
-	return o.Selector == "" && len(o.Kind) == 0 && len(o.Class) == 0 && len(o.Tags) == 0 &&
+	return o.Selector == "" && len(o.IDs) == 0 && len(o.Kind) == 0 && len(o.Provider) == 0 && len(o.Class) == 0 && len(o.Tags) == 0 &&
 		len(o.Profiles) == 0 && len(o.Hosts) == 0 && len(o.Ports) == 0 && len(o.Status) == 0 &&
 		o.LastSeen == "" && !o.Live && len(o.Failure) == 0
 }
@@ -56,7 +65,9 @@ func (o TargetOpts) Describe() string {
 			parts = append(parts, label+" "+strings.Join(values, ","))
 		}
 	}
+	add("ids", o.IDs)
 	add("kind", o.Kind)
+	add("provider", o.Provider)
 	add("class", o.Class)
 	if o.Selector != "" {
 		parts = append(parts, "selector "+o.Selector)
@@ -85,6 +96,16 @@ func (o TargetOpts) Describe() string {
 func (o TargetOpts) Validate() error {
 	if _, err := labels.Parse(o.Selector); err != nil {
 		return fmt.Errorf("invalid selector %q: %w", o.Selector, err)
+	}
+	for _, id := range o.IDs {
+		if _, err := netip.ParseAddr(id); !targetIDPattern.MatchString(id) && err != nil {
+			return fmt.Errorf("invalid target id %q", id)
+		}
+	}
+	for _, provider := range o.Provider {
+		if !providerPattern.MatchString(provider) {
+			return fmt.Errorf("invalid provider %q", provider)
+		}
 	}
 	kinds := map[string]bool{}
 	for _, kind := range api.TargetKinds() {
@@ -178,8 +199,14 @@ func (o TargetOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	if len(o.IDs) > 0 {
+		db = db.Where("id = ANY(?)", pq.StringArray(o.IDs))
+	}
 	if len(o.Kind) > 0 {
 		db = db.Where("kind = ANY(?)", pq.StringArray(o.Kind))
+	}
+	if len(o.Provider) > 0 {
+		db = db.Where("provider = ANY(?)", pq.StringArray(o.Provider))
 	}
 	if len(o.Class) > 0 {
 		db = db.Where("class = ANY(?)", pq.StringArray(o.Class))

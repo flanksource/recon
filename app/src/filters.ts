@@ -7,7 +7,7 @@
 // vocabulary from drifting away from the database's.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FilterBarFilter, FilterBarMultiFilterMode } from "@flanksource/clicky-ui";
+import type { FilterBarFilter, FilterBarMultiFilterMode } from "@flanksource/clicky-ui/components";
 
 import { fetchFilterOptions, fetchFilters } from "./api";
 import type { FilterSelection, FilterVocabulary } from "./types";

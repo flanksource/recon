@@ -226,10 +226,10 @@ type FinalizeScanOptions struct {
 	Output   models.ScanOutput
 	Findings []api.Finding
 
-	// Hosts is what the run covered — the selection it resolved at the start,
-	// not only the hosts that produced findings. Each one's scan.last_scan is
-	// stamped, which is the only thing that writes that field.
-	Hosts []string
+	// TargetIDs is what the run covered — the stable inventory identities it
+	// resolved at the start, not only targets that produced findings. Each one's
+	// scan.last_scan is stamped, which is the only thing that writes that field.
+	TargetIDs []string
 
 	// CountFindings stamps each host's scan.last_findings from this run. False
 	// for a run that cannot produce any: a liveness sweep leaves the count from
@@ -303,14 +303,16 @@ SET scan = COALESCE(t.scan, '{}'::jsonb)
                 THEN jsonb_build_object('last_findings', COALESCE(c.n, 0))
                 ELSE '{}'::jsonb END,
     updated_at = now()
-FROM unnest(CAST(@hosts AS text[])) AS sel(host)
+FROM unnest(CAST(@targets AS text[])) AS sel(id)
 LEFT JOIN (
-    SELECT host, COUNT(*) AS n FROM findings WHERE scan_id = @scan GROUP BY host
-) AS c ON c.host = sel.host
-WHERE t.host = sel.host`
+    SELECT target_id, COUNT(*) AS n FROM findings
+    WHERE scan_id = @scan AND target_id IS NOT NULL AND target_id <> ''
+    GROUP BY target_id
+) AS c ON c.target_id = sel.id
+WHERE t.id = sel.id`
 
 func stampScanned(db *gorm.DB, options FinalizeScanOptions) error {
-	if len(options.Hosts) == 0 {
+	if len(options.TargetIDs) == 0 {
 		return nil
 	}
 
@@ -318,10 +320,10 @@ func stampScanned(db *gorm.DB, options FinalizeScanOptions) error {
 		map[string]any{
 			// RFC3339 because that is what the target schema declares and what
 			// ApplyProbe writes into the sibling observed timestamps.
-			"at":    options.Scan.FinishedAt.Format(time.RFC3339),
-			"count": options.CountFindings,
-			"hosts": stringArray(options.Hosts),
-			"scan":  options.Scan.ID,
+			"at":      options.Scan.FinishedAt.Format(time.RFC3339),
+			"count":   options.CountFindings,
+			"targets": stringArray(options.TargetIDs),
+			"scan":    options.Scan.ID,
 		},
 	).Error
 	if err != nil {
@@ -337,6 +339,9 @@ func saveFindings(db *gorm.DB, scanID string, findings []api.Finding) error {
 
 	rows := make([]models.Finding, 0, len(findings))
 	for i, finding := range findings {
+		if finding.TargetID == "" {
+			finding.TargetID = finding.Host
+		}
 		rows = append(rows, models.FindingFrom(scanID, i+1, finding))
 	}
 	// Batched: a broad scan can produce tens of thousands of findings, and one
@@ -350,6 +355,7 @@ func saveFindings(db *gorm.DB, scanID string, findings []api.Finding) error {
 // FindingOpts selects findings across runs.
 type FindingOpts struct {
 	Scan     []string `flag:"scan" help:"Only findings from these runs (id or name)"`
+	Target   []string `flag:"target" help:"Only findings associated with these stable target IDs"`
 	Severity []string `flag:"severity" help:"Only these severities"`
 	Host     []string `flag:"host" help:"Only these hosts"`
 	Template []string `flag:"template" help:"Only these template ids"`
@@ -366,6 +372,9 @@ func (s *Store) ListFindings(ctx context.Context, opts FindingOpts) ([]api.Findi
 		query = query.Where(
 			"scan_id::text = ANY(?) OR scan_id IN (SELECT id FROM scans WHERE name = ANY(?))",
 			stringArray(opts.Scan), stringArray(opts.Scan))
+	}
+	if len(opts.Target) > 0 {
+		query = query.Where("target_id = ANY(?)", stringArray(opts.Target))
 	}
 	if len(opts.Severity) > 0 {
 		query = query.Where("severity = ANY(?)", stringArray(opts.Severity))

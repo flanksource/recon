@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { Badge, CodeBlock, Properties, Tabs, type TabItem } from "@flanksource/clicky-ui";
+import { Tabs, type TabItem } from "@flanksource/clicky-ui/components";
+import { Badge, CodeBlock, Properties } from "@flanksource/clicky-ui/data";
 import { severityBadge } from "./scanColumns";
 import type { Finding } from "./types";
 
@@ -258,11 +259,43 @@ function complianceEvidence(raw: Record<string, unknown>) {
   ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
 }
 
+// artifactEvidence is what a trivy finding leaves behind.
+//
+// Nothing was sent here either: the evidence is the lines of the file the
+// finding is in, which trivy reports as a Code block on a secret and under
+// CauseMetadata on a misconfiguration. A vulnerability has no such block — the
+// package inventory is the evidence — so its description stands in, which is
+// otherwise only reachable through the raw JSON.
+function artifactEvidence(raw: Record<string, unknown>) {
+  const code = record(raw.Code).Lines ?? record(record(raw.CauseMetadata).Code).Lines;
+  const lines = Array.isArray(code)
+    ? code
+        .map((line) => {
+          const entry = record(line);
+          const number = text(entry.Number);
+          return number ? `${number.padStart(4)}  ${text(entry.Content) ?? ""}` : undefined;
+        })
+        .filter((line): line is string => line !== undefined)
+    : [];
+
+  return [
+    lines.length && { title: "Code", language: "text", source: lines.join("\n") },
+    !lines.length &&
+      text(raw.Description) && {
+        title: "Description",
+        language: "text",
+        source: text(raw.Description) as string,
+      },
+  ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
+}
+
 export function FindingDetail({ finding }: { finding: Finding }) {
   const raw = record(finding.raw);
   const requestLanguage = REQUEST_LANGUAGE[finding.type ?? ""] ?? "http";
   const evidence = finding.type === "inspec"
     ? complianceEvidence(raw)
+    : finding.type === "trivy"
+    ? artifactEvidence(raw)
     : [
         finding.curl && { title: "Reproduce (curl)", language: "bash", source: finding.curl },
         finding.request && { title: "Request", language: requestLanguage, source: finding.request },

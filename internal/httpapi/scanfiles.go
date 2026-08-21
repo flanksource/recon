@@ -41,7 +41,7 @@ func RegisterScanFiles(mux *http.ServeMux, scans ScanReader) {
 		writeJSON(w, api.ScanFiles{ScanID: run.ID, Path: dir, Files: files})
 	})
 
-	mux.HandleFunc("GET /api/scan/{id}/files/{name}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/scan/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request) {
 		dir, _, err := artifactDir(r, scans)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err)

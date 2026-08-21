@@ -12,6 +12,7 @@ package engines
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/flanksource/deps/pkg/types"
 )
@@ -32,6 +33,19 @@ const (
 	// account's configuration through an API has no endpoint to contact, and
 	// handing it one would misrepresent what it scanned.
 	SubjectAccounts Subject = "accounts"
+
+	// SubjectProviderContexts is a provider-defined account or organization
+	// context resolved from the selected profile provider.
+	SubjectProviderContexts Subject = "provider-contexts"
+)
+
+// ProvisioningMode says whether recon can install an engine or must use an
+// executable maintained outside recon.
+type ProvisioningMode string
+
+const (
+	ProvisioningManaged  ProvisioningMode = ""
+	ProvisioningPathOnly ProvisioningMode = "path-only"
 )
 
 // Spec describes an engine: what it is, how to install it, and which options its
@@ -62,13 +76,21 @@ type Spec struct {
 	// and an already-installed copy on PATH is honoured.
 	Install types.Package
 
+	// ProvisioningPathOnly is for prerequisites whose upstream installation is
+	// not representable as a checksum-verified deps package.
+	Provisioning ProvisioningMode
+
+	// InstallInstructions is the exact command shown when a PATH-only
+	// prerequisite is missing, and recommended when its version differs.
+	InstallInstructions string
+
 	// Version is the constraint deps resolves. Recording the resolved version on
 	// each run is what makes a run reproducible.
 	Version string
 
-	// Sections is the ordered option catalog. Order is meaningful: it groups the
-	// options into the form the UI renders, so it is a slice rather than a map.
-	Sections Sections
+	// Options contains the complete profile schemas this engine accepts. A
+	// provider-backed engine selects one variant through its discriminator.
+	Options OptionCatalog
 
 	// Defaults is the profile created for this engine on a blank database. With
 	// no import step, this is where a working configuration comes from.
@@ -100,13 +122,25 @@ func (s Spec) BuiltInProfiles() []DefaultProfile {
 
 // ValidateConfig checks both the option catalog and engine-specific constraints.
 func (s Spec) ValidateConfig(config map[string]any) error {
-	if err := s.Sections.Validate(config); err != nil {
+	if err := s.Options.ValidateConfig(config); err != nil {
 		return err
 	}
 	if s.ValidateOptions != nil {
 		return s.ValidateOptions(config)
 	}
 	return nil
+}
+
+// ValidateContext checks provider-owned target context against the same option
+// variant selected by the profile.
+func (s Spec) ValidateContext(config, context map[string]any) error {
+	return s.Options.ValidateContext(config, context)
+}
+
+// ValidateOverrides ensures run-only changes cannot switch the option variant
+// selected by the stored profile.
+func (s Spec) ValidateOverrides(config, overrides map[string]any) error {
+	return s.Options.ValidateOverrides(config, overrides)
 }
 
 // Validate checks a spec at registration time. These are programming errors: a
@@ -117,7 +151,7 @@ func (s Spec) Validate() error {
 	}
 
 	switch s.Subject {
-	case SubjectEndpoints, SubjectAccounts:
+	case SubjectEndpoints, SubjectAccounts, SubjectProviderContexts:
 	default:
 		return fmt.Errorf("engine %s: unknown subject %q", s.Name, s.Subject)
 	}
@@ -126,21 +160,51 @@ func (s Spec) Validate() error {
 	// not apply to it. Everything below it still does: the option catalog and
 	// the built-in profiles are what a profile is validated against, and those
 	// are the same either way.
+	if s.InProcess && s.Provisioning != ProvisioningManaged {
+		return fmt.Errorf("engine %s: in-process engine cannot use %q provisioning", s.Name, s.Provisioning)
+	}
 	if !s.InProcess {
-		switch {
-		case s.Binary == "":
+		if s.Binary == "" {
 			return fmt.Errorf("engine %s: binary is required", s.Name)
-		case s.Install.Name == "":
-			return fmt.Errorf("engine %s: install package is required", s.Name)
-		case s.Install.Manager == "":
-			return fmt.Errorf("engine %s: install manager is required", s.Name)
 		}
-
-		// Without a version command, `doctor` cannot tell an outdated binary from
-		// a current one, and the run cannot record what it actually used.
 		if s.Install.VersionCommand == "" {
 			return fmt.Errorf("engine %s: install version_command is required", s.Name)
 		}
+		if s.Install.VersionRegex != "" {
+			compiled, err := regexp.Compile(s.Install.VersionRegex)
+			if err != nil {
+				return fmt.Errorf("engine %s: install version_regex: %w", s.Name, err)
+			}
+			if compiled.NumSubexp() == 0 {
+				return fmt.Errorf("engine %s: install version_regex must capture the version", s.Name)
+			}
+		}
+
+		switch s.Provisioning {
+		case ProvisioningManaged:
+			if s.Install.Name == "" {
+				return fmt.Errorf("engine %s: install package is required", s.Name)
+			}
+			if s.Install.Manager == "" {
+				return fmt.Errorf("engine %s: install manager is required", s.Name)
+			}
+		case ProvisioningPathOnly:
+			if s.Version == "" {
+				return fmt.Errorf("engine %s: version is required for PATH-only provisioning", s.Name)
+			}
+			if s.Install.Name != "" || s.Install.Manager != "" {
+				return fmt.Errorf("engine %s: PATH-only provisioning cannot declare a deps package", s.Name)
+			}
+			if s.InstallInstructions == "" {
+				return fmt.Errorf("engine %s: install instructions are required for PATH-only provisioning", s.Name)
+			}
+		default:
+			return fmt.Errorf("engine %s: unknown provisioning mode %q", s.Name, s.Provisioning)
+		}
+	}
+
+	if err := s.Options.Validate(); err != nil {
+		return fmt.Errorf("engine %s: %w", s.Name, err)
 	}
 
 	names := map[string]bool{}

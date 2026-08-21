@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveNucleiProfile, scanInvocation } from "./scan-io.ts";
+import {
+  addressableClasses,
+  resolveNucleiProfile,
+  scanInvocation,
+} from "./scan-io.ts";
 
 const profiles = [
   {
@@ -19,6 +23,18 @@ const profiles = [
 ];
 
 describe("scan invocation", () => {
+  it("indexes only addressable hosts and ignores provider contexts", () => {
+    expect(
+      addressableClasses([
+        {
+          host: "api.example.com",
+          class: "prod",
+        },
+        { class: "prod" },
+      ]),
+    ).toEqual(new Map([["api.example.com", "prod"]]));
+  });
+
   it("uses the combined Naabu and httpx discovery profile for a targeted rescan", () => {
     expect(
       scanInvocation({ profile: "discovery", resultFile: null }),

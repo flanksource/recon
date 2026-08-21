@@ -1,4 +1,4 @@
-import type { DataTableColumn, BadgeStatus } from "@flanksource/clicky-ui";
+import type { DataTableColumn, BadgeStatus } from "@flanksource/clicky-ui/data";
 import type { Finding, Severity } from "./types";
 
 export const SEVERITY_RANK: Record<Severity, number> = {
@@ -95,4 +95,3 @@ export const findingColumns: DataTableColumn<Finding>[] = [
       ) : null,
   },
 ];
-

@@ -11,14 +11,14 @@
 // the contradictory state unreachable.
 
 import { useCallback, useEffect, useState } from "react";
-import { TriStateMultiSelect } from "@flanksource/clicky-ui";
+import { TriStateMultiSelect } from "@flanksource/clicky-ui/components";
 import type {
   FieldControl,
   FilterBarMultiFilterMode,
   JsonSchemaProperty,
   PostExtension,
   PreExtension,
-} from "@flanksource/clicky-ui";
+} from "@flanksource/clicky-ui/components";
 
 import { fetchFilterOptions, fetchFilters } from "./api";
 
@@ -70,7 +70,7 @@ export const PAIRED_KEYS = PAIRS.map((pair) => pair.exclude);
  * excluded field. The schema stays the engine's own — this changes how two of
  * its options are edited, not what the engine accepts.
  */
-export function useProfileFilterPairs(): {
+export function useProfileFilterPairs(enabled = true): {
   pre: PreExtension[];
   post: PostExtension[];
   hiddenKeys: string[];
@@ -78,6 +78,7 @@ export function useProfileFilterPairs(): {
   const [vocabularies, setVocabularies] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     fetchFilters("template")
       .then((loaded) => {
@@ -93,7 +94,7 @@ export function useProfileFilterPairs(): {
     return () => {
       live = false;
     };
-  }, []);
+  }, [enabled]);
 
   const search = useCallback(
     (key: string, query: string) =>
@@ -139,7 +140,9 @@ export function useProfileFilterPairs(): {
     return pair ? { ...field, description: pair.description } : field;
   }, []);
 
-  return { pre: [pre], post: [post], hiddenKeys: PAIRED_KEYS };
+  return enabled
+    ? { pre: [pre], post: [post], hiddenKeys: PAIRED_KEYS }
+    : { pre: [], post: [], hiddenKeys: [] };
 }
 
 /** enumOf reads the values an array-of-enum property allows. */

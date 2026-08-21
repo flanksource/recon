@@ -12,7 +12,24 @@ export type MigrationOptions = {
   inventoryDir: string;
 };
 
-type LegacyTarget = Omit<TargetDocument, "$schema" | "version" | "class" | "observed" | "http" | "tech" | "scan">;
+type LegacyTarget = Omit<
+  TargetDocument,
+  | "$schema"
+  | "version"
+  | "id"
+  | "kind"
+  | "provider"
+  | "credentialMode"
+  | "arguments"
+  | "credentials"
+  | "class"
+  | "observed"
+  | "http"
+  | "tech"
+  | "scan"
+  | "host"
+  | "profiles"
+> & { host: string; profiles: string[] };
 type LegacyInventory = { zones: string[]; targets: Partial<Record<TargetClass, LegacyTarget[]>> };
 type LegacyState = {
   first_observed?: string;
@@ -45,9 +62,11 @@ function targetFromLegacy(
 ): TargetDocument {
   return {
     $schema: "../target.schema.json",
-    version: 1,
+    version: 3,
+    id: target.host,
     ...target,
     class: targetClass,
+    profiles: target.profiles.map((profile) => `scan:nuclei:${profile}`),
     tags: target.tags ?? [],
     observed:
       state?.first_observed || state?.last_seen
@@ -84,7 +103,7 @@ export function migrateLegacyInventory(options: MigrationOptions) {
   writeFileSync(
     resolve(options.inventoryDir, "inventory.json"),
     `${JSON.stringify(
-      { $schema: "./inventory.schema.json", version: 1, zones: [...source.zones].sort() },
+      { $schema: "./inventory.schema.json", version: 3, zones: [...source.zones].sort() },
       null,
       2,
     )}\n`,

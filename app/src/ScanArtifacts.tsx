@@ -27,6 +27,13 @@ const PATTERNS: { match: RegExp; describe: (name: string) => string }[] = [
     describe: (name) =>
       `Full InSpec report for ${name.replace(/^inspec-/, "").replace(/\.json$/, "")}, passes included`,
   },
+  {
+    // trivy-<context>.json — the complete report for one image, repository or
+    // directory: every package it inventoried, not only what it found wrong.
+    // The name is escaped, so it is not the target id verbatim.
+    match: /^trivy-(.+)\.json$/,
+    describe: () => "Full Trivy report for one target, everything it inventoried included",
+  },
 ];
 
 function describe(name: string): string | undefined {

@@ -1,7 +1,7 @@
 schema "public" {
 }
 
-// One row per host. The nine curated fields are typed columns: they are small,
+// One row per inventory target. The curated fields are typed columns: they are small,
 // constrained, and every selector filters on them. The six machine-owned
 // sections are jsonb, because their shape is dictated by whatever the discovery
 // engines emit and changes when those tools release — modelling them as columns
@@ -10,8 +10,15 @@ schema "public" {
 table "targets" {
   schema = schema.public
 
-  column "host" {
+  // Stable inventory identity. A host may keep its address as the id, while a
+  // provider context has no address and is named independently of whichever
+  // accounts or resources its arguments currently select.
+  column "id" {
     null = false
+    type = text
+  }
+  column "host" {
+    null = true
     type = text
   }
   column "class" {
@@ -19,8 +26,8 @@ table "targets" {
     type = text
   }
   // What kind of thing this row addresses. A host is something on the network
-  // with an address and ports; a gcp-project is a cloud account audited through
-  // an API. They share this table because they share everything that makes a
+  // with an address and ports; a provider context is audited through an API.
+  // They share this table because they share everything that makes a
   // target a target — curation, classification, tags, profiles, scan history —
   // and differ only in how a scan reaches them.
   //
@@ -30,6 +37,22 @@ table "targets" {
     null    = false
     type    = text
     default = "host"
+  }
+  column "provider" {
+    null = true
+    type = text
+  }
+  column "credential_mode" {
+    null = true
+    type = text
+  }
+  column "arguments" {
+    null = true
+    type = jsonb
+  }
+  column "credentials" {
+    null = true
+    type = jsonb
   }
   column "app" {
     null = true
@@ -107,7 +130,7 @@ table "targets" {
   }
 
   primary_key {
-    columns = [column.host]
+    columns = [column.id]
   }
 
   // The host pattern from target.schema.json, plus the traversal guard the
@@ -115,7 +138,7 @@ table "targets" {
   // defence: the JSON Schema runs first, but nothing outside this database can
   // be trusted to have run it.
   check "targets_host_format" {
-    expr = "(host ~ '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' OR host ~ '^[0-9a-f:]+$') AND host !~ '[.][.]'"
+    expr = "host IS NULL OR ((host ~ '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' OR host ~ '^[0-9a-f:]+$') AND host !~ '[.][.]')"
   }
   // The allOf if/then pair from the JSON Schema, in its SQL form.
   check "targets_reason_iff_deactivated" {
@@ -124,6 +147,7 @@ table "targets" {
   // cardinality(), not array_length(): array_length('{}', 1) is NULL rather
   // than 0, and a CHECK passes on NULL, so the obvious spelling silently
   // accepts the empty array the schema's minItems forbids.
+  //
   check "targets_profiles_nonempty" {
     expr = "cardinality(profiles) >= 1"
   }
@@ -133,13 +157,28 @@ table "targets" {
   }
   // The kind enum from target.schema.json.
   check "targets_kind" {
-    expr = "kind IN ('host', 'gcp-project')"
+    expr = "kind IN ('host', 'provider-context')"
   }
   // A cloud account has no ports, and a port on one would resolve to an
   // endpoint that does not exist — pointing a network scanner at a project id
   // as though it were a hostname.
   check "targets_cloud_has_no_ports" {
     expr = "kind = 'host' OR ports IS NULL"
+  }
+  check "targets_kind_shape" {
+    expr = "(kind = 'host' AND host IS NOT NULL AND provider IS NULL AND credential_mode IS NULL AND arguments IS NULL AND credentials IS NULL) OR (kind = 'provider-context' AND host IS NULL AND provider IS NOT NULL AND credential_mode IN ('ambient', 'configured') AND arguments IS NOT NULL)"
+  }
+  check "targets_id_format" {
+    expr = "id ~ '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' OR id ~ '^[0-9a-f:]+$'"
+  }
+  check "targets_provider_format" {
+    expr = "provider IS NULL OR provider ~ '^[a-z0-9][a-z0-9-]*$'"
+  }
+
+  index "targets_host_unique_idx" {
+    unique  = true
+    columns = [column.host]
+    where   = "host IS NOT NULL"
   }
 
   index "targets_class_idx" {

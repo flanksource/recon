@@ -90,28 +90,38 @@ func (a Artifacts) Remove() { _ = os.RemoveAll(a.Dir) }
 
 // ListArtifacts reports what a run left in dir.
 //
-// Directories are skipped rather than descended: nothing writes one, and
-// serving a listing that implies otherwise would promise downloads that fail.
+// Names use forward slashes so the API is portable. Symbolic links and other
+// non-regular files are omitted: artifacts are evidence written by the engine,
+// never pointers to unrelated files elsewhere on the host.
 func ListArtifacts(dir string) ([]api.ScanFile, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("read scan artifacts: %w", err)
-	}
-
-	files := make([]api.ScanFile, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	files := []api.ScanFile{}
+	err := filepath.WalkDir(dir, func(filename string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if filename == dir || entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			return nil
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return nil, fmt.Errorf("stat %s: %w", entry.Name(), err)
+			return fmt.Errorf("stat %s: %w", filename, err)
+		}
+		name, err := filepath.Rel(dir, filename)
+		if err != nil {
+			return fmt.Errorf("name scan artifact %s: %w", filename, err)
 		}
 		files = append(files, api.ScanFile{
-			Name:     entry.Name(),
+			Name:     filepath.ToSlash(name),
 			Size:     info.Size(),
 			Modified: info.ModTime().UTC().Format(time.RFC3339),
 		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read scan artifacts: %w", err)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 	return files, nil
@@ -125,7 +135,9 @@ func ListArtifacts(dir string) ([]api.ScanFile, error) {
 // checking that the name is something the run actually wrote removes the
 // question entirely.
 func ResolveArtifact(dir, name string) (string, error) {
-	if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(name)))
+	if name == "" || strings.Contains(name, `\`) || filepath.IsAbs(filepath.FromSlash(name)) ||
+		cleaned != name || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", fmt.Errorf("no such scan artifact: %s", name)
 	}
 	files, err := ListArtifacts(dir)
@@ -134,7 +146,7 @@ func ResolveArtifact(dir, name string) (string, error) {
 	}
 	for _, file := range files {
 		if file.Name == name {
-			return filepath.Join(dir, name), nil
+			return filepath.Join(dir, filepath.FromSlash(name)), nil
 		}
 	}
 	return "", fmt.Errorf("no such scan artifact: %s", name)

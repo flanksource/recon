@@ -13,10 +13,11 @@ import (
 // an engine needs somewhere to connect, and a host with three open ports is
 // three endpoints.
 type Endpoint struct {
-	Host   string `json:"host"`
-	Port   int    `json:"port"`
-	Scheme string `json:"scheme,omitempty"`
-	URL    string `json:"url"`
+	TargetID string `json:"targetId"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Scheme   string `json:"scheme,omitempty"`
+	URL      string `json:"url"`
 
 	// Class is carried through because the intrusive-scan gate is decided per
 	// endpoint, and an unclassified host is treated as risky.
@@ -62,46 +63,51 @@ func (s *Store) Endpoints(ctx context.Context, opts TargetOpts) ([]Endpoint, err
 // remember: asking for accounts and getting hosts back would put hostnames in
 // front of an engine that would try to audit them as projects.
 func (s *Store) Accounts(ctx context.Context, opts TargetOpts) ([]Endpoint, error) {
-	opts.Kind = accountKinds()
-
-	targets, err := s.ListTargets(ctx, opts)
+	contexts, err := s.ProviderContexts(ctx, opts, "gcp")
 	if err != nil {
 		return nil, err
 	}
 
-	accounts := make([]Endpoint, 0, len(targets))
-	for _, target := range targets {
-		accounts = append(accounts, Endpoint{
-			Host:   target.Host,
-			Scheme: schemeOfKind(target.Kind),
-			URL:    schemeOfKind(target.Kind) + "://" + target.Host,
-			Class:  target.Class,
-		})
+	var accounts []Endpoint
+	for _, target := range contexts {
+		projects, err := contextStrings(target.Arguments, "project-ids")
+		if err != nil {
+			return nil, fmt.Errorf("provider context %s: %w", target.ID, err)
+		}
+		for _, project := range projects {
+			accounts = append(accounts, Endpoint{
+				TargetID: target.ID, Host: project,
+				Scheme: "gcp", URL: "gcp://" + project, Class: target.Class,
+			})
+		}
 	}
-
-	// ListTargets already orders by host; sorting again would be redundant.
 	return accounts, nil
 }
 
-// accountKinds lists the kinds that are cloud accounts rather than addresses.
-func accountKinds() []string {
-	var kinds []string
-	for _, kind := range api.TargetKinds() {
-		if !kind.Addressable() {
-			kinds = append(kinds, string(kind))
+func contextStrings(arguments map[string]any, key string) ([]string, error) {
+	value, ok := arguments[key]
+	if !ok {
+		return nil, fmt.Errorf("%s must be a non-empty string array", key)
+	}
+	if values, ok := value.([]string); ok {
+		if len(values) == 0 {
+			return nil, fmt.Errorf("%s must be a non-empty string array", key)
 		}
+		return values, nil
 	}
-	return kinds
-}
-
-// schemeOfKind is the transport scheme an account is reached through — the
-// same vocabulary InSpec's `-t` takes, so the rendered input list is something
-// someone can paste into the tool by hand.
-func schemeOfKind(kind api.TargetKind) string {
-	if kind == api.KindGCPProject {
-		return "gcp"
+	values, ok := value.([]any)
+	if !ok || len(values) == 0 {
+		return nil, fmt.Errorf("%s must be a non-empty string array", key)
 	}
-	return ""
+	out := make([]string, 0, len(values))
+	for _, item := range values {
+		text, ok := item.(string)
+		if !ok || text == "" {
+			return nil, fmt.Errorf("%s must be a non-empty string array", key)
+		}
+		out = append(out, text)
+	}
+	return out, nil
 }
 
 // endpointsOf resolves one target. The known URL wins: it is what actually
@@ -132,7 +138,7 @@ func endpointsOf(target api.TargetDocument, only []int) []Endpoint {
 		if keep(port) {
 			seen[port] = true
 			endpoints = append(endpoints, Endpoint{
-				Host: target.Host, Port: port, Scheme: target.HTTP.Scheme,
+				TargetID: target.ID, Host: target.Host, Port: port, Scheme: target.HTTP.Scheme,
 				URL: target.HTTP.URL, Class: target.Class,
 			})
 		}
@@ -151,7 +157,7 @@ func endpointsOf(target api.TargetDocument, only []int) []Endpoint {
 		seen[port] = true
 		scheme := schemeFor(port)
 		endpoints = append(endpoints, Endpoint{
-			Host: target.Host, Port: port, Scheme: scheme,
+			TargetID: target.ID, Host: target.Host, Port: port, Scheme: scheme,
 			URL: buildURL(scheme, target.Host, port), Class: target.Class,
 		})
 	}

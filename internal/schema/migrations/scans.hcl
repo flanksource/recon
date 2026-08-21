@@ -167,6 +167,11 @@ table "findings" {
     null = false
     type = uuid
   }
+  column "target_id" {
+    null    = true
+    type    = text
+    comment = "selected inventory target; no foreign key so finding history survives target deletion"
+  }
   column "line_no" {
     null    = false
     type    = integer
@@ -256,6 +261,9 @@ table "findings" {
   }
   index "findings_host_idx" {
     columns = [column.host]
+  }
+  index "findings_target_idx" {
+    columns = [column.target_id]
   }
   index "findings_severity_idx" {
     columns = [column.severity]

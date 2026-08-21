@@ -85,9 +85,6 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 	if r.Runtimes.Scans == nil {
 		return api.Scan{}, fmt.Errorf("this build cannot start scans")
 	}
-	if r.Runtimes.Discovery == nil {
-		return api.Scan{}, fmt.Errorf("this build cannot run discovery before scanning")
-	}
 
 	target, err := opts.resolve()
 	if err != nil {
@@ -107,16 +104,15 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 	// actually there. An engine that audits cloud accounts scans nothing that
 	// discovery can find — pointing subfinder and naabu at a project id would
 	// resolve a hostname that does not exist and fail the run before it starts.
-	accountScan, err := scansAccounts(opts.Engine)
+	directSelector, direct, err := directScanSelector(opts.Engine, target)
 	if err != nil {
 		return api.Scan{}, err
 	}
-	if accountScan {
-		selector, err := accountSelector(target)
-		if err != nil {
-			return api.Scan{}, err
-		}
-		return r.startScan(ctx, opts, selector, scanConfig)
+	if direct {
+		return r.startScan(ctx, opts, directSelector, scanConfig)
+	}
+	if r.Runtimes.Discovery == nil {
+		return api.Scan{}, fmt.Errorf("this build cannot run discovery before scanning")
 	}
 
 	// Decoded before the sweep starts: a malformed override should cost nothing,
@@ -185,14 +181,26 @@ func accountSelector(target resolvedTarget) (store.TargetOpts, error) {
 	return store.TargetOpts{Hosts: target.Hosts}, nil
 }
 
-// scansAccounts reports whether an engine's subject is cloud accounts rather
-// than the endpoints a selector resolves to.
-func scansAccounts(name string) (bool, error) {
+// directScanSelector bypasses network discovery for subjects that are already
+// stable inventory records rather than addresses discovery can enumerate.
+func directScanSelector(name string, target resolvedTarget) (store.TargetOpts, bool, error) {
 	engine, err := enginescan.Get(name)
 	if err != nil {
-		return false, err
+		return store.TargetOpts{}, false, err
 	}
-	return engine.Spec().Subject == engines.SubjectAccounts, nil
+	switch engine.Spec().Subject {
+	case engines.SubjectAccounts:
+		selector, err := accountSelector(target)
+		return selector, true, err
+	case engines.SubjectProviderContexts:
+		if target.explicit() {
+			return store.TargetOpts{}, false, fmt.Errorf(
+				"--host, --domain and --cidr name network inputs and cannot name a provider context: use --id or an inventory filter")
+		}
+		return target.Inventory, true, nil
+	default:
+		return store.TargetOpts{}, false, nil
+	}
 }
 
 // defaultProfile fills in the engine's own default when none was named.

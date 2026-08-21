@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/flanksource/recon/internal/api"
+	credentialstore "github.com/flanksource/recon/internal/credentials"
 )
 
 // Target is one row of the targets table.
@@ -16,12 +17,17 @@ import (
 // discovery engines emit, and flattening them into columns would both lose the
 // absent-vs-empty distinction and make an engine upgrade a schema migration.
 type Target struct {
-	Host    string  `gorm:"column:host;primaryKey"`
-	Kind    string  `gorm:"column:kind"`
-	Class   string  `gorm:"column:class"`
-	App     *string `gorm:"column:app"`
-	Cluster *string `gorm:"column:cluster"`
-	Source  *string `gorm:"column:source"`
+	ID             string                                    `gorm:"column:id;primaryKey"`
+	Host           *string                                   `gorm:"column:host"`
+	Kind           string                                    `gorm:"column:kind"`
+	Provider       *string                                   `gorm:"column:provider"`
+	CredentialMode *string                                   `gorm:"column:credential_mode"`
+	Arguments      JSON[map[string]any]                      `gorm:"column:arguments;type:jsonb"`
+	Credentials    JSON[credentialstore.ProviderCredentials] `gorm:"column:credentials;type:jsonb"`
+	Class          string                                    `gorm:"column:class"`
+	App            *string                                   `gorm:"column:app"`
+	Cluster        *string                                   `gorm:"column:cluster"`
+	Source         *string                                   `gorm:"column:source"`
 
 	Profiles pq.StringArray `gorm:"column:profiles;type:text[]"`
 	Ports    pq.Int64Array  `gorm:"column:ports;type:integer[]"`
@@ -53,6 +59,9 @@ func (Target) TableName() string { return "targets" }
 // written before cloud accounts existed.
 func (t *Target) BeforeSave(*gorm.DB) error {
 	t.Kind = api.TargetKind(t.Kind).String()
+	if t.ID == "" && t.Host != nil {
+		t.ID = *t.Host
+	}
 	return nil
 }
 
@@ -63,52 +72,68 @@ func (t Target) Document() api.TargetDocument {
 	return api.TargetDocument{
 		Schema:  api.TargetSchemaRef,
 		Version: api.TargetVersion,
-		Host:    t.Host,
-		// A host document stays byte-identical to what it was before cloud
-		// accounts existed, which is what keeps the golden fixtures comparing
-		// equal without rewriting all 207 of them.
-		Kind:     kindOf(t.Kind),
-		Class:    api.Class(t.Class),
-		App:      deref(t.App),
-		Cluster:  deref(t.Cluster),
-		Source:   deref(t.Source),
-		Profiles: stringSlice(t.Profiles),
-		Ports:    ints(t.Ports),
-		Tags:     stringSlice(t.Tags),
-		Notes:    deref(t.Notes),
-		Reason:   deref(t.Reason),
-		Observed: t.Observed.V,
-		Network:  t.Network.V,
-		HTTP:     t.HTTP.V,
-		Tech:     t.Tech.V,
-		TLS:      t.TLS.V,
-		Scan:     t.Scan.V,
+		ID:      t.ID,
+		Host:    deref(t.Host),
+		// Host is the schema default and remains absent on the wire.
+		Kind:           kindOf(t.Kind),
+		Provider:       deref(t.Provider),
+		CredentialMode: api.CredentialMode(deref(t.CredentialMode)),
+		Arguments:      t.Arguments.Get(),
+		Credentials:    api.ProviderCredentialsFromStored(t.Credentials.V),
+		Class:          api.Class(t.Class),
+		App:            deref(t.App),
+		Cluster:        deref(t.Cluster),
+		Source:         deref(t.Source),
+		Profiles:       stringSlice(t.Profiles),
+		Ports:          ints(t.Ports),
+		Tags:           stringSlice(t.Tags),
+		Notes:          deref(t.Notes),
+		Reason:         deref(t.Reason),
+		Observed:       t.Observed.V,
+		Network:        t.Network.V,
+		HTTP:           t.HTTP.V,
+		Tech:           t.Tech.V,
+		TLS:            t.TLS.V,
+		Scan:           t.Scan.V,
 	}
 }
 
 // TargetFromDocument builds a row from a full document — the import path, where
 // the machine-owned sections arrive alongside the curated ones.
 func TargetFromDocument(document api.TargetDocument) Target {
+	arguments := JSON[map[string]any]{}
+	if document.Arguments != nil {
+		arguments = Wrap(&document.Arguments)
+	}
+	credentials := JSON[credentialstore.ProviderCredentials]{}
+	if document.Credentials != nil {
+		stored := document.Credentials.Stored()
+		credentials = Wrap(&stored)
+	}
 	return Target{
-		Host: document.Host,
+		ID: document.GetID(), Host: ref(document.Host),
 		// String() resolves the absent-means-host default, because the column is
 		// NOT NULL and an empty string is not one of the values it permits.
-		Kind:     document.Kind.String(),
-		Class:    string(document.Class),
-		App:      ref(document.App),
-		Cluster:  ref(document.Cluster),
-		Source:   ref(document.Source),
-		Profiles: pq.StringArray(document.Profiles),
-		Ports:    int64s(document.Ports),
-		Tags:     pq.StringArray(orEmpty(document.Tags)),
-		Notes:    ref(document.Notes),
-		Reason:   ref(document.Reason),
-		Observed: Wrap(document.Observed),
-		Network:  Wrap(document.Network),
-		HTTP:     Wrap(document.HTTP),
-		Tech:     Wrap(document.Tech),
-		TLS:      Wrap(document.TLS),
-		Scan:     Wrap(document.Scan),
+		Kind:           document.Kind.String(),
+		Provider:       ref(document.Provider),
+		CredentialMode: ref(string(document.CredentialMode)),
+		Arguments:      arguments,
+		Credentials:    credentials,
+		Class:          string(document.Class),
+		App:            ref(document.App),
+		Cluster:        ref(document.Cluster),
+		Source:         ref(document.Source),
+		Profiles:       pq.StringArray(document.Profiles),
+		Ports:          int64s(document.Ports),
+		Tags:           pq.StringArray(orEmpty(document.Tags)),
+		Notes:          ref(document.Notes),
+		Reason:         ref(document.Reason),
+		Observed:       Wrap(document.Observed),
+		Network:        Wrap(document.Network),
+		HTTP:           Wrap(document.HTTP),
+		Tech:           Wrap(document.Tech),
+		TLS:            Wrap(document.TLS),
+		Scan:           Wrap(document.Scan),
 	}
 }
 

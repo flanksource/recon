@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 )
 
 // Sections is an engine's option catalog, grouped for display.
@@ -87,142 +85,79 @@ func writeJSONString(buffer *bytes.Buffer, value string) {
 	buffer.Write(encoded)
 }
 
-// Lookup finds an option across every section.
-func (s Sections) Lookup(key string) (Property, bool) {
-	for _, section := range s {
+// SchemaFromSections renders one ordered form catalog as a complete JSON
+// Schema, preserving the declaration order the form layout depends on.
+//
+// Separate from OptionsFromSections because an engine whose configuration
+// varies by provider needs one of these per variant, and building each variant
+// from the same Section/Field vocabulary is what keeps a hand-written catalog
+// and a generated one describing options the same way.
+func SchemaFromSections(sections Sections) JSONSchema {
+	properties := JSONSchema{}
+	order := make([]string, 0)
+	layout := make([]OptionSection, 0, len(sections))
+	for _, section := range sections {
+		layout = append(layout, OptionSection{
+			ID: section.ID, Title: section.Title, Description: section.Description, SourceURL: section.SourceURL,
+		})
 		for _, field := range section.Properties {
-			if field.Key == key {
-				return field.Property, true
-			}
+			properties[field.Key] = field.Property.jsonSchema(section.ID)
+			order = append(order, field.Key)
 		}
 	}
-	return Property{}, false
+	return JSONSchema{
+		"$schema":              "https://json-schema.org/draft/2020-12/schema",
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           properties,
+		"x-order":              order,
+		"x-sections":           layout,
+	}
 }
 
-// Keys lists every option this engine accepts, sorted.
-func (s Sections) Keys() []string {
-	var keys []string
-	for _, section := range s {
-		for _, field := range section.Properties {
-			keys = append(keys, field.Key)
-		}
-	}
-	sort.Strings(keys)
-	return keys
+// OptionsFromSections turns the original ordered form catalog into the same
+// full JSON Schema contract used by provider-backed engines.
+func OptionsFromSections(sections Sections) OptionCatalog {
+	return OptionCatalog{Variants: []OptionVariant{{
+		ID: "default", Title: "Options", Schema: SchemaFromSections(sections),
+	}}}
 }
 
-// Validate checks a profile against the catalog. An unknown option is an error
-// rather than a warning: it is nearly always a typo, and silently dropping it
-// would mean a profile that does not do what it says.
-func (s Sections) Validate(config map[string]any) error {
-	keys := make([]string, 0, len(config))
-	for key := range config {
-		keys = append(keys, key)
+func (p Property) jsonSchema(section string) JSONSchema {
+	schema := JSONSchema{"x-section": section}
+	if p.Type != "" {
+		schema["type"] = []string{p.Type, "null"}
 	}
-	sort.Strings(keys) // deterministic message ordering
-
-	var problems []string
-	for _, key := range keys {
-		property, known := s.Lookup(key)
-		if !known {
-			problems = append(problems, fmt.Sprintf("unsupported option: %s", key))
-			continue
-		}
-		if err := property.validate(key, config[key]); err != nil {
-			problems = append(problems, err.Error())
-		}
+	if p.Title != "" {
+		schema["title"] = p.Title
 	}
-
-	if len(problems) > 0 {
-		return fmt.Errorf("%s", strings.Join(problems, "; "))
+	if p.Description != "" {
+		schema["description"] = p.Description
 	}
-	return nil
-}
-
-// validate checks one value.
-func (p Property) validate(key string, value any) error {
-	if value == nil {
-		return nil // an explicit null clears the option
-	}
-
-	// An enum constrains the value regardless of declared type.
 	if len(p.Enum) > 0 {
-		text, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("invalid value for %s: expected one of %s", key, strings.Join(p.Enum, ", "))
+		values := make([]any, 0, len(p.Enum)+1)
+		for _, value := range p.Enum {
+			values = append(values, value)
 		}
-		for _, allowed := range p.Enum {
-			if text == allowed {
-				return nil
-			}
-		}
-		return fmt.Errorf("invalid value for %s: expected one of %s", key, strings.Join(p.Enum, ", "))
+		schema["enum"] = append(values, nil)
 	}
-
-	switch p.Type {
-	case "boolean":
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("invalid value for %s: expected boolean", key)
-		}
-	case "string":
-		if _, ok := value.(string); !ok {
-			return fmt.Errorf("invalid value for %s: expected string", key)
-		}
-	case "integer", "number":
-		number, ok := asNumber(value)
-		if !ok {
-			return fmt.Errorf("invalid value for %s: expected %s", key, p.Type)
-		}
-		// YAML decodes an integer as int and JSON as float64, so accept a float
-		// with no fractional part where an integer is required.
-		if p.Type == "integer" && number != float64(int64(number)) {
-			return fmt.Errorf("invalid value for %s: expected integer", key)
-		}
-		if p.Minimum != nil && number < *p.Minimum {
-			return fmt.Errorf("invalid value for %s: minimum is %v", key, *p.Minimum)
-		}
-		if p.Maximum != nil && number > *p.Maximum {
-			return fmt.Errorf("invalid value for %s: maximum is %v", key, *p.Maximum)
-		}
-	case "array":
-		items, ok := value.([]any)
-		if !ok {
-			return fmt.Errorf("invalid value for %s: expected array", key)
-		}
-		if p.Items == nil {
-			return nil
-		}
-		for i, item := range items {
-			if err := p.Items.validate(fmt.Sprintf("%s[%d]", key, i), item); err != nil {
-				return err
-			}
-		}
+	if p.Items != nil {
+		schema["items"] = p.Items.jsonSchema("")
+		delete(schema["items"].(JSONSchema), "x-section")
 	}
-	return nil
-}
-
-// asNumber accepts every numeric shape a YAML or JSON decoder can produce.
-func asNumber(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case int:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case uint:
-		return float64(typed), true
-	case uint64:
-		return float64(typed), true
-	case json.Number:
-		parsed, err := typed.Float64()
-		return parsed, err == nil
+	if p.MultipleOf != nil {
+		schema["multipleOf"] = *p.MultipleOf
 	}
-	return 0, false
+	if p.Minimum != nil {
+		schema["minimum"] = *p.Minimum
+	}
+	if p.Maximum != nil {
+		schema["maximum"] = *p.Maximum
+	}
+	if p.ArrayDisplay != "" {
+		schema["x-array-display"] = p.ArrayDisplay
+	}
+	return schema
 }
 
 // ---------------------------------------------------------------- builders
@@ -265,6 +200,18 @@ func StrList(key, title, description string) Field {
 	return Field{Key: key, Property: Property{
 		Type: "array", Title: title, Description: description,
 		Items:        &Property{Type: "string"},
+		ArrayDisplay: "filter-pills",
+	}}
+}
+
+// EnumList declares a list option whose elements come from a fixed set — the
+// shape a tool's comma-separated `--scanners`-style flag takes. Enum rather
+// than StrList so a misspelled element is refused when the profile is saved
+// rather than by the engine, minutes into a run.
+func EnumList(key, title, description string, values ...string) Field {
+	return Field{Key: key, Property: Property{
+		Type: "array", Title: title, Description: description,
+		Items:        &Property{Type: "string", Enum: values},
 		ArrayDisplay: "filter-pills",
 	}}
 }

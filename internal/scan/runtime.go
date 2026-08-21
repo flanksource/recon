@@ -19,6 +19,7 @@ import (
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
 	"github.com/flanksource/recon/internal/models"
+	"github.com/flanksource/recon/internal/runtimecontext"
 	"github.com/flanksource/recon/internal/store"
 )
 
@@ -54,11 +55,12 @@ type Publisher interface {
 // the last result until the next one starts, so discarding it on exit would
 // blank the panel the moment a scan finished.
 type Runtime struct {
-	Store       *store.Store
-	Provisioner *engines.Provisioner
-	Publisher   Publisher
-	Root        string
-	Concurrency int
+	Store          *store.Store
+	Provisioner    *engines.Provisioner
+	ContextFactory runtimecontext.Factory
+	Publisher      Publisher
+	Root           string
+	Concurrency    int
 
 	mu      sync.Mutex
 	current *Run
@@ -77,11 +79,10 @@ type Run struct {
 	queueDone func()
 	row       models.Scan
 
-	// covered is the hosts the selector resolved to, deduplicated: several
-	// endpoints of one host are one host here. Distinct from Scan.Hosts, which
-	// is the hosts the engine found something on — this is what the run set out
-	// to cover, and so what gets stamped as scanned.
-	covered []string
+	// targetIDs are the stable inventory subjects the selector resolved,
+	// deduplicated. Distinct from Scan.Hosts, which are provider or network
+	// identities found in the evidence.
+	targetIDs []string
 
 	// done closes when the run reaches a terminal phase. Wait blocks on it.
 	done     chan struct{}
@@ -222,6 +223,9 @@ func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) 
 	if r.Provisioner == nil {
 		return api.Scan{}, fmt.Errorf("scan runtime has no provisioner: it was not wired up")
 	}
+	if r.ContextFactory == nil {
+		return api.Scan{}, fmt.Errorf("scan runtime has no execution context: it was not wired up")
+	}
 	if r.queue == nil {
 		concurrency := r.Concurrency
 		if concurrency == 0 {
@@ -245,55 +249,20 @@ func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) 
 		return api.Scan{}, err
 	}
 
-	endpoints, err := r.subjects(ctx, spec, request.Selector)
+	subjects, err := r.subjects(ctx, spec, config, request.Selector)
 	if err != nil {
 		return api.Scan{}, err
 	}
 
 	if risk := engine.Risk(config); risk.Intrusive && !request.Confirmed {
-		if risky := store.Risky(endpoints); len(risky) > 0 {
+		if risky := store.Risky(subjects.riskTargets()); len(risky) > 0 {
 			return api.Scan{}, fmt.Errorf(
 				"refusing an %s against %d host(s) that are production, public or unclassified (%s): re-run with confirmation",
 				risk, len(risky), summarise(store.Hosts(risky)))
 		}
 	}
 
-	return r.enqueue(ctx, engine, config, endpoints, request)
-}
-
-// subjects resolves the selector to whatever this engine scans.
-//
-// An engine that audits cloud accounts and one that probes services want
-// different things from the same selector, and neither can use the other's: a
-// project id is not an address, and an endpoint is not an account. The empty
-// case is an error for both — a run against nothing reports no findings, which
-// reads exactly like a clean scan.
-func (r *Runtime) subjects(
-	ctx context.Context,
-	spec engines.Spec,
-	selector store.TargetOpts,
-) ([]store.Endpoint, error) {
-	if spec.Subject == engines.SubjectAccounts {
-		accounts, err := r.Store.Accounts(ctx, selector)
-		if err != nil {
-			return nil, err
-		}
-		if len(accounts) == 0 {
-			return nil, fmt.Errorf(
-				"no cloud accounts match %s: nothing to scan", selector.Describe())
-		}
-		return accounts, nil
-	}
-
-	endpoints, err := r.Store.Endpoints(ctx, selector)
-	if err != nil {
-		return nil, err
-	}
-	if len(endpoints) == 0 {
-		return nil, fmt.Errorf(
-			"no endpoints match %s: nothing to scan", selector.Describe())
-	}
-	return endpoints, nil
+	return r.enqueue(ctx, engine, config, subjects, request)
 }
 
 // resolveConfig layers the run-only overrides over the stored profile and
@@ -303,6 +272,9 @@ func (r *Runtime) resolveConfig(ctx context.Context, spec engines.Spec, request 
 	profile, err := r.Store.GetProfile(ctx, "scan:"+spec.Name+":"+request.Profile)
 	if err != nil {
 		return nil, err
+	}
+	if err := spec.ValidateOverrides(profile.Config, request.Overrides); err != nil {
+		return nil, fmt.Errorf("scan configuration: %w", err)
 	}
 
 	config := map[string]any{}
@@ -323,7 +295,7 @@ func (r *Runtime) enqueue(
 	ctx context.Context,
 	engine enginescan.Engine,
 	config map[string]any,
-	endpoints []store.Endpoint,
+	subjects resolvedSubjects,
 	request Request,
 ) (api.Scan, error) {
 	spec := engine.Spec()
@@ -339,7 +311,7 @@ func (r *Runtime) enqueue(
 		Engine:        spec.Name,
 		Profile:       request.Profile,
 		Selector:      models.Wrap(selector),
-		EndpointCount: len(endpoints),
+		EndpointCount: subjects.count(),
 		Phase:         string(api.PhaseQueued),
 		StartedAt:     queuedAt,
 	})
@@ -352,11 +324,7 @@ func (r *Runtime) enqueue(
 		return api.Scan{}, r.failQueuedScan(ctx, row, err)
 	}
 
-	targets := make([]string, 0, len(endpoints))
-	for _, endpoint := range endpoints {
-		targets = append(targets, endpoint.URL)
-	}
-	in, err := engines.WriteList(artifacts.Dir, TargetsFile, targets)
+	in, err := writeSubjects(artifacts.Dir, subjects)
 	if err != nil {
 		artifacts.Remove()
 		return api.Scan{}, r.failQueuedScan(ctx, row, err)
@@ -379,7 +347,10 @@ func (r *Runtime) enqueue(
 	}
 
 	out := artifacts.Path(FindingsFile)
-	engineRun := engines.Run{Bin: bin, WorkDir: artifacts.Dir, Config: config, In: in, Out: out}
+	engineRun := engines.Run{
+		Bin: bin, WorkDir: artifacts.Dir, Config: config, In: in, Out: out,
+		ProviderContexts: engineProviderContexts(subjects.ProviderContexts),
+	}
 	output := NewOutput()
 	current := newSession(output, spec.Name, commandOf(engine, engineRun))
 
@@ -389,7 +360,7 @@ func (r *Runtime) enqueue(
 		artifacts: artifacts,
 		session:   current,
 		row:       row,
-		covered:   coveredHosts(endpoints),
+		targetIDs: subjects.targetIDs(),
 		done:      make(chan struct{}),
 	}
 	run.Scan.Command = current.Command
@@ -476,6 +447,7 @@ func (r *Runtime) execute(
 	r.publish()
 	r.mu.Unlock()
 
+	engineRun.Context = r.ContextFactory(ctx)
 	r.supervise(ctx, scanTask, run, engine, run.row, engineRun)
 
 	r.mu.Lock()

@@ -22,7 +22,7 @@ import (
 type TemplateOpts struct {
 	Engine   []string `json:"engine,omitempty" flag:"engine" help:"Only templates for these scan engines"`
 	Severity []string `json:"severity,omitempty" flag:"severity" help:"Only templates of these severities"`
-	Type     []string `json:"type,omitempty" flag:"type" help:"Only templates using these protocols; prefix ! to exclude"`
+	Type     []string `json:"type,omitempty" flag:"type" help:"Only catalogue items in these service or protocol families; prefix ! to exclude"`
 	Tag      []string `json:"tag,omitempty" flag:"tag" help:"Only templates carrying these tags; prefix ! to exclude"`
 	Author   []string `json:"author,omitempty" flag:"author" help:"Only templates by these authors"`
 

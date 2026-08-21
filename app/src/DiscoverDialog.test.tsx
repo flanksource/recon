@@ -32,14 +32,32 @@ function engine(name: string, title: string, byDefault = true): Engine {
     // What the server reports for the engines a sweep runs on its own, which
     // is what the picker opens on.
     default: byDefault,
-    sections: [
-      {
-        id: "general",
-        title: "General",
-        description: `${title} options`,
-        properties: { rate: { type: "integer", title: "Rate" } },
-      },
-    ],
+    options: {
+      variants: [
+        {
+          id: "default",
+          title,
+          schema: {
+            type: "object",
+            "x-sections": [
+              {
+                id: "general",
+                title: "General",
+                description: `${title} options`,
+              },
+            ],
+            "x-order": ["rate"],
+            properties: {
+              rate: {
+                type: "integer",
+                title: "Rate",
+                "x-section": "general",
+              },
+            },
+          },
+        },
+      ],
+    },
   } as unknown as Engine;
 }
 

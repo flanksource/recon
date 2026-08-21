@@ -58,7 +58,7 @@ var _ = Describe("the engine registries", func() {
 		for _, spec := range scan.Specs() {
 			scanNames = append(scanNames, spec.Name)
 		}
-		Expect(scanNames).To(Equal([]string{"inspec", "nuclei"}))
+		Expect(scanNames).To(Equal([]string{"inspec", "nuclei", "prowler", "trivy"}))
 	})
 
 	// Register panics on a malformed spec, so reaching this point already proves
@@ -73,6 +73,15 @@ var _ = Describe("the engine registries", func() {
 				By(spec.Name + " (in-process)")
 				Expect(spec.Install.Name).To(BeEmpty(),
 					"install metadata for an engine that is never installed")
+				continue
+			}
+			if spec.Provisioning == engines.ProvisioningPathOnly {
+				By(spec.Name + " (PATH-only)")
+				Expect(spec.Install.Name).To(BeEmpty())
+				Expect(spec.Install.Manager).To(BeEmpty())
+				Expect(spec.Install.VersionCommand).ToNot(BeEmpty())
+				Expect(spec.Version).ToNot(BeEmpty())
+				Expect(spec.InstallInstructions).ToNot(BeEmpty())
 				continue
 			}
 
@@ -99,6 +108,13 @@ var _ = Describe("the engine registries", func() {
 			}
 			Expect(spec.Install.ChecksumFile).ToNot(BeEmpty(),
 				"a download with no checksum is not verifiable")
+
+			// A URL template bypasses the asset name, and with it the entry in
+			// the checksums file that is looked up by that name. Trivy's own
+			// installer redirector does exactly this, and resolves with no
+			// checksum at all.
+			Expect(spec.Install.URLTemplate).To(BeEmpty(),
+				"%s must name its release asset so its checksum can be found", spec.Name)
 		}
 	})
 
@@ -108,7 +124,7 @@ var _ = Describe("the engine registries", func() {
 		// be possible, so this states the requirement once rather than leaving
 		// it implied by each manager's own metadata.
 		for _, spec := range allSpecs() {
-			if spec.InProcess {
+			if spec.InProcess || spec.Provisioning == engines.ProvisioningPathOnly {
 				continue
 			}
 			By(spec.Name)
@@ -167,6 +183,33 @@ var _ = Describe("the engine registries", func() {
 		}
 	})
 
+	It("gives every provider exactly one engine that can scan it", func() {
+		// A provider-context target names a provider, and the engine follows
+		// from it. Two engines claiming one provider is a target nothing can
+		// validate or run — prowler already owns image, kubernetes and iac, so
+		// a new engine has to name its providers around them.
+		claimed := map[string]string{}
+		for _, engine := range scan.All() {
+			options := engine.Spec().Options
+			if options.Discriminator != "provider" {
+				continue
+			}
+			for _, variant := range options.Variants {
+				if variant.ContextSchema == nil {
+					continue
+				}
+				Expect(claimed).ToNot(HaveKey(variant.ID),
+					"%s and %s both claim provider %s", claimed[variant.ID], engine.Spec().Name, variant.ID)
+				claimed[variant.ID] = engine.Spec().Name
+
+				resolved, err := scan.ForProvider(variant.ID)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(resolved.Spec().Name).To(Equal(engine.Spec().Name))
+			}
+		}
+		Expect(claimed).ToNot(BeEmpty())
+	})
+
 	It("chains: every discovery engine's input can be supplied by something", func() {
 		// A stage is fed by an earlier engine, by the inventory, or by whatever
 		// seeds the chain. Zones and hosts are the two seeds the runner supports:
@@ -222,9 +265,23 @@ var _ = Describe("the generated option catalogs", func() {
 			spec, ok := byName[name]
 			Expect(ok).To(BeTrue(), "no engine registered for catalog %s", name)
 
-			got, err := json.Marshal(spec.Sections)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(got).To(MatchJSON(want), "catalog for %s drifted from the source", name)
+			var sections []struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			Expect(json.Unmarshal(want, &sections)).To(Succeed())
+			Expect(spec.Options.Variants).To(HaveLen(1))
+			properties, ok := spec.Options.Variants[0].Schema["properties"].(engines.JSONSchema)
+			Expect(ok).To(BeTrue(), "catalog for %s has no schema properties", name)
+			for _, section := range sections {
+				for key, rawProperty := range section.Properties {
+					var expectedProperty any
+					Expect(json.Unmarshal(rawProperty, &expectedProperty)).To(Succeed())
+					actualProperty, ok := properties[key].(engines.JSONSchema)
+					Expect(ok).To(BeTrue(), "catalog for %s has no option %s", name, key)
+					Expect(normalizeGeneratedProperty(actualProperty)).To(Equal(expectedProperty),
+						"catalog for %s option %s drifted from the source", name, key)
+				}
+			}
 		}
 	})
 
@@ -232,47 +289,64 @@ var _ = Describe("the generated option catalogs", func() {
 		// A map would randomise this and encoding/json would sort it
 		// alphabetically; either scrambles a form whose grouping is deliberate.
 		spec := mustFind("naabu")
-		Expect(spec.Sections[0].Properties[0].Key).To(Equal("port"))
-		Expect(spec.Sections[0].Properties[1].Key).To(Equal("top-ports"))
-
-		encoded, err := json.Marshal(spec.Sections[0])
-		Expect(err).ToNot(HaveOccurred())
-		Expect(string(encoded)).To(MatchRegexp(`"properties":\{"port":.*"top-ports":`))
+		order, ok := spec.Options.Variants[0].Schema["x-order"].([]string)
+		Expect(ok).To(BeTrue())
+		Expect(len(order)).To(BeNumerically(">", 2))
+		Expect(order[:2]).To(Equal([]string{"port", "top-ports"}))
 	})
 })
 
 var _ = Describe("profile validation", func() {
 	It("rejects an unknown option", func() {
-		err := mustFind("naabu").Sections.Validate(map[string]any{"nope": 1})
-		Expect(err).To(MatchError(ContainSubstring("unsupported option: nope")))
+		err := mustFind("naabu").ValidateConfig(map[string]any{"nope": 1})
+		Expect(err).To(MatchError(ContainSubstring("nope")))
 	})
 
 	It("rejects a value outside an enum", func() {
-		err := mustFind("naabu").Sections.Validate(map[string]any{"top-ports": "9999"})
-		Expect(err).To(MatchError(ContainSubstring("expected one of")))
+		err := mustFind("naabu").ValidateConfig(map[string]any{"top-ports": "9999"})
+		Expect(err).To(MatchError(ContainSubstring("top-ports")))
 	})
 
 	It("rejects a value below a minimum", func() {
-		err := mustFind("naabu").Sections.Validate(map[string]any{"rate": 0})
+		err := mustFind("naabu").ValidateConfig(map[string]any{"rate": 0})
 		Expect(err).To(MatchError(ContainSubstring("minimum")))
 	})
 
 	It("rejects a wrongly typed value", func() {
-		err := mustFind("naabu").Sections.Validate(map[string]any{"exclude-cdn": "yes"})
-		Expect(err).To(MatchError(ContainSubstring("expected boolean")))
+		err := mustFind("naabu").ValidateConfig(map[string]any{"exclude-cdn": "yes"})
+		Expect(err).To(MatchError(ContainSubstring("boolean")))
 	})
 
 	It("accepts a float with no fractional part where an integer is required", func() {
 		// YAML decodes 250 as an int and JSON as a float64; both have to work.
-		Expect(mustFind("naabu").Sections.Validate(map[string]any{"rate": float64(250)})).To(Succeed())
+		Expect(mustFind("naabu").ValidateConfig(map[string]any{"rate": float64(250)})).To(Succeed())
 	})
 
 	It("reports every problem at once rather than the first", func() {
-		err := mustFind("naabu").Sections.Validate(map[string]any{"nope": 1, "alsonope": 2})
+		err := mustFind("naabu").ValidateConfig(map[string]any{"nope": 1, "alsonope": 2})
 		Expect(err).To(MatchError(ContainSubstring("alsonope")))
 		Expect(err).To(MatchError(ContainSubstring("nope")))
 	})
 })
+
+func normalizeGeneratedProperty(property engines.JSONSchema) map[string]any {
+	encoded, err := json.Marshal(property)
+	Expect(err).ToNot(HaveOccurred())
+	var normalized map[string]any
+	Expect(json.Unmarshal(encoded, &normalized)).To(Succeed())
+	delete(normalized, "x-section")
+
+	if types, ok := normalized["type"].([]any); ok && len(types) == 2 && types[1] == "null" {
+		normalized["type"] = types[0]
+	}
+	if values, ok := normalized["enum"].([]any); ok && len(values) > 0 && values[len(values)-1] == nil {
+		normalized["enum"] = values[:len(values)-1]
+	}
+	if items, ok := normalized["items"].(map[string]any); ok {
+		normalized["items"] = normalizeGeneratedProperty(engines.JSONSchema(items))
+	}
+	return normalized
+}
 
 var _ = Describe("command lines", func() {
 	It("renders booleans as bare flags and omits false ones", func() {

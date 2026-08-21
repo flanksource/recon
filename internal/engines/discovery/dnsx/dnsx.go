@@ -68,7 +68,7 @@ func (Engine) Spec() engines.Spec {
 		DocsURL:     "https://github.com/projectdiscovery/dnsx",
 		Install:     engines.ProjectDiscovery("dnsx"),
 		Version:     ">=1.3.0",
-		Sections:    catalog,
+		Options:     engines.OptionsFromSections(catalog),
 		Defaults: engines.DefaultProfile{
 			Name: "default",
 			Comment: "Resolution plus the records that point at other infrastructure.\n" +

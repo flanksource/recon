@@ -54,6 +54,10 @@ type Finding struct {
 	// from where it appeared.
 	ScanID string `json:"scanId,omitempty"`
 	LineNo int    `json:"lineNo,omitempty"`
+	// TargetID links the provider-reported account or resource back to the
+	// inventory context selected for the run. Host remains the provider's own
+	// identity from the finding evidence.
+	TargetID string `json:"targetId,omitempty"`
 
 	TemplateID  string   `json:"templateId"`
 	Name        string   `json:"name"`

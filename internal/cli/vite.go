@@ -128,8 +128,11 @@ func freePort() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("find a free port for vite: %w", err)
 	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port, nil
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		return 0, fmt.Errorf("release vite port %d: %w", port, err)
+	}
+	return port, nil
 }
 
 func waitForVite(ctx context.Context, target *url.URL) error {

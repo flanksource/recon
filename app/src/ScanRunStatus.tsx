@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type RefObject } from "react";
-import { AnsiHtml, Button, ProgressBar } from "@flanksource/clicky-ui";
+import { Button } from "@flanksource/clicky-ui/components";
+import { AnsiHtml, ProgressBar } from "@flanksource/clicky-ui/data";
 import { fetchFindings } from "./api";
 import { boundedScanPercent } from "./scanProgress";
 import { formatBytes } from "./format";

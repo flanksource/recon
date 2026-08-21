@@ -6,7 +6,7 @@ import {
   JsonSchemaForm,
   type FieldControl,
   type JsonSchemaObject,
-} from "@flanksource/clicky-ui";
+} from "@flanksource/clicky-ui/components";
 import { PAIRED_KEYS, __test, useProfileFilterPairs } from "./ProfileFilterPairs";
 
 const { modesOf, applyPair, enumOf, PAIRS } = __test;
@@ -147,7 +147,7 @@ function Form({
       pre={pre}
       post={post}
       hiddenKeys={hiddenKeys}
-      // Matches how ProfilesView and ProfileConfig render it, which is what
+      // Matches how EngineConfigForm renders it, which is what
       // surfaces a field's description.
       layout={{ mode: "stacked", help: "hover", valueMaxWidth: "100%" }}
     />

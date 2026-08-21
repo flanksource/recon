@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { DataTable, Select } from "@flanksource/clicky-ui";
-import { fetchProfiles, fetchTemplates } from "./api";
+import { Select } from "@flanksource/clicky-ui/components";
+import { DataTable } from "@flanksource/clicky-ui/data";
+import { fetchEngines, fetchProfiles, fetchTemplates } from "./api";
 import { selectionQuery, useEntityFilters } from "./filters";
-import { TemplateDetail, templateColumns } from "./templateColumns";
+import { TemplateDetail, visibleTemplateColumns } from "./templateColumns";
 import { profileId } from "./types";
-import type { Profile, Template } from "./types";
+import type { Engine, Profile, Template } from "./types";
 
 // The catalogue is over thirteen thousand templates. The table pages through
 // whatever the server returns, and this is what it is asked for: enough to work
@@ -14,8 +15,30 @@ const PAGE = 500;
 type Props = {
   /** Preselects the profile whose templates to show, from ?profile= */
   profile?: string;
+  engine?: string;
   onSelectProfile?: (profile: string | undefined) => void;
+  onSelectEngine?: (engine: string | undefined) => void;
 };
+
+function pluralize(label: string): string {
+  const words = label.split(" ");
+  const word = words.pop() ?? label;
+  const suffix = /[^aeiou]y$/i.test(word)
+    ? `${word.slice(0, -1)}ies`
+    : /(s|x|z|ch|sh)$/i.test(word)
+      ? `${word}es`
+      : `${word}s`;
+  return [...words, suffix].join(" ");
+}
+
+function profileEngine(reference: string | undefined): string | undefined {
+  const parts = reference?.split(":") ?? [];
+  return parts.length === 3 ? parts[1] : undefined;
+}
+
+function providerName(profile: Profile): string | undefined {
+  return typeof profile.config.provider === "string" ? profile.config.provider : undefined;
+}
 
 /**
  * TemplatesView browses what the scan engines could run.
@@ -24,9 +47,10 @@ type Props = {
  * question worth answering before deciding what a profile should contain, and
  * previously the only way to find out was to run a scan and read the findings.
  */
-export function TemplatesView({ profile, onSelectProfile }: Props) {
+export function TemplatesView({ engine, profile, onSelectEngine, onSelectProfile }: Props) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [engines, setEngines] = useState<Engine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
 
@@ -36,10 +60,19 @@ export function TemplatesView({ profile, onSelectProfile }: Props) {
     error: filterError,
   } = useEntityFilters("template", { exclude: ["profile", "engine"] });
 
+  const activeEngine = profileEngine(profile) ?? engine;
+  const catalogue = engines.find((item) => item.name === activeEngine);
+  const itemLabel = catalogue?.templates?.itemLabel ?? "catalog item";
+  const profileLabel = catalogue?.templates?.profileLabel ?? "profile";
+
   useEffect(() => {
     let cancelled = false;
-    fetchProfiles({ kind: "scan" })
-      .then((result) => !cancelled && setProfiles(result))
+    Promise.all([fetchProfiles({ kind: "scan" }), fetchEngines("scan")])
+      .then(([loadedProfiles, loadedEngines]) => {
+        if (cancelled) return;
+        setProfiles(loadedProfiles);
+        setEngines(loadedEngines.filter((item) => item.templates));
+      })
       .catch((reason) => !cancelled && setError((reason as Error).message));
     return () => {
       cancelled = true;
@@ -49,7 +82,12 @@ export function TemplatesView({ profile, onSelectProfile }: Props) {
   useEffect(() => {
     let cancelled = false;
     setBusy(true);
-    fetchTemplates({ ...selectionQuery(selection), profile, limit: PAGE })
+    fetchTemplates({
+      ...selectionQuery(selection),
+      engine: activeEngine,
+      profile,
+      limit: PAGE,
+    })
       .then((result) => {
         if (cancelled) return;
         setTemplates(result);
@@ -60,15 +98,38 @@ export function TemplatesView({ profile, onSelectProfile }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [selection, profile]);
+  }, [selection, activeEngine, profile]);
+
+  const catalogueOptions = useMemo(
+    () => [
+      { value: "", label: "All catalogues" },
+      ...engines.map((item) => ({
+        value: item.name,
+        label: `${item.title} ${pluralize(item.templates?.itemLabel ?? "catalog item")}`,
+      })),
+    ],
+    [engines],
+  );
 
   const profileOptions = useMemo(
     () => [
-      { value: "", label: "All templates" },
-      ...profiles.map((item) => ({ value: item.name, label: `${item.name} (${item.engine})` })),
+      { value: "", label: `All ${pluralize(profileLabel)}` },
+      ...profiles
+        .filter((item) => !activeEngine || item.engine === activeEngine)
+        .map((item) => ({
+          value: profileId(item),
+          label: activeEngine
+            ? `${item.name}${providerName(item) ? ` (${providerName(item)})` : ""}`
+            : `${item.name} (${item.engine})`,
+        })),
     ],
-    [profiles],
+    [activeEngine, profileLabel, profiles],
   );
+  const columns = useMemo(
+    () => visibleTemplateColumns(templates, { itemLabel, showEngine: !activeEngine }),
+    [activeEngine, itemLabel, templates],
+  );
+  const shownLabel = templates.length === 1 ? itemLabel : pluralize(itemLabel);
 
   return (
     <div className="flex h-full flex-col">
@@ -76,12 +137,22 @@ export function TemplatesView({ profile, onSelectProfile }: Props) {
         <div>
           <h1 className="text-lg font-semibold">Templates</h1>
           <p className="text-xs text-muted-foreground">
-            What a scan can check, and which profile would run it
+            Templates, checks and policies a scan engine can run
           </p>
         </div>
         <span className="flex-1" />
+        <label htmlFor="templates-engine" className="text-xs text-muted-foreground">
+          Catalogue
+        </label>
+        <Select
+          id="templates-engine"
+          className="w-48"
+          value={activeEngine ?? ""}
+          options={catalogueOptions}
+          onChange={(event) => onSelectEngine?.(event.target.value || undefined)}
+        />
         <label htmlFor="templates-profile" className="text-xs text-muted-foreground">
-          Profile
+          {profileLabel.charAt(0).toUpperCase() + profileLabel.slice(1)}
         </label>
         <Select
           id="templates-profile"
@@ -101,7 +172,9 @@ export function TemplatesView({ profile, onSelectProfile }: Props) {
 
         <div className="mb-2 flex items-center gap-2">
           <span className="text-sm text-muted-foreground">
-            {busy ? "Loading templates…" : `${templates.length.toLocaleString()} shown`}
+            {busy
+              ? `Loading ${pluralize(itemLabel)}…`
+              : `${templates.length.toLocaleString()} ${shownLabel} shown`}
           </span>
           {/* The server caps a listing, so a full page means there is more
               behind it. Saying so beats a count that looks complete. */}
@@ -114,16 +187,16 @@ export function TemplatesView({ profile, onSelectProfile }: Props) {
 
         <DataTable<Template>
           data={templates}
-          columns={templateColumns}
+          columns={columns}
           getRowId={(row) => `${row.engine}:${row.path}`}
           externalFilters={filters}
           showGlobalFilter
-          globalFilterPlaceholder="Search templates by id, name or path…"
+          globalFilterPlaceholder={`Search ${pluralize(itemLabel)} by id, name or path…`}
           defaultSort={{ key: "severity" }}
           emptyMessage={
             profile
-              ? "This profile selects no templates."
-              : "No templates match these filters."
+              ? `This ${profileLabel} selects no ${pluralize(itemLabel)}.`
+              : `No ${pluralize(itemLabel)} match these filters.`
           }
           detailStyle="row"
           renderExpandedRow={(row) => <TemplateDetail template={row} />}

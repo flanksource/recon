@@ -80,6 +80,30 @@ func formatNumber(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
+// asNumber accepts every numeric shape a YAML or JSON decoder can produce.
+func asNumber(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case uint:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	}
+	return 0, false
+}
+
 // ParseFloat reads a number an engine reported as a string, yielding 0 when it
 // is unparseable. Progress reporting is cosmetic — a malformed stats line should
 // not fail a scan that is otherwise working.

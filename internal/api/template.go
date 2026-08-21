@@ -11,11 +11,11 @@ type Template struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Engine   string `json:"engine"`
+	Provider string `json:"provider,omitempty"`
 	Severity string `json:"severity"`
 
-	// Type is the protocol the template speaks: http, dns, tcp, ssl, code and
-	// so on. It is the first request block the template declares, which is what
-	// the engine reports on a finding.
+	// Type is the engine-native family: a Nuclei protocol such as http or dns,
+	// or a Prowler service such as iam or storage.
 	Type string `json:"type"`
 
 	Tags    []string `json:"tags"`
@@ -25,11 +25,13 @@ type Template struct {
 	// what makes a finding traceable to a file someone can read.
 	Path string `json:"path"`
 
-	Description string   `json:"description,omitempty"`
-	Remediation string   `json:"remediation,omitempty"`
-	Reference   []string `json:"reference,omitempty"`
-	CVEID       string   `json:"cveId,omitempty"`
-	CVSSScore   float64  `json:"cvssScore,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Risk         string   `json:"risk,omitempty"`
+	ResourceType string   `json:"resourceType,omitempty"`
+	Remediation  string   `json:"remediation,omitempty"`
+	Reference    []string `json:"reference,omitempty"`
+	CVEID        string   `json:"cveId,omitempty"`
+	CVSSScore    float64  `json:"cvssScore,omitempty"`
 
 	// MaxRequests is what the template costs to run against one target. Summed
 	// across a selection it is the closest estimate of a scan's size available
@@ -39,6 +41,10 @@ type Template struct {
 	// Requires names the capabilities a profile must opt into before this
 	// template runs at all — enabling code or headless templates, or DAST.
 	Requires []string `json:"requires,omitempty"`
+
+	// Metadata retains engine-specific catalogue fields that do not have a
+	// cross-engine meaning but are still needed to inspect the original check.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // GetID returns the template id, which is what a finding reports and what the

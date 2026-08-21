@@ -38,10 +38,11 @@ describe("App routes", () => {
         return new Response(
           JSON.stringify({
             $schema: "../target.schema.json",
-            version: 1,
+            version: 2,
+            id: "api.example.com",
             host: "api.example.com",
             class: "prod",
-            profiles: ["safe"],
+            profiles: ["scan:nuclei:safe"],
             tags: [],
           }),
           { status: 200 },
@@ -117,7 +118,7 @@ describe("App routes", () => {
       if (path === "/api/v1/finding?__lookup=filters") {
         return new Response(JSON.stringify({ filters: {} }), { status: 200 });
       }
-      if (path === "/api/v1/finding?scan=scan-1") {
+      if (path === "/api/v1/finding?scan=scan-1&limit=500") {
         return new Response(JSON.stringify([]), { status: 200 });
       }
       if (path === "/api/v1/scan/scan-1") {
@@ -162,5 +163,110 @@ describe("App routes", () => {
     expect(await screen.findByText("templates")).toBeInTheDocument();
     expect(screen.getByText("templates").parentElement).toHaveTextContent("18");
     expect(screen.getByText("errors").parentElement).toHaveTextContent("2");
+  });
+
+  it("collapses every repeated finding row without reusing row identities", async () => {
+    window.history.replaceState(null, "", "/scans/scan-1");
+    vi.stubGlobal("EventSource", undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/api/v1/tasks") {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (path === "/api/v1/finding?__lookup=filters") {
+        return new Response(JSON.stringify({ filters: {} }), { status: 200 });
+      }
+      if (path === "/api/v1/finding?scan=scan-1&limit=500") {
+        return new Response(
+          JSON.stringify([
+            {
+              _id: "scan-1#1",
+              scanId: "scan-1",
+              lineNo: 1,
+              templateId: "duplicate-check",
+              name: "Repeated finding",
+              severity: "high",
+              host: "prod.example.test",
+              matchedAt: "https://prod.example.test/one",
+              matcherName: "FAIL",
+              type: "prowler",
+              tags: [],
+            },
+            {
+              _id: "scan-1#2",
+              scanId: "scan-1",
+              lineNo: 2,
+              templateId: "duplicate-check",
+              name: "Repeated finding",
+              severity: "high",
+              host: "prod.example.test",
+              matchedAt: "https://prod.example.test/two",
+              matcherName: "FAIL",
+              type: "prowler",
+              tags: [],
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (path === "/api/v1/scan/scan-1") {
+        return new Response(
+          JSON.stringify({
+            id: "scan-1",
+            name: "prowler-gcp",
+            engine: "prowler",
+            engineVersion: "5.12.0",
+            profile: "gcp",
+            selector: { hosts: ["prod.example.test"] },
+            selectorLabel: "host prod.example.test",
+            endpointCount: 1,
+            phase: "done",
+            startedAt: "2026-08-10T12:00:00",
+            finishedAt: "2026-08-10T12:00:02",
+            durationMs: 2500,
+            command: ["prowler", "gcp"],
+            exitCode: 0,
+            findings: 2,
+            severities: { critical: 0, high: 2, medium: 0, low: 0, info: 0, unknown: 0 },
+            stats: {},
+            hosts: [],
+            outputCaptured: false,
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+
+    render(<App />);
+
+    const group = (await screen.findAllByText("Repeated finding"))
+      .map((label) => label.closest("button"))
+      .find((button) => button !== null);
+    if (!group) {
+      throw new Error("result-type group label is not inside its toggle button");
+    }
+    expect(screen.getByRole("link", { name: "https://prod.example.test/one" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "https://prod.example.test/two" })).toBeInTheDocument();
+
+    fireEvent.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("link", { name: "https://prod.example.test/one" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "https://prod.example.test/two" })).not.toBeInTheDocument();
+
+    fireEvent.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "https://prod.example.test/one" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "https://prod.example.test/two" })).toBeInTheDocument();
+    expect(consoleError.mock.calls.some(([message]) => String(message).includes("same key"))).toBe(false);
   });
 });

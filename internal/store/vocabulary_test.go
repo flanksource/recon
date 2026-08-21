@@ -37,19 +37,19 @@ var _ = Describe("the filter vocabularies", Ordered, Label("db"), func() {
 
 		targets := []api.TargetDocument{{
 			Host: "api.example.test", Class: api.ClassProd,
-			Profiles: []string{"safe"}, Tags: []string{"http", "api"},
+			Profiles: []string{"scan:nuclei:safe"}, Tags: []string{"http", "api"},
 			Ports:   []int{8443},
 			Network: &api.Network{OpenPorts: []int{80, 443}},
 			HTTP:    &api.HTTP{URL: "https://api.example.test", Port: 443, StatusCode: 200},
 		}, {
 			Host: "admin.example.test", Class: api.ClassInternal,
-			Profiles: []string{"safe", "full"}, Tags: []string{"http", "admin"},
+			Profiles: []string{"scan:nuclei:safe", "scan:nuclei:full"}, Tags: []string{"http", "admin"},
 			HTTP: &api.HTTP{URL: "https://admin.example.test", Port: 8080, StatusCode: 403},
 		}, {
 			// No http section at all: a host whose last probe failed. Its ports
 			// and status must not appear, and must not break the others.
 			Host: "gone.example.test", Class: api.ClassNonProd,
-			Profiles: []string{"safe"}, Tags: []string{},
+			Profiles: []string{"scan:nuclei:safe"}, Tags: []string{},
 			Observed: &api.Observed{LastAttempt: "2026-01-01T00:00:00Z", Error: "no such host"},
 		}}
 		for _, target := range targets {
@@ -68,13 +68,22 @@ var _ = Describe("the filter vocabularies", Ordered, Label("db"), func() {
 	})
 
 	It("offers every assigned profile", func() {
-		Expect(st.Vocabulary(ctx, store.TargetProfiles)).To(Equal([]string{"full", "safe"}))
+		Expect(st.Vocabulary(ctx, store.TargetProfiles)).To(Equal([]string{
+			"scan:nuclei:full", "scan:nuclei:safe",
+		}))
 	})
 
 	It("orders hosts by byte value, which is what the listing is ordered by", func() {
 		Expect(st.Vocabulary(ctx, store.TargetHosts)).To(Equal([]string{
 			"admin.example.test", "api.example.test", "gone.example.test",
 		}))
+	})
+
+	It("offers stable target IDs independently of addressable hosts", func() {
+		Expect(st.Vocabulary(ctx, store.TargetIDs)).To(Equal([]string{
+			"admin.example.test", "api.example.test", "gone.example.test",
+		}))
+		Expect(st.Vocabulary(ctx, store.TargetProviders)).To(BeEmpty())
 	})
 
 	// A port is filterable wherever it is known, so the options have to come

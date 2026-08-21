@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AppShell,
   Button,
-  DataTable,
   Select,
   Tabs,
+} from "@flanksource/clicky-ui/components";
+import {
+  DataTable,
   type DataTableGrouping,
-} from "@flanksource/clicky-ui";
+} from "@flanksource/clicky-ui/data";
 import { fetchFindings, fetchScan, fetchScans } from "./api";
 import { selectionQuery, useEntityFilters } from "./filters";
 import { findingColumns, severityBadge, SEVERITY_RANK, worstSeverity } from "./scanColumns";
@@ -234,7 +236,19 @@ type DetailTab = "findings" | "execution";
 // it were the whole run.
 const FINDING_LIMIT = 500;
 
-export function ScanDetailView({ id, onBack }: { id: string; onBack: () => void }) {
+export function ScanDetailView({
+  id,
+  onBack,
+  tabs,
+  taskButton,
+}: {
+  id: string;
+  onBack: () => void;
+  // The app's primary nav, handed down so it renders inside this view's shell
+  // rather than in a second header band above it.
+  tabs?: ReactNode;
+  taskButton?: ReactNode;
+}) {
   const [scan, setScan] = useState<Scan | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [groupBy, setGroupBy] = useState<GroupBy>("type");
@@ -270,16 +284,22 @@ export function ScanDetailView({ id, onBack }: { id: string; onBack: () => void 
   return (
     <AppShell
       nav={
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs">
-          <span className="shrink-0 text-muted-foreground">Scans</span>
-          <span className="shrink-0 text-muted-foreground/60">›</span>
-          <span className="truncate font-medium text-foreground">{scan?.name ?? id}</span>
-        </nav>
+        <div className="flex min-w-0 items-center gap-3">
+          {tabs && <div className="flex shrink-0 items-center gap-1">{tabs}</div>}
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs">
+            <span className="shrink-0 text-muted-foreground">Scans</span>
+            <span className="shrink-0 text-muted-foreground/60">›</span>
+            <span className="truncate font-medium text-foreground">{scan?.name ?? id}</span>
+          </nav>
+        </div>
       }
       actions={
-        <Button variant="outline" size="sm" onClick={onBack}>
-          Back to scans
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onBack}>
+            Back to scans
+          </Button>
+          {taskButton}
+        </div>
       }
       bodyHeader={
         <div className="flex min-w-0 flex-col gap-2">
@@ -314,11 +334,21 @@ export function ScanDetailView({ id, onBack }: { id: string; onBack: () => void 
           </div>
         )
       }
-      // Stops the body scrolling so the findings table owns the scroll and its
-      // sticky header stays pinned — without it the page scrolls and the table
-      // header slides under the run header, as it did before.
-      contentClassName="flex min-h-0 flex-col gap-density-2 overflow-hidden p-density-4"
+      // A findings table is wide — severity, finding, host, type and a tag list
+      // — and the default centred width caps it well below what it needs, which
+      // truncated the template id mid-word and pushed the rest into a
+      // horizontal scroll. This is a table to be read across, so it gets the
+      // whole workspace.
+      contentWidth="full"
+      contentClassName="overflow-hidden p-density-4"
     >
+      {/* The findings table owns the scroll so its sticky header stays pinned.
+          h-full rather than flex-1: AppShell puts its content-width wrapper
+          between `main` and these children and that wrapper is a block, so a
+          flex class on contentClassName never reaches here — which left the
+          table sized to its content and everything past the first screen
+          clipped. */}
+      <div className="flex h-full min-h-0 flex-col gap-density-2">
       {(error ?? filterError) && (
         <div role="alert" className="text-sm text-destructive">
           {error ?? filterError}
@@ -342,7 +372,7 @@ export function ScanDetailView({ id, onBack }: { id: string; onBack: () => void 
             className="min-h-0 flex-1"
             data={findings}
             columns={findingColumns}
-            getRowId={(row, index) => `${row.templateId}:${row.host}:${row.matcherName ?? index}`}
+            getRowId={(row) => `${row.scanId}#${row.lineNo}`}
             externalFilters={filters}
             showGlobalFilter
             globalFilterPlaceholder="Search findings, hosts, templates…"
@@ -358,6 +388,7 @@ export function ScanDetailView({ id, onBack }: { id: string; onBack: () => void 
           />
         </>
       )}
+      </div>
     </AppShell>
   );
 }

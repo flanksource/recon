@@ -20,15 +20,16 @@ beforeEach(async () => {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeJson(resolve(INVENTORY_DIR, "inventory.json"), {
     $schema: "./inventory.schema.json",
-    version: 1,
+    version: 3,
     zones: ["example.com"],
   });
   writeJson(resolve(INVENTORY_DIR, "targets", "api.example.com.json"), {
     $schema: "../target.schema.json",
-    version: 1,
+    version: 3,
+    id: "api.example.com",
     host: "api.example.com",
     class: "prod",
-    profiles: ["safe"],
+    profiles: ["scan:nuclei:safe"],
     tags: ["api"],
     http: { status_code: 200 },
   });
@@ -66,8 +67,16 @@ describe("inventory API", () => {
       fetch(`${baseUrl}/api/inventory/api.example.com`).then((response) => response.json()),
     ]);
 
-    expect(inventory).toEqual(expect.objectContaining({ version: 1, rows: [expect.any(Object)] }));
-    expect(schema).toEqual(expect.objectContaining({ $schema: expect.stringContaining("2020-12") }));
+    expect(inventory).toEqual(expect.objectContaining({ version: 3, rows: [expect.any(Object)] }));
+    expect(schema).toEqual(
+      expect.objectContaining({
+        $schema: expect.stringContaining("2020-12"),
+        properties: expect.objectContaining({
+          id: expect.objectContaining({ type: "string" }),
+          version: expect.objectContaining({ const: 3 }),
+        }),
+      }),
+    );
     expect(target).toEqual(expect.objectContaining({ host: "api.example.com", class: "prod" }));
   });
 
@@ -75,13 +84,20 @@ describe("inventory API", () => {
     const update = await fetch(`${baseUrl}/api/inventory/api.example.com`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ class: "prod", profiles: ["safe", "full"], tags: ["api"] }),
+      body: JSON.stringify({
+        class: "prod",
+        profiles: ["scan:nuclei:safe", "scan:nuclei:full"],
+        tags: ["api"],
+      }),
     });
     const legacy = await fetch(`${baseUrl}/api/targets`, { method: "PUT", body: "{}" });
 
     expect(update.status).toBe(200);
     expect(await update.json()).toEqual(
-      expect.objectContaining({ profiles: ["safe", "full"], http: { status_code: 200 } }),
+      expect.objectContaining({
+        profiles: ["scan:nuclei:safe", "scan:nuclei:full"],
+        http: { status_code: 200 },
+      }),
     );
     expect(legacy.status).toBe(404);
   });
@@ -92,7 +108,7 @@ describe("inventory API", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         class: "prod",
-        profiles: ["safe"],
+        profiles: ["scan:nuclei:safe"],
         tags: ["api"],
         http: { status_code: 500 },
       }),

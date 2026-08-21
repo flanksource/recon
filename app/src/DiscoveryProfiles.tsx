@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, SegmentedControl, Select } from "@flanksource/clicky-ui";
+import { Button, SegmentedControl, Select } from "@flanksource/clicky-ui/components";
 import { fetchEngines, fetchProfiles, saveProfile } from "./api";
-import { ProfileConfig, sameConfig } from "./ProfileConfig";
+import { EngineConfigForm, sameConfig } from "./EngineConfigForm";
 import { profileId } from "./types";
 import type { Engine, Profile } from "./types";
 
@@ -435,11 +435,12 @@ export function DiscoveryProfiles({
         </span>
       </div>
 
-      <ProfileConfig
+      <EngineConfigForm
         key={profileId(profile)}
         engine={active}
-        profile={profile}
+        identity={profileId(profile)}
         value={state.draft(profile)}
+        baseline={profile.config}
         onChange={(config) => state.edit(profile, config)}
         onReset={() => state.reset(profile)}
         note={

@@ -85,6 +85,7 @@ var _ = Describe("storing a finding that saw binary bytes", func() {
 
 	It("leaves an ordinary finding byte-for-byte alone", func() {
 		finding := api.Finding{
+			TargetID:   "gcp-production",
 			TemplateID: "http-missing-security-headers",
 			Name:       "HTTP Missing Security Headers",
 			Severity:   api.SeverityInfo,
@@ -96,6 +97,8 @@ var _ = Describe("storing a finding that saw binary bytes", func() {
 
 		row := build(finding)
 
+		Expect(row.TargetID).To(Equal(finding.TargetID))
+		Expect(row.Document().TargetID).To(Equal(finding.TargetID))
 		Expect(row.Name).To(Equal(finding.Name))
 		Expect([]string(row.Tags)).To(Equal(finding.Tags))
 		Expect(row.Raw.Get()).To(Equal(finding.Raw))

@@ -14,4 +14,6 @@ import (
 	_ "github.com/flanksource/recon/internal/engines/discovery/tlsx"
 	_ "github.com/flanksource/recon/internal/engines/scan/inspec"
 	_ "github.com/flanksource/recon/internal/engines/scan/nuclei"
+	_ "github.com/flanksource/recon/internal/engines/scan/prowler"
+	_ "github.com/flanksource/recon/internal/engines/scan/trivy"
 )

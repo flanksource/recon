@@ -29,8 +29,8 @@ func (Engine) Spec() engines.Spec {
 		// ProjectDiscovery tool.
 		Install: engines.WithChecksumFile(
 			engines.ProjectDiscovery("naabu"), "naabu-checksums.txt"),
-		Version:  ">=2.6.1",
-		Sections: catalog,
+		Version: ">=2.6.1",
+		Options: engines.OptionsFromSections(catalog),
 		Defaults: engines.DefaultProfile{
 			Name: "default",
 			Comment: "Bounded port discovery. Deliberately conservative: this runs against\n" +

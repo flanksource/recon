@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProfilesView } from "./ProfilesView";
 import type { Engine, Profile, TemplatePreview } from "./types";
@@ -14,21 +14,34 @@ const engines: Engine[] = [
     binary: "nuclei",
     installed: true,
     managed: true,
-    sections: [
-      {
-        id: "performance",
-        title: "Performance",
-        description: "Rate limiting and concurrency.",
-        properties: {
-          "rate-limit": {
-            type: "integer",
-            title: "Requests per second",
-            minimum: 1,
-            multipleOf: 1,
+    options: {
+      variants: [
+        {
+          id: "default",
+          title: "Nuclei",
+          schema: {
+            type: "object",
+            "x-sections": [
+              {
+                id: "performance",
+                title: "Performance",
+                description: "Rate limiting and concurrency.",
+              },
+            ],
+            "x-order": ["rate-limit"],
+            properties: {
+              "rate-limit": {
+                type: "integer",
+                title: "Requests per second",
+                minimum: 1,
+                multipleOf: 1,
+                "x-section": "performance",
+              },
+            },
           },
         },
-      },
-    ],
+      ],
+    },
   },
   {
     _id: "discovery:naabu",
@@ -38,16 +51,62 @@ const engines: Engine[] = [
     binary: "naabu",
     installed: true,
     managed: true,
-    sections: [
-      {
-        id: "ports",
-        title: "Ports & targets",
-        description: "Which ports and hosts to probe.",
-        properties: {
-          "top-ports": { type: "string", title: "Top ports" },
+    options: {
+      variants: [
+        {
+          id: "default",
+          title: "Naabu",
+          schema: {
+            type: "object",
+            "x-sections": [
+              {
+                id: "ports",
+                title: "Ports & targets",
+                description: "Which ports and hosts to probe.",
+              },
+            ],
+            "x-order": ["top-ports"],
+            properties: {
+              "top-ports": {
+                type: "string",
+                title: "Top ports",
+                "x-section": "ports",
+              },
+            },
+          },
         },
-      },
-    ],
+      ],
+    },
+  },
+  {
+    _id: "scan:prowler",
+    name: "prowler",
+    kind: "scan",
+    title: "Prowler",
+    binary: "prowler",
+    installed: true,
+    managed: true,
+    options: {
+      variants: [
+        { id: "aws", title: "AWS", schema: {} },
+        { id: "kubernetes", title: "Kubernetes", schema: {} },
+      ],
+    },
+  },
+  {
+    _id: "scan:trivy",
+    name: "trivy",
+    kind: "scan",
+    title: "Trivy",
+    binary: "trivy",
+    installed: true,
+    managed: true,
+    options: {
+      variants: [
+        { id: "container-image", title: "Container image", schema: {} },
+        { id: "git-repository", title: "Git repository", schema: {} },
+      ],
+    },
   },
 ];
 
@@ -65,6 +124,34 @@ const profiles: Profile[] = [
     engine: "naabu",
     name: "discovery",
     config: { "top-ports": "100", rate: 250 },
+  },
+  {
+    _id: "scan:prowler:aws-cis-5-0-aws",
+    kind: "scan",
+    engine: "prowler",
+    name: "aws-cis-5-0-aws",
+    config: { provider: "aws", compliance: ["cis_5.0_aws"] },
+  },
+  {
+    _id: "scan:prowler:kubernetes-cis-1-12-kubernetes",
+    kind: "scan",
+    engine: "prowler",
+    name: "kubernetes-cis-1-12-kubernetes",
+    config: { provider: "kubernetes", compliance: ["cis_1.12_kubernetes"] },
+  },
+  {
+    _id: "scan:trivy:image-vulnerabilities",
+    kind: "scan",
+    engine: "trivy",
+    name: "image-vulnerabilities",
+    config: { provider: "container-image", scanners: ["vuln", "secret"] },
+  },
+  {
+    _id: "scan:trivy:repository-secrets",
+    kind: "scan",
+    engine: "trivy",
+    name: "repository-secrets",
+    config: { provider: "git-repository", scanners: ["secret"] },
   },
 ];
 
@@ -110,19 +197,83 @@ function previewBodies(fetchMock: ReturnType<typeof mockFetch>): unknown[] {
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
 }
 
+async function clickTreeItem(name: string) {
+  const item = await screen.findByRole("treeitem", { name });
+  const row = item.firstElementChild;
+  if (!(row instanceof HTMLElement)) throw new Error(`tree item has no row: ${name}`);
+  fireEvent.click(row);
+}
+
+async function expandTreeItem(name: string) {
+  const item = await screen.findByRole("treeitem", { name });
+  fireEvent.click(within(item).getByRole("button", { name: "Expand" }));
+}
+
 describe("ProfilesView", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
   });
 
+  it("groups profiles by kind, engine, and provider with provider icons", async () => {
+    mockFetch();
+    render(<ProfilesView />);
+
+    const tree = await screen.findByRole("tree", { name: "Profiles" });
+    expect(
+      within(tree).getByRole("treeitem", { name: "Discovery profiles" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(tree).getByRole("treeitem", { name: "Scan profiles" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(tree).getByRole("treeitem", { name: "Nuclei profiles" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    const selectedProfile = within(tree).getByRole("treeitem", {
+      name: "safe Nuclei profile",
+    });
+    expect(selectedProfile).toHaveAttribute("aria-selected", "true");
+    expect(
+      selectedProfile.querySelector("svg[aria-hidden='true']"),
+    ).toBeInTheDocument();
+
+    await expandTreeItem("Naabu profiles");
+    expect(
+      within(tree).getByRole("treeitem", { name: "discovery Naabu profile" }),
+    ).toBeInTheDocument();
+
+    await expandTreeItem("Prowler profiles");
+    const prowler = within(tree).getByRole("treeitem", { name: "Prowler profiles" });
+    expect(within(prowler).getByRole("img", { name: "Prowler" })).toBeInTheDocument();
+    const aws = within(tree).getByRole("treeitem", { name: "AWS profiles" });
+    const kubernetes = within(tree).getByRole("treeitem", {
+      name: "Kubernetes profiles",
+    });
+    expect(within(aws).getByRole("img", { name: "AWS" })).toBeInTheDocument();
+    expect(
+      within(kubernetes).getByRole("img", { name: "Kubernetes" }),
+    ).toBeInTheDocument();
+    await expandTreeItem("AWS profiles");
+    expect(
+      within(tree).getByRole("treeitem", { name: "aws-cis-5-0-aws Prowler profile" }),
+    ).toBeInTheDocument();
+
+    await expandTreeItem("Trivy profiles");
+    const trivy = within(tree).getByRole("treeitem", { name: "Trivy profiles" });
+    expect(within(trivy).getByRole("img", { name: "Trivy" })).toBeInTheDocument();
+    expect(
+      within(tree).getByRole("treeitem", { name: "Container image profiles" }),
+    ).toBeInTheDocument();
+    expect(
+      within(tree).getByRole("treeitem", { name: "Git repository profiles" }),
+    ).toBeInTheDocument();
+  });
+
   it("edits a selected profile through its schema and saves the complete config", async () => {
     const fetchMock = mockFetch();
     render(<ProfilesView />);
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: /safe.*nuclei/i }),
-    );
+    await clickTreeItem("safe Nuclei profile");
     fireEvent.click(screen.getByRole("button", { name: "Performance" }));
     fireEvent.change(
       screen.getByRole("spinbutton", { name: "Requests per second" }),
@@ -162,7 +313,7 @@ describe("ProfilesView", () => {
     const fetchMock = mockFetch();
     render(<ProfilesView />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /safe.*nuclei/i }));
+    await clickTreeItem("safe Nuclei profile");
     expect(await screen.findByLabelText("Templates selected")).toHaveTextContent("1,452");
 
     fireEvent.click(screen.getByRole("button", { name: "Performance" }));
@@ -185,10 +336,11 @@ describe("ProfilesView", () => {
     mockFetch();
     render(<ProfilesView />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /safe.*nuclei/i }));
+    await clickTreeItem("safe Nuclei profile");
     expect(screen.getByLabelText("Templates this profile runs")).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: /discovery.*naabu/i }));
+    await expandTreeItem("Naabu profiles");
+    await clickTreeItem("discovery Naabu profile");
     expect(screen.queryByLabelText("Templates this profile runs")).not.toBeInTheDocument();
   });
 
@@ -196,9 +348,8 @@ describe("ProfilesView", () => {
     mockFetch();
     render(<ProfilesView />);
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: /discovery.*naabu/i }),
-    );
+    await expandTreeItem("Naabu profiles");
+    await clickTreeItem("discovery Naabu profile");
 
     expect(screen.getByText("Naabu profile")).toBeInTheDocument();
     expect(

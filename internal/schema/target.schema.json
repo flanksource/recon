@@ -1,13 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://flanksource.com/schemas/nuclei/target.schema.json",
-  "title": "Nuclei target",
+  "$id": "https://flanksource.com/schemas/recon/target.schema.json",
+  "title": "Recon target",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "version", "host", "class", "profiles", "tags"],
+  "required": ["$schema", "version", "id", "class", "profiles", "tags"],
   "properties": {
     "$schema": { "const": "../target.schema.json", "readOnly": true },
-    "version": { "const": 1, "readOnly": true },
+    "version": { "const": 3, "readOnly": true },
+    "id": {
+      "description": "Stable inventory identity, independent of a provider resource ID or mutable address.",
+      "type": "string",
+      "anyOf": [
+        { "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$" },
+        { "format": "ipv6" }
+      ],
+      "readOnly": true
+    },
     "host": {
       "anyOf": [
         { "$ref": "#/$defs/hostname" },
@@ -16,10 +25,38 @@
       "readOnly": true
     },
     "kind": {
-      "description": "What this target addresses. A host is something on the network with an address and ports; a gcp-project is a cloud account audited through an API. Absent means host.",
+      "description": "What this target addresses. A host is contacted over the network; a provider-context is an explicit provider-native scan scope. Absent means host.",
       "type": "string",
-      "enum": ["host", "gcp-project"],
-      "default": "host"
+      "enum": ["host", "provider-context"],
+      "default": "host",
+      "readOnly": true
+    },
+    "provider": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "readOnly": true
+    },
+    "credentialMode": {
+      "type": "string",
+      "enum": ["ambient", "configured"]
+    },
+    "arguments": {
+      "type": "object",
+      "description": "Provider-native non-secret scope arguments, validated by the generated provider schema."
+    },
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "envVars": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/credentialEnvVar" }
+        },
+        "connections": {
+          "type": "object",
+          "description": "Execution connections validated by the selected provider credential schema."
+        }
+      }
     },
     "class": {
       "type": "string",
@@ -30,7 +67,7 @@
     "source": { "$ref": "#/$defs/nonEmptyString" },
     "profiles": {
       "type": "array",
-      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+      "items": { "type": "string", "pattern": "^scan:[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true
     },
@@ -188,14 +225,67 @@
       "then": { "not": { "properties": { "reason": true }, "required": ["reason"] } }
     },
     {
-      "if": {
-        "properties": { "kind": { "not": { "const": "host" } } },
-        "required": ["kind"]
+      "if": { "properties": { "kind": { "const": "provider-context" } }, "required": ["kind"] },
+      "then": {
+        "required": ["provider", "credentialMode"],
+        "not": { "anyOf": [
+          { "required": ["host"] },
+          { "required": ["ports"] }
+        ] }
       },
-      "then": { "not": { "properties": { "ports": true }, "required": ["ports"] } }
+      "else": {
+        "required": ["host"],
+        "not": { "anyOf": [
+          { "required": ["provider"] },
+          { "required": ["credentialMode"] },
+          { "required": ["arguments"] },
+          { "required": ["credentials"] }
+        ] }
+      }
     }
   ],
   "$defs": {
+    "credentialEnvVar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1, "writeOnly": true },
+        "valueFrom": { "$ref": "#/$defs/credentialValueFrom" },
+        "configured": { "type": "boolean", "const": true, "readOnly": true }
+      },
+      "oneOf": [
+        { "required": ["value"] },
+        { "required": ["valueFrom"] },
+        { "required": ["configured"] }
+      ]
+    },
+    "credentialValueFrom": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["secretKeyRef"] },
+        { "required": ["configMapKeyRef"] },
+        { "required": ["helmRef"] },
+        { "required": ["onePassword"] }
+      ],
+      "properties": {
+        "secretKeyRef": { "$ref": "#/$defs/keySelector" },
+        "configMapKeyRef": { "$ref": "#/$defs/keySelector" },
+        "helmRef": { "$ref": "#/$defs/keySelector" },
+        "onePassword": { "type": "string", "pattern": "^op://[^/]+/[^/]+/.+$" }
+      }
+    },
+    "keySelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1 }
+      }
+    },
     "hostname": {
       "type": "string",
       "format": "hostname",

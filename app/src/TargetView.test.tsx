@@ -14,11 +14,12 @@ import type { Profile, Target } from "./types";
 
 const target: Target = {
   $schema: "../target.schema.json",
-  version: 1,
+  version: 2,
+  id: "api.example.com",
   _id: "api.example.com",
   host: "api.example.com",
   class: "prod",
-  profiles: ["safe"],
+  profiles: ["scan:nuclei:safe"],
   tags: ["api"],
   observed: { last_seen: "2026-08-09T08:00:00.000Z" },
   http: {
@@ -46,6 +47,23 @@ const schema = {
   },
 };
 
+const providerTargetSchema = {
+  ...schema,
+  required: ["id", "kind", "provider", "credentialMode", "class", "profiles", "tags"],
+  properties: {
+    ...schema.properties,
+    id: { type: "string" as const, readOnly: true },
+    kind: { type: "string" as const, readOnly: true },
+    provider: { type: "string" as const, readOnly: true },
+    credentialMode: {
+      type: "string" as const,
+      title: "Credential mode",
+      enum: ["ambient", "configured"],
+    },
+    arguments: { type: "object" as const },
+  },
+};
+
 const profiles: Profile[] = [
   {
     _id: "nuclei:full",
@@ -61,6 +79,13 @@ const profiles: Profile[] = [
     name: "safe",
     config: { timeout: 10, severity: ["critical", "high"] },
   },
+  {
+    _id: "scan:prowler:cis",
+    kind: "scan",
+    engine: "prowler",
+    name: "cis",
+    config: { provider: "gcp", compliance: ["cis_5.0_gcp"] },
+  },
 ];
 
 const engines = [
@@ -72,17 +97,93 @@ const engines = [
     binary: "nuclei",
     installed: true,
     managed: false,
-    sections: [
-      {
-        id: "performance",
-        title: "Performance",
-        properties: {
-          timeout: { type: "integer", title: "Request timeout" },
+    options: {
+      variants: [
+        {
+          id: "default",
+          title: "Nuclei",
+          schema: {
+            type: "object",
+            "x-sections": [{ id: "performance", title: "Performance" }],
+            "x-order": ["timeout"],
+            properties: {
+              timeout: {
+                type: "integer",
+                title: "Request timeout",
+                "x-section": "performance",
+              },
+            },
+          },
         },
-      },
-    ],
+      ],
+    },
+  },
+  {
+    _id: "prowler",
+    name: "prowler",
+    kind: "scan",
+    title: "Prowler",
+    binary: "prowler",
+    installed: true,
+    managed: false,
+    options: {
+      discriminator: "provider",
+      variants: [
+        {
+          id: "gcp",
+          title: "Google Cloud",
+          schema: {
+            type: "object",
+            required: ["provider"],
+            "x-sections": [{ id: "checks", title: "Checks" }],
+            "x-order": ["provider", "compliance"],
+            properties: {
+              provider: {
+                type: "string",
+                const: "gcp",
+                readOnly: true,
+                "x-section": "checks",
+              },
+              compliance: {
+                type: "array",
+                items: { type: "string" },
+                "x-section": "checks",
+              },
+            },
+          },
+          contextSchema: {
+            type: "object",
+            "x-sections": [
+              { id: "scope", title: "Scope", description: "Projects to audit." },
+            ],
+            "x-order": ["project-ids"],
+            properties: {
+              "project-ids": {
+                type: "array",
+                title: "Project IDs",
+                items: { type: "string" },
+                "x-section": "scope",
+              },
+            },
+          },
+        },
+      ],
+    },
   },
 ];
+
+const providerTarget: Target = {
+  $schema: "../target.schema.json",
+  version: 2,
+  id: "gcp-production",
+  kind: "provider-context",
+  provider: "gcp",
+  credentialMode: "ambient",
+  arguments: { "project-ids": ["workload-prod-eu-02"] },
+  class: "prod",
+  profiles: ["scan:prowler:cis"],
+  tags: ["cloud"],
+};
 
 // The scan dialog also loads the discovery catalog, because every run sweeps
 // before it scans.
@@ -95,13 +196,26 @@ const discoveryEngines = [
     binary: "naabu",
     installed: true,
     managed: true,
-    sections: [
-      {
-        id: "ports",
-        title: "Ports",
-        properties: { "top-ports": { type: "string", title: "Top ports" } },
-      },
-    ],
+    options: {
+      variants: [
+        {
+          id: "default",
+          title: "Naabu",
+          schema: {
+            type: "object",
+            "x-sections": [{ id: "ports", title: "Ports" }],
+            "x-order": ["top-ports"],
+            properties: {
+              "top-ports": {
+                type: "string",
+                title: "Top ports",
+                "x-section": "ports",
+              },
+            },
+          },
+        },
+      ],
+    },
   },
 ];
 
@@ -232,7 +346,7 @@ describe("TargetView", () => {
   it("opens as a read-only preview and switches to the curated schema editor", async () => {
     mockTargetApi();
 
-    render(<TargetView host="api.example.com" onBack={vi.fn()} />);
+    render(<TargetView id="api.example.com" onBack={vi.fn()} />);
 
     expect(
       await screen.findByRole("heading", { name: "api.example.com" }),
@@ -267,7 +381,7 @@ describe("TargetView", () => {
   // operation, so this must not reach startScan at all.
   it("re-probes the current target through discovery, not through a scan", async () => {
     mockTargetApi();
-    render(<TargetView host="api.example.com" onBack={vi.fn()} />);
+    render(<TargetView id="api.example.com" onBack={vi.fn()} />);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Rescan discovery" }),
@@ -289,7 +403,7 @@ describe("TargetView", () => {
   // is started with is ScanDialog's contract and is asserted there.
   it("opens the dialog in scan mode, offering the engine's stored profiles", async () => {
     mockTargetApi();
-    render(<TargetView host="api.example.com" onBack={vi.fn()} />);
+    render(<TargetView id="api.example.com" onBack={vi.fn()} />);
 
     // The button stays disabled until the scan profiles load, so clicking any
     // earlier is a no-op that leaves the dialog closed.
@@ -309,5 +423,72 @@ describe("TargetView", () => {
     // it without complaint, so the dialog does not ask for confirmation either.
     expect(screen.queryByRole("checkbox", { name: /I authorise/ })).toBeNull();
     expect(api.runDiscovery).not.toHaveBeenCalled();
+  });
+
+  it("edits provider-context arguments through the selected provider schema", async () => {
+    mockTargetApi();
+    vi.mocked(api.fetchTarget).mockResolvedValue(providerTarget);
+    vi.mocked(api.fetchTargetSchema).mockResolvedValue(providerTargetSchema);
+    vi.mocked(api.saveTarget).mockImplementation(async (_id, update) => ({
+      ...providerTarget,
+      ...update,
+      credentials:
+        update.credentials === null
+          ? undefined
+          : update.credentials ?? providerTarget.credentials,
+    }));
+
+    render(<TargetView id="gcp-production" onBack={vi.fn()} />);
+    expect(await screen.findByText(/workload-prod-eu-02/)).toBeInTheDocument();
+    expect(screen.getByText("gcp")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Rescan discovery" }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit target" }));
+    expect(await screen.findByText("Projects to audit.")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Provider" })).toBeNull();
+    const projectInput = screen.getByRole("combobox", { name: "Project IDs" });
+    fireEvent.change(projectInput, { target: { value: "flanksource-prod" } });
+    fireEvent.keyDown(projectInput, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(api.saveTarget).toHaveBeenCalledWith(
+        "gcp-production",
+        expect.objectContaining({
+          class: "prod",
+          profiles: ["scan:prowler:cis"],
+          credentialMode: "ambient",
+          arguments: {
+            "project-ids": ["workload-prod-eu-02", "flanksource-prod"],
+          },
+        }),
+      ),
+    );
+    const update = vi.mocked(api.saveTarget).mock.calls[0][1];
+    expect(update).not.toHaveProperty("id");
+    expect(update).not.toHaveProperty("kind");
+    expect(update).not.toHaveProperty("provider");
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Run scan" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run scan" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Scan 1 target" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Scan 1 target" }));
+    await waitFor(() =>
+      expect(api.startScan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: { id: ["gcp-production"] },
+          engine: "prowler",
+          profile: "cis",
+        }),
+      ),
+    );
   });
 });

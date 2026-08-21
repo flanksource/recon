@@ -162,7 +162,9 @@ func also(base values, extra ...string) values {
 
 func (r *Registry) targetFilters() []clicky.Filter[store.TargetOpts] {
 	return []clicky.Filter[store.TargetOpts]{
+		filter[store.TargetOpts]{key: "id", label: "Target", values: r.vocabulary(store.TargetIDs)},
 		filter[store.TargetOpts]{key: "kind", label: "Kind", values: fixed(targetKindNames()...)},
+		filter[store.TargetOpts]{key: "provider", label: "Provider", values: r.vocabulary(store.TargetProviders)},
 		filter[store.TargetOpts]{key: "class", label: "Class", values: fixed(classNames()...)},
 		filter[store.TargetOpts]{key: "tags", label: "Tags", values: r.vocabulary(store.TargetTags)},
 		filter[store.TargetOpts]{key: "profiles", label: "Profiles", values: r.vocabulary(store.TargetProfiles)},
@@ -196,6 +198,7 @@ func (r *Registry) probeFilters() []clicky.Filter[store.ProbeOpts] {
 func (r *Registry) findingFilters() []clicky.Filter[store.FindingOpts] {
 	return []clicky.Filter[store.FindingOpts]{
 		filter[store.FindingOpts]{key: "scan", label: "Scan", values: r.vocabulary(store.ScanNames)},
+		filter[store.FindingOpts]{key: "target", label: "Target", values: r.vocabulary(store.FindingTargets)},
 		filter[store.FindingOpts]{key: "severity", label: "Severity", values: fixed(severityNames()...)},
 		filter[store.FindingOpts]{key: "host", label: "Host", values: r.vocabulary(store.FindingHosts)},
 		filter[store.FindingOpts]{key: "template", label: "Template", values: r.vocabulary(store.FindingTemplates)},
@@ -220,7 +223,7 @@ func (r *Registry) templateFilters() []clicky.Filter[TemplateOpts] {
 	return []clicky.Filter[TemplateOpts]{
 		filter[TemplateOpts]{key: "engine", label: "Engine", values: engineNames(api.KindScan)},
 		filter[TemplateOpts]{key: "severity", label: "Severity", values: fixed(severityNames()...)},
-		filter[TemplateOpts]{key: "type", label: "Protocol", values: r.templateValues(func(t api.Template) []string {
+		filter[TemplateOpts]{key: "type", label: "Service / protocol", values: r.templateValues(func(t api.Template) []string {
 			return []string{t.Type}
 		})},
 		filter[TemplateOpts]{key: "tag", label: "Tag", values: r.templateValues(func(t api.Template) []string {

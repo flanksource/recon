@@ -26,10 +26,10 @@ var _ = Describe("the statement that stamps a run onto its targets", func() {
 			Clauses: map[string]clause.Clause{},
 		}
 		clause.NamedExpr{SQL: stampScannedSQL, Vars: []any{map[string]any{
-			"at":    "2026-08-11T09:00:01Z",
-			"count": true,
-			"hosts": stringArray([]string{"a.example.test", "b.example.test"}),
-			"scan":  "01JSCAN",
+			"at":      "2026-08-11T09:00:01Z",
+			"count":   true,
+			"targets": stringArray([]string{"a.example.test", "gcp-production"}),
+			"scan":    "01JSCAN",
 		}}}.Build(statement)
 		return statement.SQL.String(), statement.Vars
 	}
@@ -38,7 +38,7 @@ var _ = Describe("the statement that stamps a run onto its targets", func() {
 		sql, vars := render()
 
 		Expect(sql).ToNot(ContainSubstring("@"), sql)
-		Expect(vars).To(HaveLen(4), "at, count, hosts and scan")
+		Expect(vars).To(HaveLen(4), "at, count, targets and scan")
 	})
 
 	// The casts are what make the text, boolean and array parameters usable in

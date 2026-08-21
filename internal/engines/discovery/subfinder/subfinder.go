@@ -47,10 +47,10 @@ func (Engine) Spec() engines.Spec {
 		Title:  "Subfinder",
 		Description: "Passive subdomain enumeration. Queries public sources rather than touching " +
 			"the estate, so it finds hosts nothing else knows about.",
-		DocsURL:  "https://github.com/projectdiscovery/subfinder",
-		Install:  engines.ProjectDiscovery("subfinder"),
-		Version:  ">=2.15.0",
-		Sections: catalog,
+		DocsURL: "https://github.com/projectdiscovery/subfinder",
+		Install: engines.ProjectDiscovery("subfinder"),
+		Version: ">=2.15.0",
+		Options: engines.OptionsFromSections(catalog),
 		Defaults: engines.DefaultProfile{
 			Name: "default",
 			Comment: "Bounded passive enumeration. max-time matters: without it a slow source\n" +

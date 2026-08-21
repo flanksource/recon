@@ -32,14 +32,15 @@ func repoRoot() string {
 	}
 }
 
-// The wire type has to reproduce the TypeScript documents exactly. 207 real
+// The wire type has to reproduce current documents exactly and upgrade the
+// checked-in v1 TypeScript captures onto the stable-id/profile-ref contract. 207 real
 // documents times ~60 optional fields is where a rewrite like this quietly goes
 // wrong: Go marshals a nil slice as null where TypeScript wrote [], and a plain
 // string with omitempty erases an empty value the schema explicitly allows.
 // Decoding and re-encoding every checked-in document is a mechanical,
 // exhaustive proof that the projection is lossless.
 var _ = Describe("TargetDocument", func() {
-	DescribeTable("round-trips every captured document byte-for-byte",
+	DescribeTable("round-trips every captured document after the v2 projection",
 		func(dir string, required bool) {
 			paths, err := filepath.Glob(filepath.Join(repoRoot(), dir, "*.json"))
 			Expect(err).ToNot(HaveOccurred())
@@ -54,10 +55,12 @@ var _ = Describe("TargetDocument", func() {
 
 				var target api.TargetDocument
 				Expect(json.Unmarshal(original, &target)).To(Succeed(), "decoding %s", path)
+				upgradeLegacyTarget(&target)
 
 				encoded, err := json.Marshal(target)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(encoded).To(MatchJSON(original), "re-encoding %s", filepath.Base(path))
+				Expect(encoded).To(MatchJSON(upgradeLegacyJSON(original)),
+					"re-encoding %s", filepath.Base(path))
 			}
 		},
 		Entry("the committed snapshot", "contract/snapshot/inventory/targets", true),
@@ -77,8 +80,9 @@ var _ = Describe("TargetDocument", func() {
 			// http.title, every tls string and cpe product/vendor have no
 			// minLength, and the observation normalizer deliberately keeps "".
 			const document = `{
-				"$schema": "../target.schema.json", "version": 1, "host": "a.example.test",
-				"class": "non-prod", "profiles": ["safe"], "tags": [],
+				"$schema": "../target.schema.json", "version": 3,
+				"id": "a.example.test", "host": "a.example.test",
+				"class": "non-prod", "profiles": ["scan:nuclei:safe"], "tags": [],
 				"http": {"title": "", "webserver": "", "content_type": ""},
 				"tls": {"subject_cn": "", "cipher": ""},
 				"tech": {"cpe": [{"cpe": "cpe:2.3:a", "product": "", "vendor": ""}]}
@@ -93,8 +97,9 @@ var _ = Describe("TargetDocument", func() {
 
 		It("preserves an autonomous system number of zero", func() {
 			const document = `{
-				"$schema": "../target.schema.json", "version": 1, "host": "a.example.test",
-				"class": "non-prod", "profiles": ["safe"], "tags": [],
+				"$schema": "../target.schema.json", "version": 3,
+				"id": "a.example.test", "host": "a.example.test",
+				"class": "non-prod", "profiles": ["scan:nuclei:safe"], "tags": [],
 				"network": {"asn": {"number": 0}}
 			}`
 
@@ -110,8 +115,9 @@ var _ = Describe("TargetDocument", func() {
 
 		It("preserves a last_findings count of zero", func() {
 			const document = `{
-				"$schema": "../target.schema.json", "version": 1, "host": "a.example.test",
-				"class": "non-prod", "profiles": ["safe"], "tags": [],
+				"$schema": "../target.schema.json", "version": 3,
+				"id": "a.example.test", "host": "a.example.test",
+				"class": "non-prod", "profiles": ["scan:nuclei:safe"], "tags": [],
 				"scan": {"last_scan": "2026-01-01T00:00:00Z", "last_findings": 0}
 			}`
 
@@ -127,8 +133,9 @@ var _ = Describe("TargetDocument", func() {
 		// moment the first failure is recorded.
 		It("preserves a classified probe failure", func() {
 			const document = `{
-				"$schema": "../target.schema.json", "version": 1, "host": "a.example.test",
-				"class": "non-prod", "profiles": ["safe"], "tags": [],
+				"$schema": "../target.schema.json", "version": 3,
+				"id": "a.example.test", "host": "a.example.test",
+				"class": "non-prod", "profiles": ["scan:nuclei:safe"], "tags": [],
 				"observed": {
 					"last_attempt": "2026-01-01T00:00:00Z",
 					"error": "lookup a.example.test: no such host",
@@ -159,3 +166,31 @@ var _ = Describe("TargetDocument", func() {
 		})
 	})
 })
+
+func upgradeLegacyTarget(target *api.TargetDocument) {
+	if target.Version >= api.TargetVersion {
+		return
+	}
+	target.ID = target.Host
+	for i, profile := range target.Profiles {
+		target.Profiles[i] = "scan:nuclei:" + profile
+	}
+}
+
+func upgradeLegacyJSON(original []byte) []byte {
+	var document map[string]any
+	Expect(json.Unmarshal(original, &document)).To(Succeed())
+	version, _ := document["version"].(float64)
+	if int(version) >= api.TargetVersion {
+		return original
+	}
+	document["version"] = api.TargetVersion
+	document["id"] = document["host"]
+	profiles, _ := document["profiles"].([]any)
+	for i, profile := range profiles {
+		profiles[i] = "scan:nuclei:" + profile.(string)
+	}
+	encoded, err := json.Marshal(document)
+	Expect(err).ToNot(HaveOccurred())
+	return encoded
+}

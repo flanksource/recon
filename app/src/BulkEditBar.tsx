@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
-import { Button, MultiSelect, Select } from "@flanksource/clicky-ui";
+import { Button, MultiSelect, Select } from "@flanksource/clicky-ui/components";
 import { fetchProfiles } from "./api";
-import { CLASS_ORDER, FALLBACK_PROFILES, type TargetClass } from "./types";
+import {
+  CLASS_ORDER,
+  FALLBACK_PROFILES,
+  profileId,
+  type TargetClass,
+} from "./types";
 
 export type BulkEdit =
   | { op: "add-tag"; tag: string }
@@ -39,7 +44,7 @@ export function BulkEditBar({
     fetchProfiles({ kind: "scan" })
       .then((found) => {
         if (cancelled || found.length === 0) return;
-        setAvailable([...new Set(found.map((profile) => profile.name))].sort());
+        setAvailable([...new Set(found.map(profileId))].sort());
       })
       .catch(() => undefined);
     return () => {

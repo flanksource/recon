@@ -45,7 +45,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			WHERE schemaname = 'public' AND tablename NOT LIKE 'schema_migration%'
 			ORDER BY tablename`)
 		Expect(err).ToNot(HaveOccurred())
-		defer rows.Close()
+		DeferCleanup(rows.Close)
 		for rows.Next() {
 			var name string
 			Expect(rows.Scan(&name)).To(Succeed())
@@ -55,7 +55,8 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 
 		Expect(tables).To(ConsistOf(
 			"discoveries", "discovery_hosts",
-			"engine_profiles", "findings", "scan_outputs", "scans", "targets", "zones",
+			"engine_profiles", "findings", "probe_results", "probes",
+			"scan_outputs", "scans", "targets", "zones",
 		))
 	})
 
@@ -82,7 +83,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			)
 			ORDER BY conname`)
 		Expect(err).ToNot(HaveOccurred())
-		defer rows.Close()
+		DeferCleanup(rows.Close)
 
 		var constraints []string
 		for rows.Next() {
@@ -170,8 +171,8 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 				reason = extra[0]
 			}
 			_, err := db.SQL().Exec(
-				`INSERT INTO targets (host, class, profiles, tags, reason)
-				 VALUES ($1, $2, ARRAY['safe']::text[], '{}'::text[], $3)`,
+				`INSERT INTO targets (id, host, class, profiles, tags, reason)
+				 VALUES ($1, $1, $2, ARRAY['scan:nuclei:safe']::text[], '{}'::text[], $3)`,
 				host, class, reason)
 			return err
 		}
@@ -183,6 +184,26 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 
 		It("accepts a well-formed target", func() {
 			Expect(insert("a.example.test", "non-prod")).To(Succeed())
+		})
+
+		It("creates the provider credentials jsonb column", func() {
+			var dataType string
+			Expect(db.SQL().QueryRow(`
+				SELECT data_type FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'targets' AND column_name = 'credentials'
+			`).Scan(&dataType)).To(Succeed())
+			Expect(dataType).To(Equal("jsonb"))
+		})
+
+		It("keeps credentials off host rows", func() {
+			_, err := db.SQL().Exec(`
+				INSERT INTO targets (id, host, class, profiles, tags, credentials)
+				VALUES (
+					'a.example.test', 'a.example.test', 'non-prod',
+					ARRAY['scan:nuclei:safe']::text[], '{}'::text[],
+					'{"envVars":[{"name":"TOKEN","value":"not-allowed"}]}'::jsonb
+				)`)
+			Expect(err).To(MatchError(ContainSubstring("targets_kind_shape")))
 		})
 
 		It("accepts unclassified IP targets created by discovery", func() {
@@ -221,23 +242,23 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 
 		It("accepts a profile outside the application vocabulary", func() {
 			_, err := db.SQL().Exec(
-				`INSERT INTO targets (host, class, profiles, tags)
-				 VALUES ('a.example.test', 'non-prod', ARRAY['aggressive']::text[], '{}'::text[])`)
+				`INSERT INTO targets (id, host, class, profiles, tags)
+				 VALUES ('a.example.test', 'a.example.test', 'non-prod', ARRAY['scan:nuclei:aggressive']::text[], '{}'::text[])`)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("rejects an empty profiles array", func() {
 			_, err := db.SQL().Exec(
-				`INSERT INTO targets (host, class, profiles, tags)
-				 VALUES ('a.example.test', 'non-prod', '{}'::text[], '{}'::text[])`)
+				`INSERT INTO targets (id, host, class, profiles, tags)
+				 VALUES ('a.example.test', 'a.example.test', 'non-prod', '{}'::text[], '{}'::text[])`)
 			Expect(err).To(MatchError(ContainSubstring("targets_profiles_nonempty")))
 		})
 
 		DescribeTable("bounds curated ports",
 			func(ports string, succeeds bool) {
 				_, err := db.SQL().Exec(
-					`INSERT INTO targets (host, class, profiles, tags, ports)
-					 VALUES ('a.example.test', 'non-prod', ARRAY['safe']::text[], '{}'::text[], ` + ports + `)`)
+					`INSERT INTO targets (id, host, class, profiles, tags, ports)
+					 VALUES ('a.example.test', 'a.example.test', 'non-prod', ARRAY['scan:nuclei:safe']::text[], '{}'::text[], ` + ports + `)`)
 				if succeeds {
 					Expect(err).ToNot(HaveOccurred())
 					return

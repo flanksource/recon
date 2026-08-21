@@ -16,14 +16,36 @@ import (
 // NewTarget is the body of a create: the fields fixed when a target comes into
 // existence, and the curated fields that are not.
 type NewTarget struct {
-	// Host is the target's identity.
+	// ID is the stable inventory identity. Host is populated only for an
+	// addressable target; provider contexts carry their scope in Arguments.
+	ID   string
 	Host string
 
 	// Kind is how a scan reaches it. Settable only here, for the same reason
 	// Host is: changing it would repoint every future run at something else.
 	Kind TargetKind
 
+	Provider       string
+	CredentialMode CredentialMode
+	Arguments      map[string]any
+	Credentials    *ProviderCredentials
+	CredentialsSet bool
+
 	Curated Curated
+}
+
+// TargetUpdate is one atomic edit. Stable identity remains immutable, while a
+// provider context's credential source and non-secret provider arguments may
+// change alongside its curated classification and assigned profiles.
+type TargetUpdate struct {
+	Curated Curated
+
+	// Pointers distinguish an omitted field from explicitly replacing arguments
+	// with an empty object or changing the credential mode.
+	CredentialMode *CredentialMode
+	Arguments      *map[string]any
+	Credentials    *ProviderCredentials
+	CredentialsSet bool
 }
 
 // TargetFrom decodes the body of a create: the identity fields, which are
@@ -35,12 +57,7 @@ type NewTarget struct {
 // nothing.
 func TargetFrom(body map[string]any) (NewTarget, error) {
 	host, _ := body["host"].(string)
-	if host == "" {
-		host, _ = body["id"].(string)
-	}
-	if host == "" {
-		return NewTarget{}, fmt.Errorf("host is required: it is the target's identity")
-	}
+	id, _ := body["id"].(string)
 
 	kind := KindHost
 	if value, present := body["kind"]; present {
@@ -54,9 +71,60 @@ func TargetFrom(body map[string]any) (NewTarget, error) {
 		}
 	}
 
+	provider, _ := body["provider"].(string)
+	credentialMode, _ := body["credentialMode"].(string)
+	arguments := map[string]any{}
+	if value, present := body["arguments"]; present {
+		decoded, err := objectFrom(value, "arguments")
+		if err != nil {
+			return NewTarget{}, err
+		}
+		arguments = decoded
+	}
+	var credentials *ProviderCredentials
+	value, credentialsSet := body["credentials"]
+	if credentialsSet {
+		decoded, err := credentialsFrom(value)
+		if err != nil {
+			return NewTarget{}, err
+		}
+		credentials = decoded
+	}
+
+	switch kind {
+	case KindHost:
+		if host == "" {
+			host = id
+		}
+		if host == "" {
+			return NewTarget{}, fmt.Errorf("host is required for a host target")
+		}
+		if id == "" {
+			id = host
+		}
+		if provider != "" || credentialMode != "" || len(arguments) > 0 || credentials != nil {
+			return NewTarget{}, fmt.Errorf("a host cannot have provider context")
+		}
+		arguments = nil
+	case KindProviderContext:
+		if id == "" {
+			return NewTarget{}, fmt.Errorf("id is required for a provider-context target")
+		}
+		if host != "" {
+			return NewTarget{}, fmt.Errorf("a provider-context cannot have a host")
+		}
+		if provider == "" {
+			return NewTarget{}, fmt.Errorf("provider is required for a provider-context target")
+		}
+		if !CredentialMode(credentialMode).Valid() {
+			return NewTarget{}, fmt.Errorf("credentialMode is required and must be ambient or configured")
+		}
+	}
+
 	rest := make(map[string]any, len(body))
 	for key, value := range body {
-		if key == "host" || key == "id" || key == "kind" {
+		if key == "host" || key == "id" || key == "kind" || key == "provider" ||
+			key == "credentialMode" || key == "arguments" || key == "credentials" {
 			continue
 		}
 		rest[key] = value
@@ -68,9 +136,126 @@ func TargetFrom(body map[string]any) (NewTarget, error) {
 	}
 	if !kind.Addressable() && len(curated.Ports) > 0 {
 		return NewTarget{}, fmt.Errorf(
-			"a %s has no ports: it is audited through an API rather than contacted over the network", kind)
+			"a %s has no ports: it is audited through a provider API rather than contacted over the network", kind)
 	}
-	return NewTarget{Host: host, Kind: kind, Curated: curated}, nil
+	return NewTarget{
+		ID: id, Host: host, Kind: kind, Provider: provider,
+		CredentialMode: CredentialMode(credentialMode), Arguments: arguments,
+		Credentials: credentials, CredentialsSet: credentialsSet,
+		Curated: curated,
+	}, nil
+}
+
+// TargetUpdateFrom decodes the update body. Provider and kind are stable
+// identity; credentialMode and arguments are mutable provider configuration.
+func TargetUpdateFrom(body map[string]any) (TargetUpdate, error) {
+	for _, identity := range []string{"id", "host", "kind", "provider"} {
+		if _, present := body[identity]; present {
+			return TargetUpdate{}, fmt.Errorf("%s is not editable: it defines the target's identity", identity)
+		}
+	}
+
+	var mode *CredentialMode
+	if value, present := body["credentialMode"]; present {
+		text, ok := value.(string)
+		if !ok || !CredentialMode(text).Valid() {
+			return TargetUpdate{}, fmt.Errorf("credentialMode must be ambient or configured")
+		}
+		parsed := CredentialMode(text)
+		mode = &parsed
+	}
+
+	var arguments *map[string]any
+	if value, present := body["arguments"]; present {
+		parsed, err := objectFrom(value, "arguments")
+		if err != nil {
+			return TargetUpdate{}, err
+		}
+		arguments = &parsed
+	}
+	var credentials *ProviderCredentials
+	credentialsSet := false
+	if value, present := body["credentials"]; present {
+		credentialsSet = true
+		parsed, err := credentialsFrom(value)
+		if err != nil {
+			return TargetUpdate{}, err
+		}
+		credentials = parsed
+	}
+
+	rest := make(map[string]any, len(body))
+	for key, value := range body {
+		if key != "credentialMode" && key != "arguments" && key != "credentials" {
+			rest[key] = value
+		}
+	}
+	curated, err := CuratedFrom(rest)
+	if err != nil {
+		return TargetUpdate{}, err
+	}
+	return TargetUpdate{
+		Curated: curated, CredentialMode: mode, Arguments: arguments,
+		Credentials: credentials, CredentialsSet: credentialsSet,
+	}, nil
+}
+
+func credentialsFrom(value any) (*ProviderCredentials, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if text, ok := value.(string); ok && strings.TrimSpace(text) == "null" {
+		return nil, nil
+	}
+	object, err := objectFrom(value, "credentials")
+	if err != nil {
+		return nil, err
+	}
+	if values, ok := object["envVars"].([]any); ok {
+		for _, value := range values {
+			item, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			if _, present := item["configured"]; present {
+				return nil, fmt.Errorf("credential configured is read-only")
+			}
+		}
+	}
+	var credentials ProviderCredentials
+	if err := decode(object, &credentials); err != nil {
+		return nil, err
+	}
+	if err := credentials.ValidateWrite(); err != nil {
+		return nil, err
+	}
+	return &credentials, nil
+}
+
+// objectFrom decodes a nested object field.
+//
+// It arrives either as an object — a JSON body posted directly, or a document
+// read off disk — or as a JSON string, because the HTTP executor flattens every
+// top-level body value to a string before a handler sees it. Accepting only the
+// object form made provider-context arguments unsettable over HTTP: both the
+// create and the update refused every request the UI could send. ProfileFrom's
+// config has taken both forms for the same reason since it was written.
+func objectFrom(value any, field string) (map[string]any, error) {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed, nil
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return map[string]any{}, nil
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(typed), &decoded); err != nil {
+			return nil, fmt.Errorf("%s must be a JSON object: %w", field, err)
+		}
+		return decoded, nil
+	default:
+		return nil, fmt.Errorf("%s must be an object", field)
+	}
 }
 
 func validKind(kind TargetKind) bool {
@@ -100,6 +285,11 @@ func CuratedFrom(body map[string]any) (Curated, error) {
 	// that omitted it would turn a cloud account back into a hostname.
 	if _, present := body["kind"]; present {
 		return Curated{}, fmt.Errorf("kind is not editable: it is fixed when the target is created")
+	}
+	for _, identity := range []string{"id", "provider", "credentialMode", "arguments", "credentials"} {
+		if _, present := body[identity]; present {
+			return Curated{}, fmt.Errorf("%s is not editable: it defines the target's provider context", identity)
+		}
 	}
 	for _, machine := range []string{"observed", "network", "http", "tech", "tls", "scan"} {
 		if _, present := body[machine]; present {

@@ -9,6 +9,7 @@ function row(overrides: Partial<TableRow> = {}): TableRow {
   return {
     $schema: "../target.schema.json",
     version: 1,
+    id: "api.example.com",
     host: "api.example.com",
     class: "prod",
     profiles: ["safe"],
@@ -23,6 +24,29 @@ function column(key: string) {
   expect(found, `no ${key} column`).toBeDefined();
   return found!;
 }
+
+describe("the Target column", () => {
+  afterEach(cleanup);
+
+  it("uses the stable id while keeping the provider as descriptive context", () => {
+    render(
+      <>
+        {column("id").render?.(
+          "gcp-production",
+          row({
+            id: "gcp-production",
+            host: undefined,
+            kind: "provider-context",
+            provider: "gcp",
+          }),
+        )}
+      </>,
+    );
+
+    expect(screen.getByText("gcp-production")).toBeInTheDocument();
+    expect(screen.getByText("gcp")).toBeInTheDocument();
+  });
+});
 
 describe("the Status column", () => {
   afterEach(cleanup);
@@ -102,11 +126,16 @@ describe("the Kind column", () => {
     expect(screen.getByText("Host")).toBeInTheDocument();
   });
 
-  it("names a cloud account by its provider", () => {
+  it("names a provider-native target independently of its provider", () => {
     render(
-      <>{column("kind").render?.("gcp-project", row({ kind: "gcp-project" }))}</>,
+      <>
+        {column("kind").render?.(
+          "provider-context",
+          row({ kind: "provider-context", provider: "gcp" }),
+        )}
+      </>,
     );
-    expect(screen.getByText("GCP project")).toBeInTheDocument();
+    expect(screen.getByText("Provider context")).toBeInTheDocument();
   });
 
   // The filter has to agree with what is rendered, or selecting "host" in the
@@ -114,7 +143,10 @@ describe("the Kind column", () => {
   it("filters on the resolved kind rather than the raw cell", () => {
     expect(column("kind").filterValue?.(undefined, row())).toBe("host");
     expect(
-      column("kind").filterValue?.("gcp-project", row({ kind: "gcp-project" })),
-    ).toBe("gcp-project");
+      column("kind").filterValue?.(
+        "provider-context",
+        row({ kind: "provider-context", provider: "gcp" }),
+      ),
+    ).toBe("provider-context");
   });
 });

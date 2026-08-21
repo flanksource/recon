@@ -10,183 +10,15 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScanDialog } from "./ScanDialog";
-import type {
-  Discover,
-  Engine,
-  Profile,
-  Scan,
-  TargetRow,
-  TemplatePreview,
-} from "./types";
-
-const rows: TargetRow[] = [
-  {
-    $schema: "../target.schema.json",
-    version: 1,
-    host: "api.example.com",
-    class: "non-prod",
-    profiles: ["safe"],
-    tags: ["api"],
-  },
-  {
-    $schema: "../target.schema.json",
-    version: 1,
-    host: "docs.example.com",
-    class: "public",
-    profiles: ["safe"],
-    tags: ["docs"],
-  },
-];
-
-const nucleiEngine: Engine = {
-  _id: "scan:nuclei",
-  name: "nuclei",
-  kind: "scan",
-  title: "Nuclei",
-  binary: "nuclei",
-  installed: true,
-  managed: true,
-  sections: [
-    {
-      id: "scan",
-      title: "Scan",
-      properties: {
-        dast: { type: "boolean", title: "DAST" },
-      },
-    },
-  ],
-};
-
-// Every run in this dialog sweeps before it scans, so the dialog also loads the
-// discovery catalog. Naabu has a second profile so an override can be chosen.
-const naabuEngine: Engine = {
-  _id: "discovery:naabu",
-  name: "naabu",
-  kind: "discovery",
-  title: "Naabu",
-  binary: "naabu",
-  installed: true,
-  managed: true,
-  sections: [
-    {
-      id: "ports",
-      title: "Ports",
-      properties: { "top-ports": { type: "string", title: "Top ports" } },
-    },
-  ],
-};
-
-const discoveryProfiles: Profile[] = [
-  {
-    _id: "discovery:naabu:default",
-    kind: "discovery",
-    engine: "naabu",
-    name: "default",
-    config: { "top-ports": "100" },
-  },
-  {
-    _id: "discovery:naabu:full-ports",
-    kind: "discovery",
-    engine: "naabu",
-    name: "full-ports",
-    config: { "top-ports": "65535" },
-  },
-];
-
-const safeProfile: Profile = {
-  _id: "scan:nuclei:safe",
-  kind: "scan",
-  engine: "nuclei",
-  name: "safe",
-  config: {},
-  intrusive: false,
-};
-
-// The engine reports its own verdict on a configuration, and the confirm gate
-// keys off that rather than off the profile's name.
-const intrusiveProfile: Profile = {
-  _id: "scan:nuclei:full",
-  kind: "scan",
-  engine: "nuclei",
-  name: "full",
-  config: { dast: true },
-  intrusive: true,
-  reason: "DAST sends active payloads",
-};
-
-// What the chosen profile would run. A profile name says nothing about how much
-// it checks, so the dialog previews it before the scan starts.
-const templatePreview: TemplatePreview = {
-  engine: "nuclei",
-  total: 4314,
-  bySeverity: { critical: 96, high: 803 },
-  byType: { http: 4314 },
-  byTag: [{ tag: "panel", count: 1200 }],
-  maxRequests: 9000,
-  templates: [],
-  truncated: true,
-};
-
-const createdScan: Scan = {
-  _id: "scan-1",
-  id: "scan-1",
-  name: "run-1",
-  engine: "nuclei",
-  profile: "safe",
-  selector: { hosts: ["api.example.com"] },
-  selectorLabel: "hosts api.example.com",
-  endpointCount: 1,
-  phase: "running",
-  startedAt: "2026-08-09T08:00:00.000Z",
-  durationMs: 0,
-  findings: 0,
-  severities: {
-    critical: 0,
-    high: 0,
-    medium: 0,
-    low: 0,
-    info: 0,
-    unknown: 0,
-  },
-  hosts: ["api.example.com"],
-};
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-// The discovery catalog is served first so the kind-qualified prefixes win over
-// the bare ones — the two listings differ only by query string.
-function mockFetch(handlers: Record<string, unknown>) {
-  const routes: Record<string, unknown> = {
-    "/api/v1/engine?kind=discovery": [naabuEngine],
-    "/api/v1/profile?kind=discovery": discoveryProfiles,
-    "/api/template/preview": templatePreview,
-    // The scan profile form is editable in this dialog, and it reads the
-    // template vocabulary to offer the include/exclude filter pairs.
-    "/api/v1/template": { filters: {} },
-    ...handlers,
-  };
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = typeof input === "string" ? input : (input as Request).url;
-    const path = url.replace(/^https?:\/\/[^/]+/, "");
-    const match = Object.entries(routes).find(([prefix]) =>
-      path.startsWith(prefix),
-    );
-    if (!match) throw new Error(`unexpected fetch: ${path}`);
-    // A route may answer the request rather than name a fixed body, which is
-    // how a spec reads what a run actually sent.
-    const body = match[1];
-    return jsonResponse(
-      typeof body === "function"
-        ? (body as (path: string, init?: RequestInit) => unknown)(path, init)
-        : body,
-    );
-  });
-}
+import {
+  createdScan,
+  intrusiveProfile,
+  mockFetch,
+  nucleiEngine,
+  rows,
+  safeProfile,
+} from "./ScanDialog.test-support";
+import type { Discover } from "./types";
 
 describe("ScanDialog", () => {
   afterEach(() => {
@@ -207,8 +39,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={onStatus}
       />,
@@ -227,7 +59,7 @@ describe("ScanDialog", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            host: ["api.example.com"],
+            id: ["api.example.com"],
             engine: "nuclei",
             profile: "safe",
             "discovery-profile": ["default"],
@@ -262,8 +94,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
       />,
@@ -294,8 +126,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
       />,
@@ -330,8 +162,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
       />,
@@ -371,8 +203,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={status}
         onStatus={vi.fn()}
         editableProfile
@@ -400,8 +232,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
         editableProfile
@@ -425,7 +257,7 @@ describe("ScanDialog", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            host: ["api.example.com"],
+            id: ["api.example.com"],
             engine: "nuclei",
             profile: "full",
             "discovery-profile": ["default"],
@@ -435,7 +267,7 @@ describe("ScanDialog", () => {
         }),
       ),
     );
-    expect(rows[0].profiles).toEqual(["safe"]);
+    expect(rows[0].profiles).toEqual(["scan:nuclei:safe"]);
   });
 
   it("requires confirmation for an intrusive scan of a prod or public host", async () => {
@@ -450,15 +282,15 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["docs.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["docs.example.com"]}
         status={null}
         onStatus={vi.fn()}
       />,
     );
 
     const authorisation = await screen.findByText(
-      /prod\/public or unsaved host/,
+      /prod\/public or unsaved target/,
     );
     expect(screen.getByRole("button", { name: "Scan 1 host" })).toBeDisabled();
 
@@ -477,7 +309,7 @@ describe("ScanDialog", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            host: ["docs.example.com"],
+            id: ["docs.example.com"],
             engine: "nuclei",
             profile: "full",
             "discovery-profile": ["default"],
@@ -503,8 +335,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["docs.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["docs.example.com"]}
         status={null}
         onStatus={vi.fn()}
       />,
@@ -513,7 +345,7 @@ describe("ScanDialog", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Scan 1 host" })).toBeEnabled(),
     );
-    expect(screen.queryByText(/prod\/public or unsaved host/)).toBeNull();
+    expect(screen.queryByText(/prod\/public or unsaved target/)).toBeNull();
   });
 
   it("allows discovery to auto-inventory an unsaved explicit host", async () => {
@@ -535,8 +367,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={[]}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={[]}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
         discoveryOnly
@@ -580,8 +412,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
         discoveryOnly
@@ -617,8 +449,8 @@ describe("ScanDialog", () => {
         open
         onClose={vi.fn()}
         rows={rows}
-        savedHosts={rows.map((row) => row.host)}
-        selectedHosts={["api.example.com"]}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
         status={null}
         onStatus={vi.fn()}
       />,
@@ -639,7 +471,7 @@ describe("ScanDialog", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            host: ["api.example.com"],
+            id: ["api.example.com"],
             engine: "nuclei",
             profile: "safe",
             "discovery-profile": ["default", "naabu=full-ports"],

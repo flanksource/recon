@@ -2,12 +2,17 @@ package engines
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/flanksource/commons/logger"
 	"github.com/flanksource/deps"
 	"github.com/flanksource/deps/pkg/config"
 	"github.com/flanksource/deps/pkg/types"
@@ -15,11 +20,9 @@ import (
 
 // Provisioner installs and locates engine binaries.
 //
-// Engines declare a deps.Package rather than an install command, so a binary is
-// version-pinned and checksum-verified instead of whatever `go install @latest`
-// happened to fetch. An existing copy on PATH is honoured via the package's
-// PreInstalled list — this does not insist on managing a tool the machine
-// already has.
+// Managed engines declare a deps.Package rather than an install command, so a
+// binary is version-pinned and checksum-verified. PATH-only prerequisites are
+// resolved and version-checked but remain externally managed.
 type Provisioner struct {
 	BinDir string
 	AppDir string
@@ -38,6 +41,14 @@ func NewProvisioner(binDir string) *Provisioner {
 
 // register merges every engine package into the deps registry. Done once and
 // lazily: the registry is process-global, and merging twice would be wasted work.
+//
+// An engine's own package wins over a default deps already carries for the same
+// name. The spec is the declaration recon tests — that every platform has an
+// asset and that the download is checksum-verified — and deferring to the
+// registry meant installing something those tests never described. It is not
+// hypothetical: deps resolves trivy through a redirector whose file name is
+// absent from the release's checksums file, so the install recon would have got
+// was unverified while its own spec named the asset that carries a sum.
 func (p *Provisioner) register(specs []Spec) error {
 	p.once.Do(func() {
 		registry := config.GetGlobalRegistry()
@@ -49,8 +60,7 @@ func (p *Provisioner) register(specs []Spec) error {
 			registry.Registry = map[string]types.Package{}
 		}
 		for _, spec := range specs {
-			// Do not shadow a package deps already knows how to install.
-			if _, exists := registry.Registry[spec.Install.Name]; exists {
+			if spec.InProcess || spec.Provisioning == ProvisioningPathOnly {
 				continue
 			}
 			registry.Registry[spec.Install.Name] = spec.Install
@@ -70,6 +80,13 @@ const InProcessPath = "(in-process)"
 func (p *Provisioner) Install(ctx context.Context, spec Spec, all []Spec) (string, error) {
 	if spec.InProcess {
 		return InProcessPath, nil
+	}
+	if spec.Provisioning == ProvisioningPathOnly {
+		path, err := p.Resolve(spec)
+		if err != nil {
+			return "", errors.New(spec.InstallInstructions)
+		}
+		return path, nil
 	}
 	if err := p.register(all); err != nil {
 		return "", err
@@ -101,6 +118,20 @@ func (p *Provisioner) Resolve(spec Spec) (string, error) {
 	if spec.InProcess {
 		return InProcessPath, nil
 	}
+	if spec.Provisioning == ProvisioningPathOnly {
+		found, err := pathOnlyExecutable(spec)
+		if err != nil {
+			return "", err
+		}
+		warning, err := verifyExternalVersion(spec, found)
+		if err != nil {
+			return "", err
+		}
+		if warning != "" {
+			logger.Warnf("%s; continuing", warning)
+		}
+		return found, nil
+	}
 
 	managed := filepath.Join(p.BinDir, spec.Binary)
 	if executable(managed) {
@@ -114,7 +145,7 @@ func (p *Provisioner) Resolve(spec Spec) (string, error) {
 	return found, nil
 }
 
-// Status reports what is installed, for `doctor`.
+// Status reports whether an engine binary is present without running it.
 type Status struct {
 	Engine    string
 	Binary    string
@@ -124,7 +155,8 @@ type Status struct {
 	Problem   string
 }
 
-// Status resolves one engine's installation state.
+// Status inspects one engine's installation state. Resolve performs the full
+// version check immediately before a PATH-only engine is used.
 func (p *Provisioner) Status(spec Spec) Status {
 	status := Status{Engine: spec.Name, Binary: spec.Binary}
 
@@ -138,15 +170,59 @@ func (p *Provisioner) Status(spec Spec) Status {
 		return status
 	}
 
-	path, err := p.Resolve(spec)
+	var path string
+	var err error
+	if spec.Provisioning == ProvisioningPathOnly {
+		path, err = pathOnlyExecutable(spec)
+	} else {
+		path, err = p.Resolve(spec)
+	}
 	if err != nil {
 		status.Problem = err.Error()
 		return status
 	}
 	status.Path = path
 	status.Installed = true
-	status.Managed = filepath.Dir(path) == filepath.Clean(p.BinDir)
+	status.Managed = spec.Provisioning != ProvisioningPathOnly && filepath.Dir(path) == filepath.Clean(p.BinDir)
 	return status
+}
+
+func pathOnlyExecutable(spec Spec) (string, error) {
+	found, err := exec.LookPath(spec.Binary)
+	if err != nil {
+		return "", fmt.Errorf("%s is not installed on PATH: %s", spec.Binary, spec.InstallInstructions)
+	}
+	return found, nil
+}
+
+func verifyExternalVersion(spec Spec, path string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, path, strings.Fields(spec.Install.VersionCommand)...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("check %s version: %w: %s", spec.Binary, err, strings.TrimSpace(string(output)))
+	}
+
+	pattern := spec.Install.VersionRegex
+	if pattern == "" {
+		pattern = `v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)`
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("check %s version: invalid pattern %q: %w", spec.Binary, pattern, err)
+	}
+	match := compiled.FindStringSubmatch(string(output))
+	if len(match) < 2 {
+		return "", fmt.Errorf("check %s version: output %q does not match %q", spec.Binary, strings.TrimSpace(string(output)), pattern)
+	}
+	installed := strings.TrimPrefix(match[1], "v")
+	required := strings.TrimPrefix(spec.Version, "v")
+	if installed != required {
+		return fmt.Sprintf(
+			"%s version %q does not match required %q: %s",
+			spec.Binary, installed, required, spec.InstallInstructions), nil
+	}
+	return "", nil
 }
 
 func executable(path string) bool {

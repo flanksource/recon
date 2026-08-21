@@ -2,13 +2,10 @@ package server_test
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +69,55 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 	})
 
 	Describe("the generated OpenAPI description", func() {
+		It("publishes every Prowler provider's CLI, profile, context, and credential schemas", func() {
+			components, _ := spec["components"].(map[string]any)
+			schemas, _ := components["schemas"].(map[string]any)
+			for _, name := range []string{
+				"ProwlerGCPCLIOptions", "ProwlerGCPProfileOptions", "ProwlerGCPContextOptions",
+				"ProwlerGCPCredential",
+				"ProwlerGitHubCLIOptions", "ProwlerGitHubProfileOptions", "ProwlerGitHubContextOptions",
+				"ProwlerGitHubCredential",
+			} {
+				Expect(schemas).To(HaveKey(name), name)
+			}
+			prowlerSchemas := 0
+			for name := range schemas {
+				if strings.HasPrefix(name, "Prowler") {
+					prowlerSchemas++
+				}
+			}
+			Expect(prowlerSchemas).To(Equal(23 * 4))
+
+			gcp, _ := schemas["ProwlerGCPProfileOptions"].(map[string]any)
+			Expect(gcp).ToNot(HaveKey("$schema"))
+			properties, _ := gcp["properties"].(map[string]any)
+			provider, _ := properties["provider"].(map[string]any)
+			Expect(provider).ToNot(HaveKey("const"))
+			Expect(provider).To(HaveKeyWithValue("enum", ConsistOf("gcp")))
+		})
+
+		It("caches JSON and YAML with representation-specific validators", func() {
+			jsonResponse, err := http.Get(suite.URL + "/api/openapi.json")
+			Expect(err).ToNot(HaveOccurred())
+			DeferCleanup(jsonResponse.Body.Close)
+			jsonETag := jsonResponse.Header.Get("ETag")
+			Expect(jsonETag).ToNot(BeEmpty())
+
+			yamlResponse, err := http.Get(suite.URL + "/api/openapi.yaml")
+			Expect(err).ToNot(HaveOccurred())
+			DeferCleanup(yamlResponse.Body.Close)
+			Expect(yamlResponse.Header.Get("ETag")).ToNot(BeEmpty())
+			Expect(yamlResponse.Header.Get("ETag")).ToNot(Equal(jsonETag))
+
+			request, err := http.NewRequest(http.MethodGet, suite.URL+"/api/openapi.json", nil)
+			Expect(err).ToNot(HaveOccurred())
+			request.Header.Set("If-None-Match", jsonETag)
+			cached, err := http.DefaultClient.Do(request)
+			Expect(err).ToNot(HaveOccurred())
+			DeferCleanup(cached.Body.Close)
+			Expect(cached.StatusCode).To(Equal(http.StatusNotModified))
+		})
+
 		It("gives every entity a list and a get", func() {
 			paths, _ := spec["paths"].(map[string]any)
 			for _, entity := range []string{"target", "scan", "finding", "discover", "probe", "profile", "engine"} {
@@ -196,7 +242,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 			}
 
 			Expect(verbs).To(HaveKeyWithValue("target",
-				[]string{"list", "get", "create", "update"}))
+				[]string{"list", "get", "create", "update", "delete"}))
 			Expect(verbs).To(HaveKeyWithValue("profile",
 				[]string{"list", "get", "create", "update", "delete"}))
 			Expect(verbs).To(HaveKeyWithValue("engine", []string{"list", "get"}))
@@ -205,10 +251,19 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 
 	Describe("targets", func() {
 		BeforeAll(func() {
+			_, err := st.SaveProfile(GinkgoT().Context(), api.Profile{
+				Kind: "scan", Engine: "nuclei", Name: "server-test", Config: map[string]any{},
+			})
+			Expect(err).ToNot(HaveOccurred())
+			_, err = st.SaveProfile(GinkgoT().Context(), api.Profile{
+				Kind: "scan", Engine: "prowler", Name: "gcp-cis-5-0-gcp",
+				Config: map[string]any{"provider": "gcp", "compliance": []any{"cis_5.0_gcp"}},
+			})
+			Expect(err).ToNot(HaveOccurred())
 			Expect(st.SaveTarget(GinkgoT().Context(), api.TargetDocument{
 				Schema: api.TargetSchemaRef, Version: api.TargetVersion,
 				Host: "one.example.test", Class: api.ClassNonProd,
-				Profiles: []string{"safe"}, Tags: []string{"http"},
+				Profiles: []string{"scan:nuclei:server-test"}, Tags: []string{"http"},
 			})).To(Succeed())
 		})
 
@@ -244,22 +299,33 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 		// inventory" with nothing to call.
 		It("classifies a discovered host into the inventory", func() {
 			created := send(http.MethodPost, suite.URL+"/api/v1/target",
-				`{"host":"found.example.test","class":"non-prod","profiles":["safe"],"tags":["http"]}`)
+				`{"host":"found.example.test","class":"non-prod","profiles":["scan:nuclei:server-test"],"tags":["http"]}`)
 
 			var target api.TargetDocument
 			Expect(json.Unmarshal(created, &target)).To(Succeed(), string(created))
-			Expect(target.Host).To(Equal("found.example.test"))
+			Expect(target.Host).To(Equal("found.example.test"), string(created))
 			Expect(target.Class).To(Equal(api.ClassNonProd))
 
 			Expect(getJSON[api.TargetDocument](
 				suite.URL + "/api/v1/target/found.example.test").Tags).To(Equal([]string{"http"}))
 		})
 
+		It("creates a provider context with structured arguments", func() {
+			created := send(http.MethodPost, suite.URL+"/api/v1/target",
+				`{"id":"gcp-server-test","kind":"provider-context","provider":"gcp","credentialMode":"ambient","arguments":{"project-ids":["example-prod"]},"class":"non-prod","profiles":["scan:prowler:gcp-cis-5-0-gcp"],"tags":[]}`)
+
+			var target api.TargetDocument
+			Expect(json.Unmarshal(created, &target)).To(Succeed(), string(created))
+			Expect(target.ID).To(Equal("gcp-server-test"), string(created))
+			Expect(target.Arguments).To(Equal(map[string]any{"project-ids": []any{"example-prod"}}))
+			Expect(st.DeleteTarget(GinkgoT().Context(), target.ID)).To(Succeed())
+		})
+
 		It("refuses to add a host that is already curated", func() {
 			// Overwriting would discard whoever classified it first, and the
 			// caller asked to add rather than to replace.
 			Expect(errorOf(send(http.MethodPost, suite.URL+"/api/v1/target",
-				`{"host":"one.example.test","class":"prod","profiles":["safe"],"tags":[]}`))).
+				`{"host":"one.example.test","class":"prod","profiles":["scan:nuclei:server-test"],"tags":[]}`))).
 				To(ContainSubstring("already in the inventory"))
 		})
 
@@ -330,7 +396,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 		It("rejects a config its engine would reject", func() {
 			Expect(errorOf(send(http.MethodPost, suite.URL+"/api/v1/profile",
 				`{"kind":"scan","engine":"nuclei","name":"bad","config":{"nonsense":1}}`))).
-				To(ContainSubstring("unsupported option: nonsense"))
+				To(ContainSubstring("additional properties 'nonsense' not allowed"))
 		})
 
 		It("rejects mutually exclusive Nuclei execution modes", func() {
@@ -349,17 +415,58 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 	Describe("engines", func() {
 		It("serves the registry, including the option catalog the form needs", func() {
 			engines := getJSON[[]api.EngineSpec](suite.URL + "/api/v1/engine")
-			Expect(engines).To(HaveLen(7))
+			Expect(engines).To(HaveLen(10))
 
-			var nuclei api.EngineSpec
+			var nuclei, prowler, trivy api.EngineSpec
 			for _, engine := range engines {
-				if engine.Name == "nuclei" {
+				switch engine.Name {
+				case "nuclei":
 					nuclei = engine
+				case "prowler":
+					prowler = engine
+				case "trivy":
+					trivy = engine
 				}
 			}
 			Expect(nuclei.Kind).To(Equal("scan"))
-			Expect(nuclei.Sections).ToNot(BeNil())
+			Expect(nuclei.Options.Variants).To(HaveLen(1))
 			Expect(nuclei.Defaults).To(Equal("safe"))
+			Expect(nuclei.Templates).ToNot(BeNil())
+			Expect(nuclei.Templates.ItemLabel).To(Equal("template"))
+			Expect(nuclei.Templates.ProfileLabel).To(Equal("profile"))
+			Expect(prowler.Options.Discriminator).To(Equal("provider"))
+			Expect(prowler.Options.Variants).ToNot(BeEmpty())
+			Expect(prowler.Templates).ToNot(BeNil())
+			Expect(prowler.Templates.ItemLabel).To(Equal("check"))
+			Expect(prowler.Templates.ProfileLabel).To(Equal("compliance framework"))
+
+			// Trivy is the second provider-backed engine, so the form has to
+			// pick a variant by provider for it too. It offers no template
+			// preview: its checks come from databases fetched at scan time, not
+			// from a corpus on disk that could be listed beforehand.
+			Expect(trivy.Kind).To(Equal("scan"))
+			Expect(trivy.Subject).To(Equal("provider-contexts"))
+			Expect(trivy.Options.Discriminator).To(Equal("provider"))
+			Expect(trivy.Options.Variants).To(HaveLen(3))
+			Expect(trivy.Templates).To(BeNil())
+		})
+
+		It("says what each scan engine's input list holds", func() {
+			// Which targets an engine's profiles may be assigned to is decided by
+			// its subject, and a control that guessed instead — say, from whether
+			// the engine declares providers — offers inspec's cloud-account
+			// compliance profile against a hostname it can never reach.
+			subjects := map[string]string{}
+			for _, engine := range getJSON[[]api.EngineSpec](suite.URL + "/api/v1/engine") {
+				if engine.Kind == "scan" {
+					subjects[engine.Name] = engine.Subject
+				}
+			}
+
+			Expect(subjects).To(HaveKeyWithValue("prowler", "provider-contexts"))
+			Expect(subjects).To(HaveKeyWithValue("inspec", "accounts"))
+			// Endpoints is the zero value, so a network scanner says nothing.
+			Expect(subjects).To(HaveKeyWithValue("nuclei", ""))
 		})
 
 		It("reports a discovery engine's place in the chain", func() {
@@ -369,126 +476,3 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 		})
 	})
 })
-
-// errorOf reads the error out of the executor's response envelope. Asserting on
-// the raw bytes would be asserting on JSON escaping rather than on the message.
-func errorOf(body []byte) string {
-	var envelope struct {
-		Error string `json:"error"`
-	}
-	Expect(json.Unmarshal(body, &envelope)).To(Succeed(),
-		fmt.Sprintf("not an error envelope: %s", truncate(body)))
-	Expect(envelope.Error).ToNot(BeEmpty(),
-		fmt.Sprintf("expected an error, got %s", truncate(body)))
-	return envelope.Error
-}
-
-func operationID(operation any) string {
-	fields, _ := operation.(map[string]any)
-	id, _ := fields["operationId"].(string)
-	return id
-}
-
-func parameters(spec map[string]any, path, method string) []string {
-	paths, _ := spec["paths"].(map[string]any)
-	item, _ := paths[path].(map[string]any)
-	operation, _ := item[method].(map[string]any)
-	declared, _ := operation["parameters"].([]any)
-
-	var names []string
-	for _, parameter := range declared {
-		fields, _ := parameter.(map[string]any)
-		if name, ok := fields["name"].(string); ok {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-// parameterRoles maps each declared query parameter to the control the UI is
-// told to render it as.
-func parameterRoles(spec map[string]any, path, method string) map[string]string {
-	paths, _ := spec["paths"].(map[string]any)
-	item, _ := paths[path].(map[string]any)
-	operation, _ := item[method].(map[string]any)
-	declared, _ := operation["parameters"].([]any)
-
-	roles := map[string]string{}
-	for _, parameter := range declared {
-		fields, _ := parameter.(map[string]any)
-		name, ok := fields["name"].(string)
-		if !ok {
-			continue
-		}
-		meta, _ := fields["x-clicky"].(map[string]any)
-		role, _ := meta["role"].(string)
-		roles[name] = role
-	}
-	return roles
-}
-
-// lookupFilter is one control as the lookup describes it. Options is keyed by
-// the value the filter sends, which is what makes values() the option set.
-type lookupFilter struct {
-	Label   string                     `json:"label"`
-	Multi   bool                       `json:"multi"`
-	Total   int                        `json:"total"`
-	Options map[string]json.RawMessage `json:"options"`
-}
-
-func (f lookupFilter) values() []string {
-	values := make([]string, 0, len(f.Options))
-	for value := range f.Options {
-		values = append(values, value)
-	}
-	sort.Strings(values)
-	return values
-}
-
-// lookup asks a listing what its filters offer. search is the extra query
-// string that narrows one of them, or "" for every filter's head set.
-func lookup(url, search string) map[string]lookupFilter {
-	response := getJSON[struct {
-		Filters map[string]lookupFilter `json:"filters"`
-	}](url + "?__lookup=filters" + search)
-	return response.Filters
-}
-
-func get(url string) []byte {
-	response, err := http.Get(url)
-	Expect(err).ToNot(HaveOccurred())
-	defer response.Body.Close()
-
-	body, err := io.ReadAll(response.Body)
-	Expect(err).ToNot(HaveOccurred())
-	return body
-}
-
-func send(method, url, body string) []byte {
-	request, err := http.NewRequest(method, url, strings.NewReader(body))
-	Expect(err).ToNot(HaveOccurred())
-	request.Header.Set("Content-Type", "application/json")
-
-	response, err := http.DefaultClient.Do(request)
-	Expect(err).ToNot(HaveOccurred())
-	defer response.Body.Close()
-
-	read, err := io.ReadAll(response.Body)
-	Expect(err).ToNot(HaveOccurred())
-	return read
-}
-
-func getJSON[T any](url string) T {
-	body := get(url)
-	var decoded T
-	Expect(json.Unmarshal(body, &decoded)).To(Succeed(),
-		fmt.Sprintf("%s returned %s", url, truncate(body)))
-	return decoded
-}
-
-func truncate(body []byte) string {
-	if len(body) > 400 {
-		return string(body[:400]) + "…"
-	}
-	return string(body)
-}

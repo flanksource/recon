@@ -27,19 +27,18 @@ func selectorMap(opts store.TargetOpts) (*map[string]any, error) {
 	return &stored, nil
 }
 
-// coveredHosts reduces the resolved endpoints to the distinct hosts behind
-// them. A host with three open ports is three endpoints and one host, and what
-// gets stamped as scanned is the host.
-func coveredHosts(endpoints []store.Endpoint) []string {
+// targetIDsOf reduces resolved endpoints to their stable inventory identities.
+// A host with three open ports is three endpoints and one target.
+func targetIDsOf(endpoints []store.Endpoint) []string {
 	seen := map[string]bool{}
-	var hosts []string
+	var ids []string
 	for _, endpoint := range endpoints {
-		if endpoint.Host != "" && !seen[endpoint.Host] {
-			seen[endpoint.Host] = true
-			hosts = append(hosts, endpoint.Host)
+		if endpoint.TargetID != "" && !seen[endpoint.TargetID] {
+			seen[endpoint.TargetID] = true
+			ids = append(ids, endpoint.TargetID)
 		}
 	}
-	return hosts
+	return ids
 }
 
 func hostsOf(findings []api.Finding) []string {

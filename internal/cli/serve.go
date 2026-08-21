@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -21,6 +23,7 @@ func newServeCommand() *cobra.Command {
 		port            int
 		host            string
 		scanConcurrency int
+		namespace       string
 		dev             bool
 	)
 
@@ -32,6 +35,10 @@ func newServeCommand() *cobra.Command {
 			"declaration.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			namespace = strings.TrimSpace(namespace)
+			if namespace == "" {
+				return fmt.Errorf("namespace must not be empty")
+			}
 			if err := scans.SetConcurrency(scanConcurrency); err != nil {
 				return err
 			}
@@ -52,7 +59,7 @@ func newServeCommand() *cobra.Command {
 					cmd.Printf("seeded %d default engine profiles\n", seeded)
 				}
 
-				return serve(cmd, st, host, port, dev)
+				return serve(cmd, st, host, port, namespace, dev)
 			})
 		},
 	}
@@ -60,15 +67,17 @@ func newServeCommand() *cobra.Command {
 	cmd.Flags().IntVar(&port, "port", 8280, "port to listen on")
 	cmd.Flags().StringVar(&host, "host", "localhost", "address to listen on")
 	cmd.Flags().IntVar(&scanConcurrency, "scan-concurrency", 1, "maximum number of scans to run concurrently")
+	cmd.Flags().StringVar(&namespace, "namespace", namespaceFromEnvironment(os.LookupEnv),
+		"default Kubernetes namespace for secret references and catalogs (env NAMESPACE, then POD_NAMESPACE)")
 	cmd.Flags().BoolVar(&dev, "dev", false,
 		"serve the interface from a Vite dev server on a free port instead of the embedded build, so source changes appear without rebuilding")
 	return cmd
 }
 
 // serve builds the mux and runs until the context is cancelled.
-func serve(cmd *cobra.Command, st *store.Store, host string, port int, dev bool) error {
+func serve(cmd *cobra.Command, st *store.Store, host string, port int, namespace string, dev bool) error {
 	config := server.Config{
-		Host: host, Port: port,
+		Host: host, Port: port, Namespace: namespace,
 		Root: cmd.Root(), Registry: registry, Store: st, Scans: scans, Sweeps: sweeps, Probes: liveness,
 		UI: recon.UI, UIDir: recon.UIDir,
 	}
@@ -110,4 +119,13 @@ func serve(cmd *cobra.Command, st *store.Store, host string, port int, dev bool)
 		return err
 	}
 	return nil
+}
+
+func namespaceFromEnvironment(lookup func(string) (string, bool)) string {
+	for _, name := range []string{"NAMESPACE", "POD_NAMESPACE"} {
+		if value, ok := lookup(name); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "default"
 }

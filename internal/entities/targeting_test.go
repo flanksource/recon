@@ -51,6 +51,15 @@ var _ = Describe("run targeting", func() {
 		Expect(target.explicit()).To(BeFalse())
 	})
 
+	It("selects saved targets by stable ID without becoming explicit discovery", func() {
+		target, err := (runTarget{
+			ID: []string{"gcp-production", "api.example.test", "gcp-production"},
+		}).resolve()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(target.Inventory.IDs).To(Equal([]string{"api.example.test", "gcp-production"}))
+		Expect(target.explicit()).To(BeFalse())
+	})
+
 	It("refuses to turn empty explicit discovery into a whole-inventory scan", func() {
 		_, err := scanSelectorFromDiscovery(nil)
 		Expect(err).To(MatchError("explicit discovery found no targets to scan"))

@@ -67,7 +67,10 @@ describe("legacy inventory migration", () => {
     ).toEqual({ targets: 1, zones: 1, stateEntries: 1, missingState: [] });
     expect(createInventoryStore({ inventoryDir }).get("api.example.com")).toEqual(
       expect.objectContaining({
+        id: "api.example.com",
+        version: 3,
         app: "api",
+        profiles: ["scan:nuclei:safe", "scan:nuclei:full"],
         observed: {
           first_observed: "2026-08-01T00:00:00Z",
           last_seen: "2026-08-02T00:00:00.000Z",
@@ -77,6 +80,14 @@ describe("legacy inventory migration", () => {
         scan: { last_scan: "2026-08-03T00:00:00Z", last_findings: 2 },
       }),
     );
+    expect(createInventoryStore({ inventoryDir }).get("api.example.com")).not.toHaveProperty(
+      "credentials",
+    );
+    expect(JSON.parse(readFileSync(resolve(inventoryDir, "inventory.json"), "utf8"))).toEqual({
+      $schema: "./inventory.schema.json",
+      version: 3,
+      zones: ["example.com"],
+    });
     expect(readFileSync(resolve(inventoryDir, "inventory.json"), "utf8")).toMatch(/\n$/);
   });
 });

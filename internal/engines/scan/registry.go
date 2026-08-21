@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/flanksource/recon/internal/api"
@@ -99,6 +100,47 @@ func Get(name string) (Engine, error) {
 		return nil, fmt.Errorf("unknown scan engine: %s", name)
 	}
 	return engine, nil
+}
+
+// ForProvider returns the one engine that declares context options for a
+// provider.
+//
+// A provider-context target names a provider, not an engine: an operator adds
+// "this container image" or "this GCP project" and the engine that can scan it
+// follows from that. Resolving it here rather than assuming one engine is what
+// lets a second provider-backed engine exist at all.
+//
+// Two engines claiming one provider is a wiring error, not a preference between
+// them — the target would validate against whichever won a map iteration — so it
+// is reported rather than resolved.
+func ForProvider(provider string) (Engine, error) {
+	var found []Engine
+	for _, engine := range All() {
+		options := engine.Spec().Options
+		if options.Discriminator != "provider" {
+			continue
+		}
+		for _, variant := range options.Variants {
+			if variant.ID == provider && variant.ContextSchema != nil {
+				found = append(found, engine)
+				break
+			}
+		}
+	}
+
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		return nil, fmt.Errorf("no scan engine defines context options for provider %q", provider)
+	default:
+		names := make([]string, 0, len(found))
+		for _, engine := range found {
+			names = append(names, engine.Spec().Name)
+		}
+		return nil, fmt.Errorf("scan engines %s both define context options for provider %q",
+			strings.Join(names, " and "), provider)
+	}
 }
 
 // All returns every registered engine, ordered by name.

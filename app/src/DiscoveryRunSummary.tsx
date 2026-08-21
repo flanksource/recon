@@ -1,4 +1,4 @@
-import { AnsiHtml } from "@flanksource/clicky-ui";
+import { AnsiHtml } from "@flanksource/clicky-ui/data";
 import type { Discover } from "./types";
 
 export function DiscoveryRunSummary({

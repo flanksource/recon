@@ -3,6 +3,31 @@
 // Every shape here is what `/api/v1/<entity>` actually returns — the Go types in
 // internal/api are the source of truth and these mirror them.
 
+import type { TargetCredentials } from "./credential-types";
+import type { Profile } from "./engine-types";
+export type {
+  CredentialEnvVar,
+  CredentialKeySelector,
+  CredentialMutation,
+  CredentialValueFrom,
+  TargetCredentials,
+} from "./credential-types";
+export type {
+  Engine,
+  EngineKind,
+  EngineOptionSchema,
+  EngineOptions,
+  EngineOptionVariant,
+  Profile,
+} from "./engine-types";
+export type {
+  Template,
+  TemplateMetadata,
+  TemplatePreview,
+  TemplateRemediationMetadata,
+  TemplateTag,
+} from "./template-types";
+
 export const CLASS_ORDER = [
   "public",
   "prod",
@@ -13,22 +38,34 @@ export const CLASS_ORDER = [
 ] as const;
 export type TargetClass = (typeof CLASS_ORDER)[number];
 
-// What a target addresses. A host is something on the network with an address
-// and ports; a gcp-project is a cloud account audited through an API, which is
-// why it has neither. Mirrors api.TargetKinds() in internal/api/target.go.
-export const KIND_ORDER = ["host", "gcp-project"] as const;
+// What a target addresses. A host is contacted over the network; a provider
+// context carries provider-native scope arguments instead.
+export const KIND_ORDER = ["host", "provider-context"] as const;
 export type TargetKind = (typeof KIND_ORDER)[number];
+export type CredentialMode = "ambient" | "configured";
 
 // Absent means host: the server omits the field for one so an existing target
 // document is unchanged by cloud accounts existing.
 export const targetKind = (target: { kind?: TargetKind }): TargetKind =>
   target.kind ?? "host";
 
+export function targetId(target: { id?: string }): string {
+  if (!target.id) throw new Error("target response has no stable id");
+  return target.id;
+}
+
+export function targetHost(target: { kind?: TargetKind; host?: string }): string {
+  if (targetKind(target) !== "host" || !target.host) {
+    throw new Error("host target response has no host");
+  }
+  return target.host;
+}
+
 // The profiles a target can opt into are whatever the server has stored, which
 // is no longer a list short enough to keep here: nuclei ships focused profiles
 // alongside its own, and a hardcoded pair would silently hide the rest from
 // every control that offers them. Fetch with fetchProfiles({ kind: "scan" }).
-export const FALLBACK_PROFILES = ["safe", "full"] as const;
+export const FALLBACK_PROFILES = ["scan:nuclei:safe", "scan:nuclei:full"] as const;
 
 // The server stamps `_id` onto rows in a list response so one is addressable
 // without knowing which field is its key. A single get does not carry it, hence
@@ -62,9 +99,14 @@ export type ObservedState = {
 
 export type TargetDocument = {
   $schema: "../target.schema.json";
-  version: 1;
-  host: string;
+  version: number;
+  id: string;
+  host?: string;
   kind?: TargetKind;
+  provider?: string;
+  credentialMode?: CredentialMode;
+  arguments?: Record<string, unknown>;
+  credentials?: TargetCredentials;
   class: TargetClass;
   app?: string;
   cluster?: string;
@@ -130,12 +172,19 @@ export type CuratedTarget = Pick<
   | "reason"
 >;
 
-// TargetSelector is the target list-options struct, and it is also what selects
-// the endpoints a scan runs against — the same filter drives the table, the
-// query string and the scan. Every value is a comma-joined list because that is
-// how the CLI's repeated flags arrive over HTTP.
+export type TargetUpdate = CuratedTarget & {
+  credentialMode?: CredentialMode;
+  arguments?: Record<string, unknown>;
+  credentials?: TargetCredentials | null;
+};
+
+// TargetSelector is the target list-options struct used by GET /target. Every
+// value is comma-joined because that is how repeated CLI flags arrive over HTTP.
+// Scan actions use RunTarget instead: its selectors are arrays in the POST body.
 export type TargetSelector = {
   selector?: string;
+  id?: string;
+  provider?: string;
   class?: string;
   tags?: string;
   profiles?: string;
@@ -209,45 +258,6 @@ export type Finding = {
 // installed templates rather than the database, so these are the engine's own
 // fields — renaming them would make it harder to trace a finding back to what
 // produced it.
-export type Template = Identified & {
-  id: string;
-  name: string;
-  engine: string;
-  severity: Severity;
-  type: string;
-  tags: string[];
-  authors: string[];
-  path: string;
-  description?: string;
-  remediation?: string;
-  reference?: string[];
-  cveId?: string;
-  cvssScore?: number;
-  maxRequests?: number;
-  // Options a profile must enable before this template runs at all.
-  requires?: string[];
-};
-
-export type TemplateTag = { tag: string; count: number };
-
-// TemplatePreview is what a profile configuration would run, answered before it
-// runs. Counts describe the whole selection; `templates` is a capped sample, so
-// read `total` for the number and `truncated` to know the list is partial.
-export type TemplatePreview = {
-  engine: string;
-  profile?: string;
-  total: number;
-  bySeverity: Partial<Record<Severity, number>>;
-  byType: Record<string, number>;
-  byTag: TemplateTag[];
-  maxRequests: number;
-  templates: Template[];
-  truncated: boolean;
-  // Reasons the count may overstate what runs — a filter the preview cannot
-  // evaluate, or a requirement that depends on the scanning host.
-  caveats?: string[];
-};
-
 export type ScanPhase = "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
 
 export const TERMINAL_PHASES: ScanPhase[] = ["done", "failed", "cancelled"];
@@ -339,79 +349,6 @@ export type ScanStatus = Scan & {
   running: boolean;
   log: string;
   output: ScanOutputEvent[];
-};
-
-export type EngineKind = "discovery" | "scan";
-
-export type SchemaProperty = {
-  type?: string;
-  title?: string;
-  description?: string;
-  enum?: unknown[];
-  default?: unknown;
-  minimum?: number;
-  maximum?: number;
-  multipleOf?: number;
-  items?: SchemaProperty;
-  [key: string]: unknown;
-};
-
-export type EngineSection = {
-  id: string;
-  title: string;
-  description?: string;
-  sourceUrl?: string;
-  properties: Record<string, SchemaProperty>;
-};
-
-export type Engine = Identified & {
-  name: string;
-  kind: EngineKind;
-  title: string;
-  description?: string;
-  docsUrl?: string;
-  binary: string;
-  // Discovery engines declare what they consume and produce so a chain can be
-  // validated; scan engines leave these empty.
-  accepts?: string;
-  emits?: string;
-  // Whether a sweep runs this engine when nothing is chosen. The engine picker
-  // opens on this rather than on a list of its own, so what it shows as on is
-  // what the server would actually run.
-  default?: boolean;
-  version?: string;
-  installed: boolean;
-  managed: boolean;
-  path?: string;
-  // The profile the engine ships with, which is what a picker should open on:
-  // an engine's own idea of its default beats a name hardcoded here, and a
-  // hardcoded one is simply wrong for every engine that does not use it.
-  defaults?: string;
-  // The template corpus, for engines that match against one. An in-process
-  // engine's binary cannot be missing, so this is the part that can be — and
-  // without it every scan matches nothing.
-  templates?: {
-    version?: string;
-    count: number;
-    path?: string;
-    problem?: string;
-  };
-  sections: EngineSection[];
-};
-
-export type Profile = Identified & {
-  kind: EngineKind;
-  engine: string;
-  name: string;
-  config: Record<string, unknown>;
-  // The leading comment block of the stored profile, preserved verbatim.
-  comment?: string;
-  // The engine's own verdict on this configuration. Gate on this rather than on
-  // the profile's name: it is the rule the server enforces, so asking for
-  // confirmation whenever it is false would be friction the server would not
-  // have imposed.
-  intrusive?: boolean;
-  reason?: string;
 };
 
 export type Zone = Identified & { zone: string };

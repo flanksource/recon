@@ -1,4 +1,4 @@
-import { AnsiHtml } from "@flanksource/clicky-ui";
+import { AnsiHtml } from "@flanksource/clicky-ui/data";
 import { ScanArtifacts } from "./ScanArtifacts";
 import { ScanTraffic } from "./ScanTraffic";
 import type { Scan } from "./types";

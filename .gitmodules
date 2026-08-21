@@ -1,0 +1,4 @@
+[submodule "third_party/prowler"]
+	path = third_party/prowler
+	url = https://github.com/prowler-cloud/prowler.git
+	shallow = true

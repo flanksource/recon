@@ -40,10 +40,11 @@ const idleScan = {
 const target: Target = {
   $schema: "../target.schema.json",
   version: 1,
+  id: "api.example.com",
   _id: "api.example.com",
   host: "api.example.com",
   class: "prod",
-  profiles: ["safe"],
+  profiles: ["scan:nuclei:safe"],
   tags: [],
   network: { open_ports: [443, 8443] },
   http: {
@@ -57,11 +58,25 @@ const target: Target = {
 const other: Target = {
   $schema: "../target.schema.json",
   version: 1,
+  id: "docs.example.com",
   _id: "docs.example.com",
   host: "docs.example.com",
   class: "prod",
-  profiles: ["safe"],
+  profiles: ["scan:nuclei:safe"],
   tags: [],
+};
+
+const providerTarget: Target = {
+  $schema: "../target.schema.json",
+  version: 2,
+  id: "gcp-production",
+  kind: "provider-context",
+  provider: "gcp",
+  credentialMode: "ambient",
+  arguments: { "project-ids": ["workload-prod-eu-02"] },
+  class: "prod",
+  profiles: ["scan:prowler:cis"],
+  tags: ["cloud"],
 };
 
 // What the server returns for docs.example.com once a probe has been merged into
@@ -185,6 +200,24 @@ describe("InventoryView", () => {
     expect(screen.getByText("8443")).toBeInTheDocument();
     expect(screen.getByText("/login")).toBeInTheDocument();
     expect(screen.getByText("Web login")).toBeInTheDocument();
+  });
+
+  it("uses a provider context's stable id for inventory selection and navigation", async () => {
+    stubMatchMedia();
+    const { fetchTargets } = await import("./api");
+    vi.mocked(fetchTargets).mockResolvedValueOnce([providerTarget]);
+    const onOpenTarget = vi.fn();
+
+    render(<InventoryView onOpenScan={vi.fn()} onOpenTarget={onOpenTarget} />);
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: /gcp-production/ }),
+    );
+    expect(new URL(window.location.href).searchParams.get("selected")).toBe(
+      "gcp-production",
+    );
+    fireEvent.click(screen.getByText("gcp-production"));
+    expect(onOpenTarget).toHaveBeenCalledWith("gcp-production");
   });
 
   // The controls used to be written out here, which meant the browser held its

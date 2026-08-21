@@ -9,19 +9,49 @@ import (
 )
 
 var _ = Describe("routing a scan by what its engine audits", func() {
-	Describe("scansAccounts", func() {
-		It("sends a compliance engine down the account path", func() {
-			Expect(scansAccounts("inspec")).To(BeTrue())
+	Describe("directScanSelector", func() {
+		It("passes a provider-context stable ID straight to the scan runtime", func() {
+			target, err := (runTarget{ID: []string{"gcp-prod"}}).resolve()
+			Expect(err).ToNot(HaveOccurred())
+
+			selector, direct, err := directScanSelector("prowler", target)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(direct).To(BeTrue())
+			Expect(selector).To(Equal(store.TargetOpts{IDs: []string{"gcp-prod"}}))
 		})
 
-		It("leaves a network scanner on the endpoint path", func() {
-			// The endpoint path runs discovery first, which is what keeps a
-			// scan running against what is actually there.
-			Expect(scansAccounts("nuclei")).To(BeFalse())
+		It("sends a cloud account engine down the direct path", func() {
+			target, err := (runTarget{Host: []string{"acme-platform-prod"}}).resolve()
+			Expect(err).ToNot(HaveOccurred())
+
+			_, direct, err := directScanSelector("inspec", target)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(direct).To(BeTrue())
+		})
+
+		It("leaves a network scanner on the discovery path", func() {
+			target, err := (runTarget{Host: []string{"example.test"}}).resolve()
+			Expect(err).ToNot(HaveOccurred())
+
+			_, direct, err := directScanSelector("nuclei", target)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(direct).To(BeFalse())
+		})
+
+		It("rejects network inputs for a provider-context scan", func() {
+			target, err := (runTarget{Host: []string{"example.test"}}).resolve()
+			Expect(err).ToNot(HaveOccurred())
+
+			_, _, err = directScanSelector("prowler", target)
+
+			Expect(err).To(MatchError(ContainSubstring("cannot name a provider context")))
 		})
 
 		It("reports an engine that is not registered", func() {
-			_, err := scansAccounts("nmap")
+			_, _, err := directScanSelector("nmap", resolvedTarget{})
 
 			Expect(err).To(MatchError(ContainSubstring("unknown scan engine")))
 		})

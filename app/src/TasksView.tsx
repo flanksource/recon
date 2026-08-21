@@ -1,4 +1,4 @@
-import { TaskManager } from "@flanksource/clicky-ui";
+import { TaskManager } from "@flanksource/clicky-ui/data";
 
 type Props = {
   selectedId?: string;

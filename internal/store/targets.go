@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -15,14 +14,12 @@ import (
 	"github.com/flanksource/recon/internal/schema"
 )
 
-// hostOrder sorts by byte value rather than the database's default collation.
-// The TypeScript store sorted hosts with localeCompare, which agrees with byte
-// order across every hostname the schema's ^[a-z0-9][a-z0-9.-]*$ pattern allows;
-// pinning the collation here keeps that true regardless of how the cluster was
+// targetOrder sorts stable IDs by byte value rather than the database's default
+// collation, so lists are deterministic regardless of how the cluster was
 // initialised.
-const hostOrder = `host COLLATE "C" ASC`
+const targetOrder = `id COLLATE "C" ASC`
 
-// ListTargets returns the targets a selector matches, ordered by host.
+// ListTargets returns the targets a selector matches, ordered by stable ID.
 func (s *Store) ListTargets(ctx context.Context, opts TargetOpts) ([]api.TargetDocument, error) {
 	query, err := opts.Scope(s.DB(ctx))
 	if err != nil {
@@ -30,7 +27,7 @@ func (s *Store) ListTargets(ctx context.Context, opts TargetOpts) ([]api.TargetD
 	}
 
 	var rows []models.Target
-	if err := query.Order(hostOrder).Find(&rows).Error; err != nil {
+	if err := query.Order(targetOrder).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
 
@@ -49,73 +46,108 @@ func (s *Store) ListTargets(ctx context.Context, opts TargetOpts) ([]api.TargetD
 }
 
 // GetTarget returns one target.
-func (s *Store) GetTarget(ctx context.Context, host string) (api.TargetDocument, error) {
+func (s *Store) GetTarget(ctx context.Context, id string) (api.TargetDocument, error) {
 	var row models.Target
-	err := s.DB(ctx).Where("host = ?", host).First(&row).Error
+	err := s.DB(ctx).Where("id = ?", id).First(&row).Error
 	if err != nil {
 		if IsNotFound(err) {
-			return api.TargetDocument{}, NotFound("target", host)
+			return api.TargetDocument{}, NotFound("target", id)
 		}
-		return api.TargetDocument{}, fmt.Errorf("get target %s: %w", host, err)
+		return api.TargetDocument{}, fmt.Errorf("get target %s: %w", id, err)
 	}
 	return row.Document(), nil
 }
 
 // SaveTarget writes a whole document, machine-owned sections included. This is
-// the import and observation-merge path; user edits go through UpdateCurated.
+// the observation-merge path; user edits go through UpdateTarget.
 func (s *Store) SaveTarget(ctx context.Context, document api.TargetDocument) error {
+	document = normalizeTarget(document)
 	if err := validate(document); err != nil {
+		return err
+	}
+	if err := validateProviderContext(ctx, s.providerContextValidator, document); err != nil {
 		return err
 	}
 
 	row := models.TargetFromDocument(document)
 	err := s.DB(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "host"}},
+		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
+			"host", "kind", "provider", "credential_mode", "arguments", "credentials",
 			"class", "app", "cluster", "source", "profiles", "ports", "tags",
 			"notes", "reason", "observed", "network", "http", "tech", "tls",
 			"scan", "updated_at",
 		}),
 	}).Create(&row).Error
 	if err != nil {
-		return fmt.Errorf("save target %s: %w", document.Host, err)
+		return fmt.Errorf("save target %s: %w", document.GetID(), err)
 	}
 	return nil
 }
 
-// CreateTarget adds a host to the inventory with only its curated fields set.
-//
-// This is how a host a sweep found becomes a target: discovery records what it
-// sees but never classifies it, because a class is a judgement about what a
-// host is for. An existing host is refused rather than overwritten — a create
-// that silently replaced a curated record would discard someone's work.
+// CreateTarget adds a curated host or provider context to the inventory. An
+// existing stable ID is refused rather than overwritten, because a create that
+// silently replaced a curated record would discard someone's work.
 func (s *Store) CreateTarget(ctx context.Context, target api.NewTarget) (api.TargetDocument, error) {
-	host := target.Host
-	row := models.Target{Host: host, Kind: target.Kind.String()}
+	target = normalizeNewTarget(target)
+	id := target.ID
+	document := normalizeTarget(api.TargetDocument{
+		ID: id, Host: target.Host, Kind: target.Kind, Provider: target.Provider,
+		CredentialMode: target.CredentialMode, Arguments: target.Arguments,
+		Credentials: target.Credentials,
+	})
+	row := models.TargetFromDocument(document)
 	row.ApplyCurated(target.Curated)
 
-	document := row.Document()
+	document = row.Document()
 	if err := validate(document); err != nil {
+		return api.TargetDocument{}, err
+	}
+	if err := validateProfiles(s.DB(ctx), id, document.Profiles); err != nil {
+		return api.TargetDocument{}, err
+	}
+	if err := validateProviderContext(ctx, s.providerContextValidator, document); err != nil {
 		return api.TargetDocument{}, err
 	}
 
 	result := s.DB(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if result.Error != nil {
-		return api.TargetDocument{}, fmt.Errorf("create target %s: %w", host, result.Error)
+		return api.TargetDocument{}, fmt.Errorf("create target %s: %w", id, result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return api.TargetDocument{}, fmt.Errorf("target %s is already in the inventory", host)
+		return api.TargetDocument{}, fmt.Errorf("target %s is already in the inventory", id)
 	}
 	return document, nil
+}
+
+// DeleteTarget removes a target from the inventory.
+//
+// Its history is deliberately left behind: no foreign key points at targets, so
+// what a scan found stays in findings whether or not the host is still listed.
+// Deleting the row does not unfind it.
+//
+// This is for a record that is wrong — a typo, a placeholder, a project that
+// never existed. Retiring something real is a class, not a delete: `deactivated`
+// keeps a host for subdomain-takeover coverage, and deleting a host discovery
+// can still see only removes it until the next sweep puts it back.
+func (s *Store) DeleteTarget(ctx context.Context, id string) error {
+	result := s.DB(ctx).Where("id = ?", id).Delete(&models.Target{})
+	if result.Error != nil {
+		return fmt.Errorf("delete target %s: %w", id, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return NotFound("target", id)
+	}
+	return nil
 }
 
 // EnsureDiscoveredTarget creates the conservative inventory record used for a
 // newly observed identity, and returns an existing record unchanged.
 func (s *Store) EnsureDiscoveredTarget(ctx context.Context, host string) (api.TargetDocument, error) {
-	row := models.Target{Host: host}
+	row := models.Target{ID: host, Host: stringRef(host)}
 	row.ApplyCurated(api.Curated{
 		Class: api.ClassUnclassified, Source: "discovery",
-		Profiles: []string{"safe"}, Tags: []string{},
+		Profiles: []string{"scan:nuclei:safe"}, Tags: []string{},
 	})
 	if err := validate(row.Document()); err != nil {
 		return api.TargetDocument{}, err
@@ -126,47 +158,17 @@ func (s *Store) EnsureDiscoveredTarget(ctx context.Context, host string) (api.Ta
 	return s.GetTarget(ctx, host)
 }
 
-// UpdateCurated replaces only the editable fields and returns the stored
-// document. Machine-owned sections are read back from the row and re-applied, so
-// an edit can never clobber an observation — the property the TypeScript store
-// guaranteed by spreading the existing document underneath the curated one.
-func (s *Store) UpdateCurated(ctx context.Context, host string, curated api.Curated) (api.TargetDocument, error) {
+// UpdateTarget atomically replaces curated fields and, for a provider context,
+// any supplied credential mode and non-secret arguments. Stable identity fields
+// remain fixed for the lifetime of the target.
+func (s *Store) UpdateTarget(ctx context.Context, id string, update api.TargetUpdate) (api.TargetDocument, error) {
 	var stored api.TargetDocument
 
 	err := s.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		var row models.Target
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("host = ?", host).First(&row).Error; err != nil {
-			if IsNotFound(err) {
-				return NotFound("target", host)
-			}
+		document, err := updateTarget(tx, id, update, s.providerContextValidator)
+		if err != nil {
 			return err
 		}
-
-		row.ApplyCurated(curated)
-		document := row.Document()
-		if err := validate(document); err != nil {
-			return err
-		}
-		if err := validateProfiles(tx, host, document.Profiles); err != nil {
-			return err
-		}
-
-		if err := tx.Model(&models.Target{}).Where("host = ?", host).Updates(map[string]any{
-			"class":      row.Class,
-			"app":        row.App,
-			"cluster":    row.Cluster,
-			"source":     row.Source,
-			"profiles":   row.Profiles,
-			"ports":      row.Ports,
-			"tags":       row.Tags,
-			"notes":      row.Notes,
-			"reason":     row.Reason,
-			"updated_at": gorm.Expr("now()"),
-		}).Error; err != nil {
-			return err
-		}
-
 		stored = document
 		return nil
 	})
@@ -174,9 +176,230 @@ func (s *Store) UpdateCurated(ctx context.Context, host string, curated api.Cura
 		if IsNotFound(err) {
 			return api.TargetDocument{}, err
 		}
-		return api.TargetDocument{}, fmt.Errorf("update target %s: %w", host, err)
+		return api.TargetDocument{}, fmt.Errorf("update target %s: %w", id, err)
 	}
 	return stored, nil
+}
+
+// updateTarget applies the edit to an existing row. Split out of UpdateTarget
+// so an import can make the same edit inside the transaction it already holds:
+// going back through the Store would use a second connection and drop the write
+// out of the batch it is supposed to be part of.
+func updateTarget(
+	tx *gorm.DB,
+	id string,
+	update api.TargetUpdate,
+	contextValidator ProviderContextValidator,
+) (api.TargetDocument, error) {
+	var row models.Target
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", id).First(&row).Error; err != nil {
+		if IsNotFound(err) {
+			return api.TargetDocument{}, NotFound("target", id)
+		}
+		return api.TargetDocument{}, err
+	}
+
+	if api.TargetKind(row.Kind) != api.KindProviderContext &&
+		(update.CredentialMode != nil || update.Arguments != nil || update.CredentialsSet) {
+		return api.TargetDocument{}, fmt.Errorf("host target %s cannot have provider configuration", id)
+	}
+	if update.CredentialMode != nil {
+		row.CredentialMode = stringRef(string(*update.CredentialMode))
+	}
+	if update.Arguments != nil {
+		arguments := *update.Arguments
+		row.Arguments = models.JSON[map[string]any]{V: &arguments}
+	}
+	if update.CredentialsSet {
+		row.Credentials.V = nil
+		if update.Credentials != nil && !update.Credentials.Empty() {
+			credentials := update.Credentials.Stored()
+			row.Credentials.V = &credentials
+		}
+	}
+
+	row.ApplyCurated(update.Curated)
+	document := row.Document()
+	if err := validate(document); err != nil {
+		return api.TargetDocument{}, err
+	}
+	if err := validateProfiles(tx, id, document.Profiles); err != nil {
+		return api.TargetDocument{}, err
+	}
+	if err := validateProviderContext(tx.Statement.Context, contextValidator, document); err != nil {
+		return api.TargetDocument{}, err
+	}
+
+	if err := tx.Model(&models.Target{}).Where("id = ?", id).Updates(map[string]any{
+		"credential_mode": row.CredentialMode,
+		"arguments":       row.Arguments,
+		"credentials":     row.Credentials,
+		"class":           row.Class,
+		"app":             row.App,
+		"cluster":         row.Cluster,
+		"source":          row.Source,
+		"profiles":        row.Profiles,
+		"ports":           row.Ports,
+		"tags":            row.Tags,
+		"notes":           row.Notes,
+		"reason":          row.Reason,
+		"updated_at":      gorm.Expr("now()"),
+	}).Error; err != nil {
+		return api.TargetDocument{}, err
+	}
+	return document, nil
+}
+
+// ImportResult is what one import did, per outcome.
+type ImportResult struct {
+	// Created is the stable target IDs that were not in the inventory.
+	Created []string `json:"created"`
+	// Updated is the target IDs whose editable fields the import changed.
+	Updated []string `json:"updated"`
+	// Unchanged is the target IDs that already said exactly this. Reported rather
+	// than folded into Updated so a re-import reads as the no-op it is.
+	Unchanged []string `json:"unchanged"`
+}
+
+// ImportTargets applies a batch of curated definitions to the inventory.
+//
+// Curated fields plus provider-context configuration, deliberately. A target
+// document also carries machine-owned observations, and importing those would
+// assert that something saw a host answer when nothing did. A re-import is a
+// no-op, so this is safe to run repeatedly.
+//
+// All or nothing: one transaction, so a file with a bad document halfway
+// through leaves the inventory as it was rather than half-applied.
+func (s *Store) ImportTargets(ctx context.Context, targets []api.NewTarget) (ImportResult, error) {
+	var result ImportResult
+
+	err := s.DB(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, target := range targets {
+			target = normalizeNewTarget(target)
+			outcome, err := importOne(tx, target, s.providerContextValidator)
+			if err != nil {
+				return err
+			}
+			switch outcome {
+			case importCreated:
+				result.Created = append(result.Created, target.ID)
+			case importUpdated:
+				result.Updated = append(result.Updated, target.ID)
+			case importUnchanged:
+				result.Unchanged = append(result.Unchanged, target.ID)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ImportResult{}, err
+	}
+	return result, nil
+}
+
+type importOutcome int
+
+const (
+	importCreated importOutcome = iota
+	importUpdated
+	importUnchanged
+)
+
+// importOne applies a single definition, creating the target or replacing its
+// curated fields and mutable provider-context configuration.
+//
+// Profiles are validated on both branches. Discovery bypasses this path via
+// EnsureDiscoveredTarget, while an import is a deliberate inventory statement.
+func importOne(
+	tx *gorm.DB,
+	target api.NewTarget,
+	contextValidator ProviderContextValidator,
+) (importOutcome, error) {
+	var row models.Target
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", target.ID).First(&row).Error
+
+	switch {
+	case err != nil && !IsNotFound(err):
+		return 0, err
+
+	case IsNotFound(err):
+		fresh := models.TargetFromDocument(normalizeTarget(api.TargetDocument{
+			ID: target.ID, Host: target.Host, Kind: target.Kind, Provider: target.Provider,
+			CredentialMode: target.CredentialMode, Arguments: target.Arguments,
+			Credentials: target.Credentials,
+		}))
+		fresh.ApplyCurated(target.Curated)
+		document := fresh.Document()
+		if err := validate(document); err != nil {
+			return 0, err
+		}
+		if err := validateProfiles(tx, target.ID, document.Profiles); err != nil {
+			return 0, err
+		}
+		if err := validateProviderContext(tx.Statement.Context, contextValidator, document); err != nil {
+			return 0, err
+		}
+		if err := tx.Create(&fresh).Error; err != nil {
+			return 0, fmt.Errorf("import target %s: %w", target.ID, err)
+		}
+		return importCreated, nil
+	}
+
+	// Kind is fixed when a target is created, for the same reason it is not
+	// editable: changing it would repoint every future run at something else.
+	// An import that disagrees is a mistake worth reporting, not applying.
+	if kind := target.Kind.String(); kind != api.TargetKind(row.Kind).String() {
+		return 0, fmt.Errorf(
+			"import target %s: it is already a %s and cannot become a %s",
+			target.ID, api.TargetKind(row.Kind).String(), kind)
+	}
+	if target.Provider != derefString(row.Provider) {
+		return 0, fmt.Errorf("import target %s: provider is fixed when the target is created", target.ID)
+	}
+
+	before := row.Document()
+	row.ApplyCurated(target.Curated)
+	document := row.Document()
+	contextChanged := target.Kind == api.KindProviderContext &&
+		(target.CredentialMode != before.CredentialMode ||
+			!sameArguments(target.Arguments, before.Arguments) ||
+			(target.CredentialsSet && !sameCredentials(target.Credentials, before.Credentials)))
+	if sameCuration(before, document) && !contextChanged {
+		return importUnchanged, nil
+	}
+
+	update := api.TargetUpdate{Curated: target.Curated}
+	if target.Kind == api.KindProviderContext {
+		mode := target.CredentialMode
+		arguments := target.Arguments
+		update.CredentialMode = &mode
+		update.Arguments = &arguments
+		if target.CredentialsSet {
+			update.Credentials = target.Credentials
+			update.CredentialsSet = true
+		}
+	}
+	if _, err := updateTarget(tx, target.ID, update, contextValidator); err != nil {
+		return 0, err
+	}
+	return importUpdated, nil
+}
+
+// sameCuration compares only what an import can write, so an observation
+// recorded since the last import does not make a document look changed.
+func sameCuration(before, after api.TargetDocument) bool {
+	encode := func(document api.TargetDocument) string {
+		encoded, _ := json.Marshal(api.Curated{
+			Class: document.Class, App: document.App, Cluster: document.Cluster,
+			Source: document.Source, Profiles: document.Profiles,
+			Ports: document.Ports, Tags: document.Tags,
+			Notes: document.Notes, Reason: document.Reason,
+		})
+		return string(encoded)
+	}
+	return encode(before) == encode(after)
 }
 
 // CountTargets is the import verification's cheap check.
@@ -220,53 +443,17 @@ func (s *Store) Inventory(ctx context.Context) (api.Inventory, error) {
 // database. The CHECK constraints are the backstop; this is what produces an
 // error a human can act on, naming the offending field.
 func validate(document api.TargetDocument) error {
-	encoded, err := json.Marshal(document)
-	if err != nil {
-		return fmt.Errorf("encode target %s: %w", document.Host, err)
-	}
-	return schema.ValidateTargetJSON(document.Host+".json", encoded)
-}
-
-// validateProfiles refuses a target that opts into a profile nobody defined.
-//
-// The schema constrains the shape of a name but cannot know which names exist:
-// engines ship dozens of profiles and users add their own, so the closed enum
-// this replaces was wrong the moment anyone created one. The table is the only
-// thing that knows, and a typo here means a host is quietly never scanned.
-//
-// Only the curated edit path checks this. An observation merge or a discovered
-// host must never be refused because of a curation problem — a sweep recording
-// what it saw is not the moment to argue about which profile should run.
-func validateProfiles(db *gorm.DB, host string, profiles []string) error {
-	if len(profiles) == 0 {
-		return nil
-	}
-
-	var known []string
-	if err := db.Model(&models.EngineProfile{}).
-		Where("kind = ?", api.KindScan).
-		Distinct().Pluck("name", &known).Error; err != nil {
-		return fmt.Errorf("read scan profiles: %w", err)
-	}
-
-	available := map[string]bool{}
-	for _, name := range known {
-		available[name] = true
-	}
-
-	var unknown []string
-	for _, profile := range profiles {
-		if !available[profile] {
-			unknown = append(unknown, profile)
+	document = normalizeTarget(document)
+	if document.Credentials != nil {
+		if err := document.Credentials.ValidateWrite(); err != nil {
+			return err
 		}
 	}
-	if len(unknown) == 0 {
-		return nil
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return fmt.Errorf("encode target %s: %w", document.GetID(), err)
 	}
-
-	sort.Strings(known)
-	return fmt.Errorf("%s: unknown scan profile %s (value must be one of: %s)",
-		host, strings.Join(unknown, ", "), strings.Join(known, ", "))
+	return schema.ValidateTargetJSON(document.GetID()+".json", encoded)
 }
 
 // ---------------------------------------------------------------------- zones

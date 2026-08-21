@@ -12,6 +12,8 @@ import (
 	depstemplate "github.com/flanksource/deps/pkg/template"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/flanksource/recon/internal/engines"
 )
 
 // The install definitions are only exercised on a machine that does not already
@@ -49,7 +51,7 @@ var _ = Describe("engine install definitions", Label("network"), func() {
 		if err != nil {
 			return 0, err
 		}
-		defer response.Body.Close()
+		DeferCleanup(response.Body.Close)
 		return response.StatusCode, nil
 	}
 
@@ -68,6 +70,13 @@ var _ = Describe("engine install definitions", Label("network"), func() {
 		// An in-process engine is linked into this binary: there is no release
 		// to publish assets, and its version is whatever recon compiled against.
 		if spec.InProcess {
+			continue
+		}
+
+		// Asset patterns and a checksum file are how a github_release package
+		// names its artifact. A manager that resolves both from an API has
+		// neither, and is covered by its own spec below.
+		if spec.Install.Manager != "github_release" {
 			continue
 		}
 
@@ -105,6 +114,54 @@ var _ = Describe("engine install definitions", Label("network"), func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(status).To(BeElementOf(http.StatusOK, http.StatusFound),
 					"%s does not publish %s at %s", spec.Name, asset, tag)
+			}
+		})
+	}
+})
+
+// The same question for a package whose manager resolves the artifact from an
+// API rather than from a naming convention: does it actually have a build for
+// every platform recon runs on, and does it come with a checksum?
+//
+// Asked through the registry rather than by importing the manager, so this
+// still compiles against a release of deps that does not have it — and then
+// says so, which is the useful failure.
+var _ = Describe("API-resolved install definitions", Label("network"), func() {
+	BeforeEach(func() {
+		if testing.Short() {
+			Skip("network-gated")
+		}
+	})
+
+	platforms := []platform.Platform{
+		{OS: "darwin", Arch: "amd64"},
+		{OS: "darwin", Arch: "arm64"},
+		{OS: "linux", Arch: "amd64"},
+		{OS: "linux", Arch: "arm64"},
+	}
+
+	for _, engine := range allSpecs() {
+		spec := engine
+
+		if spec.InProcess || spec.Provisioning == engines.ProvisioningPathOnly || spec.Install.Manager == "github_release" {
+			continue
+		}
+
+		It(fmt.Sprintf("%s resolves an artifact on every platform", spec.Name), func(ctx SpecContext) {
+			manager, ok := depsmanager.GetGlobalRegistry().Get(spec.Install.Manager)
+			Expect(ok).To(BeTrue(),
+				"deps has no %s manager: %s cannot be installed until it is released",
+				spec.Install.Manager, spec.Name)
+
+			for _, plat := range platforms {
+				By(plat.String())
+				resolution, err := manager.Resolve(ctx, spec.Install, "latest", plat)
+
+				Expect(err).ToNot(HaveOccurred(), "%s has no build for %s", spec.Name, plat)
+				Expect(resolution.DownloadURL).ToNot(BeEmpty())
+				// A download with no checksum is not verifiable, whichever
+				// manager produced it.
+				Expect(resolution.Checksum).To(HavePrefix("sha256:"))
 			}
 		})
 	}

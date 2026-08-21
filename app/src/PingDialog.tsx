@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
-  DataTable,
   Modal,
-  ProgressBar,
   SegmentedControl,
+} from "@flanksource/clicky-ui/components";
+import {
+  DataTable,
+  ProgressBar,
   type DataTableColumn,
-} from "@flanksource/clicky-ui";
+} from "@flanksource/clicky-ui/data";
 import { probeTargets } from "./api";
 import { useProbeRun } from "./useProbeRun";
-import { TERMINAL_PHASES, type ProbeResult, type TargetRow } from "./types";
+import {
+  TERMINAL_PHASES,
+  targetHost,
+  type ProbeResult,
+  type TargetRow,
+} from "./types";
 
 type Scope = "selected" | "all";
 
@@ -95,9 +102,9 @@ export function PingDialog({
   }, [open, selectedHosts.length]);
 
   const hosts = useMemo(() => {
-    if (scope === "all") return rows.map((row) => row.host);
+    if (scope === "all") return rows.map(targetHost);
     const selected = new Set(selectedHosts);
-    return rows.filter((row) => selected.has(row.host)).map((row) => row.host);
+    return rows.filter((row) => selected.has(targetHost(row))).map(targetHost);
   }, [rows, scope, selectedHosts]);
 
   const ping = useCallback(async () => {

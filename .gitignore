@@ -17,6 +17,9 @@
 # Embedded Postgres data directory — holds the live inventory.
 /.data/
 
+# Project-local scratch output used by generators and test tooling.
+/.tmp/
+
 # The repository skill moved to .agents; keep any legacy Claude state local.
 /.claude/
 
@@ -27,3 +30,4 @@
 !.agents/skills/
 .claude
 !.agents/skills/reconctl/
+third_party/

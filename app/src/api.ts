@@ -18,12 +18,17 @@ import type {
   Target,
   TargetDocument,
   TargetSelector,
+  TargetUpdate,
   Template,
   TemplatePreview,
   FilterVocabulary,
   Zone,
 } from "./types";
-import { curatedTarget } from "./types";
+import { overrideFields } from "./api-helpers";
+import type { EngineConfig, NewTarget, RunTarget } from "./api-run-types";
+import { curatedTarget, targetKind } from "./types";
+
+export { scanFileUrl } from "./api-helpers";
 
 const API = "/api/v1";
 
@@ -149,6 +154,26 @@ export async function fetchFilterOptions(
   return optionValues(response.filters?.[key] ?? {});
 }
 
+export async function fetchLookupOptions(
+  url: string,
+  key: string,
+  search: string,
+  params: Record<string, string> = {},
+): Promise<Array<{ value: string; label: string }>> {
+  const separator = url.includes("?") ? "&" : "?";
+  const lookupQuery = query({
+    __lookup: "filters",
+    __lookup_filter: key,
+    __lookup_q: search,
+    ...params,
+  }).slice(1);
+  const response = await request<LookupResponse>(`${url}${separator}${lookupQuery}`);
+  return optionValues(response.filters?.[key] ?? {}).map((value) => ({
+    value,
+    label: value,
+  }));
+}
+
 // ---------------------------------------------------------------- targets
 
 export function fetchTargets(selector?: TargetSelector): Promise<Target[]> {
@@ -166,16 +191,15 @@ export function fetchTargetSchema(): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>("/api/schema/target");
 }
 
-// A save replaces the curated fields wholesale; the machine-owned sections are
-// discovery's and are never sent. Always send every curated field: omitting one
-// clears it rather than leaving it alone.
+// A save replaces the curated fields wholesale and may atomically update a
+// provider context's mutable configuration. Identity stays in the route.
 export function saveTarget(
-  host: string,
-  curated: CuratedTarget,
+  id: string,
+  update: TargetUpdate,
 ): Promise<Target> {
   return request<Target>(
-    `${API}/target`,
-    json("PUT", { ...curated, id: host }),
+    `${API}/target/${encodeURIComponent(id)}`,
+    json("PUT", update),
   );
 }
 
@@ -189,18 +213,36 @@ export function createTarget(
   return request<Target>(`${API}/target`, json("POST", { ...curated, host }));
 }
 
+export function addTarget(target: NewTarget): Promise<Target> {
+  return request<Target>(`${API}/target`, json("POST", target));
+}
+
+export function deleteTarget(id: string): Promise<void> {
+  return request<void>(`${API}/target/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function saveTargets(
   rows: TargetDocument[],
   isNew: (host: string) => boolean = () => false,
 ): Promise<Target[]> {
   const saved: Target[] = [];
   for (const row of rows) {
-    const write = isNew(row.host) ? createTarget : saveTarget;
+    const id = row.id;
+    if (!id) throw new Error("target response has no stable id");
+    const update: TargetUpdate = {
+      ...curatedTarget(row),
+      ...(row.kind === "provider-context"
+        ? { credentialMode: row.credentialMode, arguments: row.arguments ?? {} }
+        : {}),
+    };
+    const write = targetKind(row) === "host" && isNew(id) ? createTarget : saveTarget;
     try {
-      saved.push(await write(row.host, curatedTarget(row)));
+      saved.push(await write(id, update));
     } catch (error) {
       throw new Error(
-        `saved ${saved.length} target(s); ${row.host} failed: ${(error as Error).message}`,
+        `saved ${saved.length} target(s); ${id} failed: ${(error as Error).message}`,
       );
     }
   }
@@ -314,10 +356,6 @@ export function fetchScanFiles(id: string): Promise<ScanFiles> {
   return request<ScanFiles>(`/api/scan/${encodeURIComponent(id)}/files`);
 }
 
-export function scanFileUrl(id: string, name: string): string {
-  return `/api/scan/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`;
-}
-
 // Findings are queried rather than read out of a result file, so the same call
 // drills into one scan or compares a template across every run.
 export function fetchFindings(params: {
@@ -399,16 +437,6 @@ export async function fetchLatestDiscovery(): Promise<Discover | null> {
 
 // Runs a sweep. With no selector it enumerates from the configured zones;
 // with one it re-probes just those targets.
-export type RunTarget = {
-  selector?: string;
-  host?: string[];
-  domain?: string[];
-  cidr?: string[];
-};
-
-// One engine's configuration: the keys its stored profile holds.
-export type EngineConfig = Record<string, unknown>;
-
 // Run-only configuration is sent as a nested object and omitted when empty.
 //
 // The server takes it as one JSON-encoded parameter rather than a repeatable
@@ -416,13 +444,6 @@ export type EngineConfig = Record<string, unknown>;
 // the same thing to an engine's schema. Sending the object is what keeps the
 // types the form produced; an empty one is dropped so a run that customises
 // nothing says so.
-function overrideFields(
-  field: string,
-  value: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  return value && Object.keys(value).length > 0 ? { [field]: value } : {};
-}
-
 // `profile` is a list because a sweep runs several engines: a bare name applies
 // to all of them and `engine=name` overrides one, which is the same grammar
 // `reconctl discover --profile` takes. `engine` chooses which of them run at

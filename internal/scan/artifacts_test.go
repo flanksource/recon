@@ -34,13 +34,14 @@ var _ = Describe("scan artifacts", func() {
 		Expect(artifacts.Dir).To(BeADirectory())
 	})
 
-	It("lists what a run wrote, with sizes, and ignores directories", func() {
+	It("lists nested files with portable names and ignores directories", func() {
 		artifacts, err := scan.NewArtifacts(root, "nuclei", started, "run")
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(artifacts.WriteFile(scan.FindingsFile, []byte(`{"a":1}`+"\n"))).To(Succeed())
 		Expect(artifacts.WriteJSON(scan.ConfigFile, map[string]any{"rate-limit": 50})).To(Succeed())
 		Expect(os.Mkdir(artifacts.Path("nested"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(artifacts.Path("nested/report.json"), []byte("{}\n"), 0o644)).To(Succeed())
 
 		files, err := scan.ListArtifacts(artifacts.Dir)
 		Expect(err).ToNot(HaveOccurred())
@@ -51,7 +52,7 @@ var _ = Describe("scan artifacts", func() {
 			Expect(file.Size).To(BeNumerically(">", 0), file.Name)
 			Expect(file.Modified).ToNot(BeEmpty(), file.Name)
 		}
-		Expect(names).To(Equal([]string{scan.ConfigFile, scan.FindingsFile}))
+		Expect(names).To(Equal([]string{scan.ConfigFile, scan.FindingsFile, "nested/report.json"}))
 	})
 
 	// The directory comes from the database and the name from a URL. Matching
@@ -68,7 +69,7 @@ var _ = Describe("scan artifacts", func() {
 		},
 		Entry("parent traversal", ".."),
 		Entry("a path out of the directory", "../../../etc/passwd"),
-		Entry("a nested path", "nested/findings.jsonl"),
+		Entry("a path that cleans into another file", "nested/../findings.jsonl"),
 		Entry("a windows-style path", `..\config.json`),
 		Entry("nothing at all", ""),
 		Entry("a file the run did not write", "secrets.env"),
@@ -82,6 +83,32 @@ var _ = Describe("scan artifacts", func() {
 		path, err := scan.ResolveArtifact(artifacts.Dir, scan.LogFile)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(os.ReadFile(path)).To(BeEquivalentTo("[INF] done\n"))
+	})
+
+	It("resolves a nested file the run did write", func() {
+		artifacts, err := scan.NewArtifacts(root, "prowler", started, "run")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(os.MkdirAll(artifacts.Path("contexts/0001/output"), 0o755)).To(Succeed())
+		name := "contexts/0001/output/report.ocsf.json"
+		Expect(os.WriteFile(artifacts.Path(name), []byte("[]\n"), 0o644)).To(Succeed())
+
+		resolved, err := scan.ResolveArtifact(artifacts.Dir, name)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(os.ReadFile(resolved)).To(BeEquivalentTo("[]\n"))
+	})
+
+	It("does not list or resolve symbolic links", func() {
+		artifacts, err := scan.NewArtifacts(root, "prowler", started, "run")
+		Expect(err).ToNot(HaveOccurred())
+		outside := filepath.Join(root, "credential.json")
+		Expect(os.WriteFile(outside, []byte("secret\n"), 0o600)).To(Succeed())
+		Expect(os.Symlink(outside, artifacts.Path("credential.json"))).To(Succeed())
+
+		files, err := scan.ListArtifacts(artifacts.Dir)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(files).To(BeEmpty())
+		_, err = scan.ResolveArtifact(artifacts.Dir, "credential.json")
+		Expect(err).To(MatchError(ContainSubstring("no such scan artifact")))
 	})
 
 	It("reports a directory that is no longer there rather than an empty listing", func() {

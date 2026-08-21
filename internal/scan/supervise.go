@@ -111,10 +111,10 @@ func (r *Runtime) supervise(
 	persist := context.WithoutCancel(ctx)
 	if err := r.Store.FinalizeScan(persist, store.FinalizeScanOptions{
 		Scan: row, Output: captured, Findings: findings,
-		// Every host the selector resolved to, not only the ones with findings:
-		// "this host was scanned and nothing was found" is the answer the
+		// Every target the selector resolved to, not only the ones with findings:
+		// "this target was scanned and nothing was found" is the answer the
 		// inventory's Last scan column exists to give.
-		Hosts: run.covered, CountFindings: true,
+		TargetIDs: run.targetIDs, CountFindings: true,
 	}); err != nil {
 		run.Scan.Phase = api.PhaseFailed
 		run.Scan.Error = fmt.Sprintf("persist scan evidence: %v", err)

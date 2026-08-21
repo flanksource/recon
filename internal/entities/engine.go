@@ -108,8 +108,9 @@ func (r *Registry) describe(spec engines.Spec, kind string) api.EngineSpec {
 		Description: spec.Description,
 		DocsURL:     spec.DocsURL,
 		Binary:      spec.Binary,
+		Subject:     string(spec.Subject),
 		Version:     spec.Version,
-		Sections:    spec.Sections,
+		Options:     describeOptions(spec.Options),
 		Defaults:    spec.Defaults.Name,
 	}
 
@@ -121,4 +122,27 @@ func (r *Registry) describe(spec engines.Spec, kind string) api.EngineSpec {
 		described.Problem = status.Problem
 	}
 	return described
+}
+
+func describeOptions(options engines.OptionCatalog) api.EngineOptions {
+	variants := make([]api.EngineOptionVariant, 0, len(options.Variants))
+	for _, variant := range options.Variants {
+		var contextSchema *api.JSONSchema
+		if variant.ContextSchema != nil {
+			converted := api.JSONSchema(*variant.ContextSchema)
+			contextSchema = &converted
+		}
+		var credentialSchema *api.JSONSchema
+		if variant.CredentialSchema != nil {
+			converted := api.JSONSchema(*variant.CredentialSchema)
+			credentialSchema = &converted
+		}
+		variants = append(variants, api.EngineOptionVariant{
+			ID: variant.ID, Title: variant.Title,
+			Schema: api.JSONSchema(variant.Schema), ContextSchema: contextSchema, CredentialSchema: credentialSchema,
+			SchemaRef: variant.SchemaRef, ContextSchemaRef: variant.ContextSchemaRef,
+			CredentialSchemaRef: variant.CredentialSchemaRef, CLIArgumentsSchemaRef: variant.CLIArgumentsSchemaRef,
+		})
+	}
+	return api.EngineOptions{Discriminator: options.Discriminator, Variants: variants}
 }

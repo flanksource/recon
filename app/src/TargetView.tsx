@@ -3,41 +3,31 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ComponentProps,
   type ReactNode,
 } from "react";
-import {
-  Badge,
-  Button,
-  JsonSchemaForm,
-  KeyValueList,
-  Panel,
-  Section,
-} from "@flanksource/clicky-ui";
+import { Button, Panel, Section } from "@flanksource/clicky-ui/components";
+import { Badge, KeyValueList } from "@flanksource/clicky-ui/data";
 import {
   curatedTarget,
+  targetKind,
+  type Engine,
+  type CredentialMutation,
   type Profile,
   type TargetDocument,
+  type TargetUpdate,
 } from "./types";
 import {
+  fetchEngines,
   fetchProfiles,
   fetchTarget,
   fetchTargetSchema,
   saveTarget,
 } from "./api";
 import { ScanDialog } from "./ScanDialog";
+import { TargetEditor } from "./TargetEditor";
 import { useScanStatus } from "./useScanStatus";
 
-type TargetSchema = ComponentProps<typeof JsonSchemaForm>["schema"];
-type TargetPreExtension = NonNullable<
-  ComponentProps<typeof JsonSchemaForm>["pre"]
->[number];
-type Props = { host: string; onBack: () => void };
-
-const hideInactiveReason: TargetPreExtension = (field, context) =>
-  field.key === "reason" && context.rootValue?.class !== "deactivated"
-    ? null
-    : field;
+type Props = { id: string; onBack: () => void };
 // Discovery is no longer a scan profile but a separate operation, so the two
 // buttons open the same dialog in different modes rather than picking a profile.
 type ScanMode = "discovery" | "scan";
@@ -77,6 +67,23 @@ function MachinePanel({
 
 function Preview({ target }: { target: TargetDocument }) {
   const definition = [
+    { key: "id", label: "ID", value: display(target.id) },
+    { key: "kind", label: "Kind", value: display(targetKind(target)) },
+    ...(target.kind === "provider-context"
+      ? [
+          { key: "provider", label: "Provider", value: display(target.provider) },
+          {
+            key: "credentialMode",
+            label: "Credentials",
+            value: display(target.credentialMode),
+          },
+          {
+            key: "arguments",
+            label: "Provider scope",
+            value: display(target.arguments),
+          },
+        ]
+      : [{ key: "host", label: "Host", value: display(target.host) }]),
     {
       key: "class",
       label: "Class",
@@ -133,36 +140,72 @@ function Preview({ target }: { target: TargetDocument }) {
   );
 }
 
-export function TargetView({ host, onBack }: Props) {
+export function resolveProviderContextEngine(
+  engines: Engine[],
+  provider: string,
+): Engine {
+  const matches = engines.filter(
+    (engine) =>
+      engine.options.discriminator === "provider" &&
+      engine.options.variants.some(
+        (variant) => variant.id === provider && variant.contextSchema,
+      ),
+  );
+  if (matches.length === 0) {
+    throw new Error(`No scan engine defines context options for provider "${provider}"`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`Multiple scan engines define context options for provider "${provider}"`);
+  }
+  return matches[0];
+}
+
+function editableDefinition(target: TargetDocument): TargetUpdate {
+  return {
+    ...curatedTarget(target),
+    ...(target.kind === "provider-context"
+      ? {
+          credentialMode: target.credentialMode,
+          arguments: target.arguments ?? {},
+        }
+      : {}),
+  };
+}
+
+export function TargetView({ id, onBack }: Props) {
   const [target, setTarget] = useState<TargetDocument | null>(null);
-  const [schema, setSchema] = useState<TargetSchema | null>(null);
+  const [schema, setSchema] = useState<Record<string, unknown> | null>(null);
   const [draft, setDraft] = useState<Record<string, unknown> | null>(null);
   const [editing, setEditing] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode | null>(null);
   const [scanRunMode, setScanRunMode] = useState<ScanMode | null>(null);
   const [scanProfiles, setScanProfiles] = useState<Profile[]>([]);
+  const [scanEngines, setScanEngines] = useState<Engine[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [credentialMutation, setCredentialMutation] =
+    useState<CredentialMutation>(undefined);
 
   const refreshTarget = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      setTarget(await fetchTarget(host));
+      setTarget(await fetchTarget(id));
     } catch (nextError) {
       setError((nextError as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [host]);
+  }, [id]);
 
   const {
     status: scan,
     error: scanError,
     setStatus: setScan,
   } = useScanStatus((finished) => {
-    if (finished.phase === "done" && finished.hosts.includes(host)) {
+    if (finished.phase === "done" && finished.hosts.includes(id)) {
       void refreshTarget();
     }
   });
@@ -171,29 +214,32 @@ export function TargetView({ host, onBack }: Props) {
     let active = true;
     setBusy(true);
     setError(null);
-    Promise.all([fetchTarget(host), fetchTargetSchema()])
+    Promise.all([fetchTarget(id), fetchTargetSchema()])
       .then(([nextTarget, nextSchema]) => {
         if (!active) return;
         setTarget(nextTarget);
-        setSchema(nextSchema as TargetSchema);
+        setSchema(nextSchema);
       })
       .catch((nextError: Error) => active && setError(nextError.message))
       .finally(() => active && setBusy(false));
     return () => {
       active = false;
     };
-  }, [host]);
+  }, [id]);
 
   useEffect(() => {
     let active = true;
+    setCatalogLoaded(false);
     setProfileError(null);
-    fetchProfiles({ kind: "scan" })
-      .then((profiles) => {
+    Promise.all([fetchProfiles({ kind: "scan" }), fetchEngines("scan")])
+      .then(([profiles, engines]) => {
         if (!active) return;
-        if (profiles.length === 0) throw new Error("No scan profiles found");
         setScanProfiles(profiles);
+        setScanEngines(engines);
+        if (profiles.length === 0) setProfileError("No scan profiles found");
       })
-      .catch((nextError: Error) => active && setProfileError(nextError.message));
+      .catch((nextError: Error) => active && setProfileError(nextError.message))
+      .finally(() => active && setCatalogLoaded(true));
     return () => {
       active = false;
     };
@@ -201,11 +247,12 @@ export function TargetView({ host, onBack }: Props) {
 
   const dirty = useMemo(() => {
     if (!target || !draft) return false;
+    if (credentialMutation !== undefined) return true;
     return (
-      JSON.stringify(curatedTarget(draft as TargetDocument)) !==
-      JSON.stringify(curatedTarget(target))
+      JSON.stringify(editableDefinition(draft as TargetDocument)) !==
+      JSON.stringify(editableDefinition(target))
     );
-  }, [draft, target]);
+  }, [credentialMutation, draft, target]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -229,6 +276,16 @@ export function TargetView({ host, onBack }: Props) {
   };
 
   const canScan = scanProfiles.length > 0;
+  const providerEngine = useMemo(() => {
+    if (!catalogLoaded || target?.kind !== "provider-context" || !target.provider) {
+      return null;
+    }
+    try {
+      return { engine: resolveProviderContextEngine(scanEngines, target.provider) };
+    } catch (cause) {
+      return { error: (cause as Error).message };
+    }
+  }, [catalogLoaded, scanEngines, target]);
   const dialogStatus =
     scan?.phase === "queued" ||
     scan?.phase === "running" ||
@@ -246,12 +303,15 @@ export function TargetView({ host, onBack }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const updated = await saveTarget(
-        host,
-        curatedTarget(draft as TargetDocument),
-      );
+      const updated = await saveTarget(id, {
+        ...editableDefinition(draft as TargetDocument),
+        ...(credentialMutation !== undefined
+          ? { credentials: credentialMutation }
+          : {}),
+      });
       setTarget(updated);
       setDraft(null);
+      setCredentialMutation(undefined);
       setEditing(false);
     } catch (nextError) {
       setError((nextError as Error).message);
@@ -267,7 +327,7 @@ export function TargetView({ host, onBack }: Props) {
           Back to inventory
         </Button>
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold">{host}</h1>
+          <h1 className="truncate text-lg font-semibold">{id}</h1>
           <p className="text-xs text-muted-foreground">
             Canonical inventory target
           </p>
@@ -289,6 +349,7 @@ export function TargetView({ host, onBack }: Props) {
               onClick={() => {
                 setEditing(false);
                 setDraft(null);
+                setCredentialMutation(undefined);
               }}
             >
               Cancel
@@ -307,7 +368,7 @@ export function TargetView({ host, onBack }: Props) {
             <Button
               variant="outline"
               size="sm"
-              disabled={!target}
+              disabled={!target || target.kind === "provider-context"}
               onClick={() => openScan("discovery")}
             >
               Rescan discovery
@@ -325,6 +386,7 @@ export function TargetView({ host, onBack }: Props) {
               disabled={!target || !schema || busy}
               onClick={() => {
                 setDraft({ ...target });
+                setCredentialMutation(undefined);
                 setEditing(true);
               }}
             >
@@ -338,8 +400,9 @@ export function TargetView({ host, onBack }: Props) {
           open
           onClose={() => setScanMode(null)}
           rows={[target]}
-          savedHosts={[target.host]}
-          selectedHosts={[target.host]}
+          savedTargetIds={[id]}
+          selectedTargetIds={[id]}
+          preferredProfile={target.profiles[0]}
           status={dialogStatus}
           onStatus={(next) => {
             setScanRunMode(scanMode);
@@ -356,18 +419,17 @@ export function TargetView({ host, onBack }: Props) {
         ) : null}
         {!editing && target ? <Preview target={target} /> : null}
         {editing && target && schema && draft ? (
-          <Panel title="Edit curated definition">
-            <JsonSchemaForm
-              schema={schema}
-              value={draft}
-              onChange={(next) => setDraft({ ...target, ...next })}
-              hideReadOnlyFields
-              requiredFirst
-              pre={[hideInactiveReason]}
-              layout={{ mode: "inline", valueMaxWidth: "48rem" }}
-              idPrefix="target"
-            />
-          </Panel>
+          <TargetEditor
+            id={id}
+            target={target}
+            schema={schema}
+            draft={draft}
+            setDraft={(update) => setDraft((current) => (current ? update(current) : current))}
+            catalogLoaded={catalogLoaded}
+            providerEngine={providerEngine}
+            credentialMutation={credentialMutation}
+            onCredentialChange={setCredentialMutation}
+          />
         ) : null}
       </main>
     </div>

@@ -15,6 +15,7 @@ const rows: TargetRow[] = [
   {
     $schema: "../target.schema.json",
     version: 1,
+    id: "api.example.com",
     host: "api.example.com",
     class: "non-prod",
     profiles: ["safe"],
@@ -23,6 +24,7 @@ const rows: TargetRow[] = [
   {
     $schema: "../target.schema.json",
     version: 1,
+    id: "docs.example.com",
     host: "docs.example.com",
     class: "public",
     profiles: ["safe"],

@@ -1,0 +1,462 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-08-20T22:53:41.302651+03:00",
+  "ArtifactName": "sample",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "requirements.txt",
+      "Class": "lang-pkgs",
+      "Type": "pip",
+      "Packages": [
+        {
+          "Name": "Django",
+          "Identifier": {
+            "PURL": "pkg:pypi/django@2.0.1",
+            "UID": "1ad4be5eeffae00"
+          },
+          "Version": "2.0.1",
+          "Locations": [
+            {
+              "StartLine": 1,
+              "EndLine": 1
+            }
+          ],
+          "AnalyzedBy": "pip"
+        },
+        {
+          "Name": "requests",
+          "Identifier": {
+            "PURL": "pkg:pypi/requests@2.19.1",
+            "UID": "ebfa0f8a25b158c"
+          },
+          "Version": "2.19.1",
+          "Locations": [
+            {
+              "StartLine": 2,
+              "EndLine": 2
+            }
+          ],
+          "AnalyzedBy": "pip"
+        }
+      ],
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2019-19844",
+          "VendorIDs": [
+            "GHSA-vfq6-hq5r-27r6"
+          ],
+          "PkgName": "Django",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/django@2.0.1",
+            "UID": "1ad4be5eeffae00"
+          },
+          "InstalledVersion": "2.0.1",
+          "FixedVersion": "1.11.27, 2.2.9, 3.0.1",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2019-19844",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:94692e91da6d0539c8abd71e0249c17e2844c724f287bf9e9f0c339c9176a089",
+          "Title": "Django: crafted email address allows account takeover",
+          "Description": "Django before 1.11.27, 2.x before 2.2.9, and 3.x before 3.0.1 allows account takeover. A suitably crafted email address (that is equal to an existing user's email address after case transformation of Unicode characters) would allow an attacker to be sent a password reset token for the matched user account. (One mitigation in the new releases is to send password reset tokens only to the registered user email address.)",
+          "Severity": "CRITICAL",
+          "CweIDs": [
+            "CWE-640"
+          ],
+          "VendorSeverity": {
+            "ghsa": 4,
+            "nvd": 4,
+            "redhat": 4,
+            "ubuntu": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+              "V3Score": 9.8,
+              "V40Score": 9.3
+            },
+            "nvd": {
+              "V2Vector": "AV:N/AC:L/Au:N/C:N/I:P/A:N",
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V2Score": 5,
+              "V3Score": 9.8
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 9.8
+            }
+          },
+          "References": [
+            "http://packetstormsecurity.com/files/155872/Django-Account-Hijack.html",
+            "https://access.redhat.com/security/cve/CVE-2019-19844",
+            "https://docs.djangoproject.com/en/dev/releases/security",
+            "https://docs.djangoproject.com/en/dev/releases/security/",
+            "https://github.com/advisories/GHSA-vfq6-hq5r-27r6",
+            "https://github.com/django/django",
+            "https://github.com/django/django/commit/302a4ff1e8b1c798aab97673909c7a3dfda42c26",
+            "https://github.com/django/django/commit/4d334bea06cac63dc1272abcec545b85136cca0e",
+            "https://github.com/django/django/commit/5b1fbcef7a8bec991ebe7b2a18b5d5a95d72cb70",
+            "https://github.com/django/django/commit/f4cff43bf921fcea6a29b726eb66767f67753fa2",
+            "https://github.com/pypa/advisory-database/tree/main/vulns/django/PYSEC-2019-16.yaml",
+            "https://groups.google.com/forum/#!topic/django-announce/3oaB2rVH3a0",
+            "https://groups.google.com/forum/#%21topic/django-announce/3oaB2rVH3a0",
+            "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/message/HCM2DPUI7TOZWN4A6JFQFUVQ2XGE7GUD",
+            "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/message/HCM2DPUI7TOZWN4A6JFQFUVQ2XGE7GUD/",
+            "https://nvd.nist.gov/vuln/detail/CVE-2019-19844",
+            "https://seclists.org/bugtraq/2020/Jan/9",
+            "https://security.gentoo.org/glsa/202004-17",
+            "https://security.netapp.com/advisory/ntap-20200110-0003",
+            "https://security.netapp.com/advisory/ntap-20200110-0003/",
+            "https://ubuntu.com/security/notices/USN-4224-1",
+            "https://ubuntu.com/security/notices/USN-6722-1",
+            "https://usn.ubuntu.com/4224-1",
+            "https://usn.ubuntu.com/4224-1/",
+            "https://www.cve.org/CVERecord?id=CVE-2019-19844",
+            "https://www.debian.org/security/2020/dsa-4598",
+            "https://www.djangoproject.com/weblog/2019/dec/18/security-releases",
+            "https://www.djangoproject.com/weblog/2019/dec/18/security-releases/"
+          ],
+          "PublishedDate": "2019-12-18T19:15:11.78Z",
+          "LastModifiedDate": "2026-06-17T02:27:20.267Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2020-7471",
+          "VendorIDs": [
+            "GHSA-hmr4-m2h5-33qx"
+          ],
+          "PkgName": "Django",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/django@2.0.1",
+            "UID": "1ad4be5eeffae00"
+          },
+          "InstalledVersion": "2.0.1",
+          "FixedVersion": "1.11.28, 2.2.10, 3.0.3",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2020-7471",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:bfc8a946311cb998540fab1a8bea2e000422a13a3492e97614c953e054949ba5",
+          "Title": "django: potential SQL injection via StringAgg(delimiter)",
+          "Description": "Django 1.11 before 1.11.28, 2.2 before 2.2.10, and 3.0 before 3.0.3 allows SQL Injection if untrusted data is used as a StringAgg delimiter (e.g., in Django applications that offer downloads of data as a series of rows with a user-specified column delimiter). By passing a suitably crafted delimiter to a contrib.postgres.aggregates.StringAgg instance, it was possible to break escaping and inject malicious SQL.",
+          "Severity": "CRITICAL",
+          "CweIDs": [
+            "CWE-89"
+          ],
+          "VendorSeverity": {
+            "bitnami": 4,
+            "ghsa": 4,
+            "nvd": 4,
+            "redhat": 3,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "bitnami": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 9.8
+            },
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+              "V3Score": 9.8,
+              "V40Score": 9.3
+            },
+            "nvd": {
+              "V2Vector": "AV:N/AC:L/Au:N/C:P/I:P/A:P",
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V2Score": 7.5,
+              "V3Score": 9.8
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 9.8
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2020/02/03/1",
+            "https://access.redhat.com/security/cve/CVE-2020-7471",
+            "https://docs.djangoproject.com/en/3.0/releases/security",
+            "https://docs.djangoproject.com/en/3.0/releases/security/",
+            "https://github.com/advisories/GHSA-hmr4-m2h5-33qx",
+            "https://github.com/django/django",
+            "https://github.com/django/django/commit/001b0634cd309e372edb6d7d95d083d02b8e37bd",
+            "https://github.com/django/django/commit/505826b469b16ab36693360da9e11fd13213421b",
+            "https://github.com/django/django/commit/c67a368c16e4680b324b4f385398d638db4d8147",
+            "https://github.com/django/django/commit/eb31d845323618d688ad429479c6dda973056136",
+            "https://github.com/pypa/advisory-database/tree/main/vulns/django/PYSEC-2020-35.yaml",
+            "https://groups.google.com/forum/#!topic/django-announce/X45S86X5bZI",
+            "https://groups.google.com/forum/#%21topic/django-announce/X45S86X5bZI",
+            "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/message/4A2AP4T7RKPBCLTI2NNQG3T6MINDUUMZ",
+            "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/message/4A2AP4T7RKPBCLTI2NNQG3T6MINDUUMZ/",
+            "https://nvd.nist.gov/vuln/detail/CVE-2020-7471",
+            "https://seclists.org/bugtraq/2020/Feb/30",
+            "https://security.gentoo.org/glsa/202004-17",
+            "https://security.netapp.com/advisory/ntap-20200221-0006",
+            "https://security.netapp.com/advisory/ntap-20200221-0006/",
+            "https://ubuntu.com/security/notices/USN-4264-1",
+            "https://usn.ubuntu.com/4264-1",
+            "https://usn.ubuntu.com/4264-1/",
+            "https://www.cve.org/CVERecord?id=CVE-2020-7471",
+            "https://www.debian.org/security/2020/dsa-4629",
+            "https://www.djangoproject.com/weblog/2020/feb/03/security-releases",
+            "https://www.djangoproject.com/weblog/2020/feb/03/security-releases/",
+            "https://www.openwall.com/lists/oss-security/2020/02/03/1"
+          ],
+          "PublishedDate": "2020-02-03T12:15:26.993Z",
+          "LastModifiedDate": "2026-06-17T03:24:50.777Z"
+        }
+      ]
+    },
+    {
+      "Target": "Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 25,
+        "Failures": 2
+      },
+      "Misconfigurations": [
+        {
+          "Type": "Dockerfile Security Check",
+          "ID": "DS-0002",
+          "Title": "Image user should not be 'root'",
+          "Description": "Running containers with 'root' user can lead to a container escape situation. It is a best practice to run containers as non-root users, which can be done by adding a 'USER' statement to the Dockerfile.",
+          "Message": "Last USER command in Dockerfile should not be 'root'",
+          "Namespace": "builtin.dockerfile.DS002",
+          "Query": "data.builtin.dockerfile.DS002.deny",
+          "Resolution": "Add 'USER <non root user name>' line to the Dockerfile",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ds-0002",
+          "References": [
+            "https://docs.docker.com/develop/develop-images/dockerfile_best-practices/",
+            "https://avd.aquasec.com/misconfig/ds-0002"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Dockerfile",
+            "Service": "general",
+            "StartLine": 2,
+            "EndLine": 2,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 2,
+                  "Content": "USER root",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[38;5;64mUSER\u001b[0m\u001b[38;5;37m root\u001b[0m",
+                  "FirstCause": true,
+                  "LastCause": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "Type": "Dockerfile Security Check",
+          "ID": "DS-0026",
+          "Title": "No HEALTHCHECK defined",
+          "Description": "You should add HEALTHCHECK instruction in your docker container images to perform the health check on running containers.",
+          "Message": "Add HEALTHCHECK instruction in your Dockerfile",
+          "Namespace": "builtin.dockerfile.DS026",
+          "Query": "data.builtin.dockerfile.DS026.deny",
+          "Resolution": "Add HEALTHCHECK instruction in Dockerfile",
+          "Severity": "LOW",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ds-0026",
+          "References": [
+            "https://blog.aquasec.com/docker-security-best-practices",
+            "https://avd.aquasec.com/misconfig/ds-0026"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Dockerfile",
+            "Service": "general"
+          }
+        }
+      ]
+    },
+    {
+      "Target": "credentials",
+      "Class": "secret",
+      "Secrets": [
+        {
+          "RuleID": "aws-access-key-id",
+          "Category": "AWS",
+          "Severity": "CRITICAL",
+          "Title": "AWS Access Key ID",
+          "StartLine": 2,
+          "EndLine": 2,
+          "Code": {
+            "Lines": [
+              {
+                "Number": 1,
+                "Content": "[default]",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "[default]",
+                "FirstCause": false,
+                "LastCause": false
+              },
+              {
+                "Number": 2,
+                "Content": "aws_access_key_id = ********************",
+                "IsCause": true,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "aws_access_key_id = ********************",
+                "FirstCause": true,
+                "LastCause": true
+              },
+              {
+                "Number": 3,
+                "Content": "aws_secret_access_key = ****************************************",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "aws_secret_access_key = ****************************************",
+                "FirstCause": false,
+                "LastCause": false
+              }
+            ]
+          },
+          "Match": "aws_access_key_id = ********************",
+          "Offset": 30
+        },
+        {
+          "RuleID": "aws-secret-access-key",
+          "Category": "AWS",
+          "Severity": "CRITICAL",
+          "Title": "AWS Secret Access Key",
+          "StartLine": 3,
+          "EndLine": 3,
+          "Code": {
+            "Lines": [
+              {
+                "Number": 1,
+                "Content": "[default]",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "[default]",
+                "FirstCause": false,
+                "LastCause": false
+              },
+              {
+                "Number": 2,
+                "Content": "aws_access_key_id = ********************",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "aws_access_key_id = ********************",
+                "FirstCause": false,
+                "LastCause": false
+              },
+              {
+                "Number": 3,
+                "Content": "aws_secret_access_key = ****************************************",
+                "IsCause": true,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "aws_secret_access_key = ****************************************",
+                "FirstCause": true,
+                "LastCause": true
+              },
+              {
+                "Number": 4,
+                "Content": "github_token = ****************************************",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "github_token = ****************************************",
+                "FirstCause": false,
+                "LastCause": false
+              }
+            ]
+          },
+          "Match": "aws_secret_access_key = ****************************************",
+          "Offset": 75
+        },
+        {
+          "RuleID": "github-pat",
+          "Category": "GitHub",
+          "Severity": "CRITICAL",
+          "Title": "GitHub Personal Access Token",
+          "StartLine": 4,
+          "EndLine": 4,
+          "Code": {
+            "Lines": [
+              {
+                "Number": 2,
+                "Content": "aws_access_key_id = ********************",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "aws_access_key_id = ********************",
+                "FirstCause": false,
+                "LastCause": false
+              },
+              {
+                "Number": 3,
+                "Content": "aws_secret_access_key = ****************************************",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "aws_secret_access_key = ****************************************",
+                "FirstCause": false,
+                "LastCause": false
+              },
+              {
+                "Number": 4,
+                "Content": "github_token = ****************************************",
+                "IsCause": true,
+                "Annotation": "",
+                "Truncated": false,
+                "Highlighted": "github_token = ****************************************",
+                "FirstCause": true,
+                "LastCause": true
+              },
+              {
+                "Number": 5,
+                "Content": "",
+                "IsCause": false,
+                "Annotation": "",
+                "Truncated": false,
+                "FirstCause": false,
+                "LastCause": false
+              }
+            ]
+          },
+          "Match": "github_token = ****************************************",
+          "Offset": 131
+        }
+      ]
+    },
+    {
+      "Target": "Loose File License(s)",
+      "Class": "license-file",
+      "Licenses": [
+        {
+          "Severity": "LOW",
+          "Category": "notice",
+          "PkgName": "",
+          "FilePath": "LICENSE",
+          "Name": "MIT",
+          "Text": "",
+          "Confidence": 1,
+          "Link": "https://spdx.org/licenses/MIT.html"
+        }
+      ]
+    }
+  ]
+}

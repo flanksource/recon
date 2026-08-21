@@ -74,7 +74,7 @@ func (Engine) Spec() engines.Spec {
 		DocsURL:     "https://github.com/projectdiscovery/tlsx",
 		Install:     engines.ProjectDiscovery("tlsx"),
 		Version:     ">=1.3.0",
-		Sections:    catalog,
+		Options:     engines.OptionsFromSections(catalog),
 		Defaults: engines.DefaultProfile{
 			Name: "default",
 			Comment: "Certificate posture: identity, validity and the negotiated parameters.\n" +

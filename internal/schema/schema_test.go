@@ -35,10 +35,11 @@ func repoRoot() string {
 func base() map[string]any {
 	return map[string]any{
 		"$schema":  "../target.schema.json",
-		"version":  float64(1),
+		"version":  float64(api.TargetVersion),
+		"id":       "a.example.test",
 		"host":     "a.example.test",
 		"class":    "non-prod",
-		"profiles": []any{"safe"},
+		"profiles": []any{"scan:nuclei:safe"},
 		"tags":     []any{},
 	}
 }
@@ -52,7 +53,15 @@ var _ = Describe("target schema", func() {
 		for _, path := range paths {
 			raw, err := os.ReadFile(path)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(schema.ValidateTargetJSON(filepath.Base(path), raw)).
+			var document map[string]any
+			Expect(json.Unmarshal(raw, &document)).To(Succeed())
+			document["version"] = float64(api.TargetVersion)
+			document["id"] = document["host"]
+			profiles, _ := document["profiles"].([]any)
+			for i, profile := range profiles {
+				profiles[i] = "scan:nuclei:" + profile.(string)
+			}
+			Expect(schema.ValidateTarget(filepath.Base(path), document)).
 				To(Succeed(), "validating %s", filepath.Base(path))
 		}
 	})
@@ -62,12 +71,14 @@ var _ = Describe("target schema", func() {
 		Expect(err).ToNot(HaveOccurred())
 		var manifest any
 		Expect(json.Unmarshal(raw, &manifest)).To(Succeed())
+		manifest.(map[string]any)["version"] = float64(api.TargetVersion)
 		Expect(schema.ValidateInventory("inventory.json", manifest)).To(Succeed())
 	})
 
 	DescribeTable("accepts discovered target identities",
 		func(host string) {
 			document := base()
+			document["id"] = host
 			document["host"] = host
 			document["class"] = "unclassified"
 			Expect(schema.ValidateTarget("t.json", document)).To(Succeed())
@@ -76,6 +87,77 @@ var _ = Describe("target schema", func() {
 		Entry("an IPv4 address", "192.0.2.10"),
 		Entry("an IPv6 address", "2001:db8::10"),
 	)
+
+	It("accepts an addressless provider context", func() {
+		document := base()
+		delete(document, "host")
+		document["id"] = "gcp-production"
+		document["kind"] = "provider-context"
+		document["provider"] = "gcp"
+		document["credentialMode"] = "ambient"
+		document["arguments"] = map[string]any{
+			"project-ids": []any{"workload-prod-eu-02", "flanksource-prod"},
+		}
+		document["profiles"] = []any{"scan:prowler:gcp-cis-5-0"}
+
+		Expect(schema.ValidateTarget("gcp-production.json", document)).To(Succeed())
+	})
+
+	It("accepts redacted provider credentials and references", func() {
+		document := base()
+		delete(document, "host")
+		document["id"] = "cloudflare-production"
+		document["kind"] = "provider-context"
+		document["provider"] = "cloudflare"
+		document["credentialMode"] = "configured"
+		document["arguments"] = map[string]any{}
+		document["credentials"] = map[string]any{"envVars": []any{
+			map[string]any{"name": "CLOUDFLARE_API_TOKEN", "configured": true},
+			map[string]any{"name": "CLOUDFLARE_API_TOKEN_REF", "valueFrom": map[string]any{
+				"secretKeyRef": map[string]any{"name": "prowler", "key": "api-token"},
+			}},
+		}}
+		document["profiles"] = []any{"scan:prowler:cloudflare-context"}
+
+		Expect(schema.ValidateTarget("cloudflare-production.json", document)).To(Succeed())
+	})
+
+	It("keeps provider credentials off host targets", func() {
+		document := base()
+		document["credentials"] = map[string]any{"envVars": []any{
+			map[string]any{"name": "TOKEN", "configured": true},
+		}}
+
+		Expect(schema.ValidateTarget("host.json", document)).To(HaveOccurred())
+	})
+
+	It("rejects service-account references in provider EnvVars", func() {
+		document := base()
+		delete(document, "host")
+		document["id"] = "cloudflare-production"
+		document["kind"] = "provider-context"
+		document["provider"] = "cloudflare"
+		document["credentialMode"] = "configured"
+		document["arguments"] = map[string]any{}
+		document["credentials"] = map[string]any{"envVars": []any{map[string]any{
+			"name": "CLOUDFLARE_API_TOKEN",
+			"valueFrom": map[string]any{"serviceAccount": "prowler"},
+		}}}
+		document["profiles"] = []any{"scan:prowler:cloudflare-context"}
+
+		Expect(schema.ValidateTarget("cloudflare-production.json", document)).To(HaveOccurred())
+	})
+
+	It("rejects a provider context that also claims a host address", func() {
+		document := base()
+		document["id"] = "gcp-production"
+		document["kind"] = "provider-context"
+		document["provider"] = "gcp"
+		document["credentialMode"] = "ambient"
+		document["profiles"] = []any{"scan:prowler:gcp-cis-5-0"}
+
+		Expect(schema.ValidateTarget("gcp-production.json", document)).To(HaveOccurred())
+	})
 
 	// observed is `additionalProperties: false` and the failure kinds are an
 	// enum, so the schema has to be taught every kind the prober can produce.
@@ -110,9 +192,9 @@ var _ = Describe("target schema", func() {
 			document["profiles"] = []any{profile}
 			Expect(schema.ValidateTarget("t.json", document)).To(Succeed())
 		},
-		Entry("a curated profile", "k8s"),
-		Entry("an imported upstream profile", "subdomain-takeovers"),
-		Entry("a profile someone created", "our-internal-baseline"),
+		Entry("a curated profile", "scan:nuclei:k8s"),
+		Entry("an imported upstream profile", "scan:nuclei:subdomain-takeovers"),
+		Entry("a profile someone created", "scan:prowler:our-internal-baseline"),
 	)
 
 	// The conditional rule is the one piece of the schema a naive Go validator
@@ -158,12 +240,14 @@ var _ = Describe("target schema", func() {
 			func(d map[string]any) { d["nope"] = 1 }, "nope"),
 		Entry("an unknown class",
 			func(d map[string]any) { d["class"] = "staging" }, "value must be one of"),
+		Entry("a malformed stable id",
+			func(d map[string]any) { d["id"] = "gcp/project" }, "does not match pattern"),
 		Entry("an empty profiles array",
 			func(d map[string]any) { d["profiles"] = []any{} }, "minItems"),
 		Entry("a profile name the profile table could not hold",
 			func(d map[string]any) { d["profiles"] = []any{"Aggressive Scan"} }, "pattern"),
 		Entry("a duplicated profile",
-			func(d map[string]any) { d["profiles"] = []any{"safe", "safe"} }, "items at 0 and 1 are equal"),
+			func(d map[string]any) { d["profiles"] = []any{"scan:nuclei:safe", "scan:nuclei:safe"} }, "items at 0 and 1 are equal"),
 		Entry("an uppercase host",
 			func(d map[string]any) { d["host"] = "A.example.test" }, "pattern"),
 		Entry("a port above the maximum",

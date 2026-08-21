@@ -196,3 +196,93 @@ describe("a compliance finding", () => {
     expect(screen.queryByText("Reproduce (curl)")).toBeNull();
   });
 });
+
+// A secret as trivy reports it. The value is already masked in the engine's own
+// record — recon never sees the token — so the evidence worth showing is where
+// in the file it is.
+const SECRET_FINDING: Finding = {
+  _id: "scan-3#1",
+  scanId: "scan-3",
+  lineNo: 1,
+  templateId: "github-pat",
+  name: "GitHub Personal Access Token",
+  severity: "critical",
+  host: "ghcr.io/acme/api:1.4",
+  matchedAt: "app/config/credentials:4",
+  type: "trivy",
+  tags: ["class:secret", "category:GitHub"],
+  remediation: "Rotate the credential and remove it from app/config/credentials",
+  raw: {
+    RuleID: "github-pat",
+    Title: "GitHub Personal Access Token",
+    StartLine: 4,
+    Match: "github_token = ****************",
+    Code: {
+      Lines: [
+        { Number: 3, Content: "[github]", IsCause: false },
+        { Number: 4, Content: "github_token = ****************", IsCause: true },
+      ],
+    },
+  },
+};
+
+// A vulnerability has no code block: the package inventory is the evidence, and
+// the description is the only prose trivy gives.
+const VULNERABILITY_FINDING: Finding = {
+  _id: "scan-3#2",
+  scanId: "scan-3",
+  lineNo: 2,
+  templateId: "CVE-2019-19844",
+  name: "Django: crafted email address allows account takeover",
+  severity: "critical",
+  host: "ghcr.io/acme/api:1.4",
+  matchedAt: "requirements.txt: Django@2.0.1",
+  type: "trivy",
+  tags: ["class:lang-pkgs", "package:Django"],
+  raw: {
+    VulnerabilityID: "CVE-2019-19844",
+    PkgName: "Django",
+    Description: "Django before 1.11.27 allows account takeover.",
+  },
+};
+
+describe("an artifact finding", () => {
+  afterEach(cleanup);
+
+  it("shows the lines of the file the secret is in", () => {
+    render(<FindingDetail finding={SECRET_FINDING} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.getByText(/github_token/)).toBeInTheDocument();
+  });
+
+  it("keeps the value masked, exactly as the engine wrote it", () => {
+    render(<FindingDetail finding={SECRET_FINDING} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+
+    expect(screen.getByText(/\*{4}/)).toBeInTheDocument();
+  });
+
+  it("falls back to the description when there is no code to show", () => {
+    render(<FindingDetail finding={VULNERABILITY_FINDING} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+
+    expect(screen.getByText("Description")).toBeInTheDocument();
+    expect(screen.getByText(/account takeover/)).toBeInTheDocument();
+  });
+
+  it("offers no HTTP evidence panels", () => {
+    // Nothing was sent: the image was pulled and read. Labelling the file's
+    // lines as a request would misrepresent what the engine did.
+    render(<FindingDetail finding={SECRET_FINDING} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+
+    expect(screen.queryByText("Request")).toBeNull();
+    expect(screen.queryByText("Reproduce (curl)")).toBeNull();
+  });
+});

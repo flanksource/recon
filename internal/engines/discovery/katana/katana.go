@@ -72,8 +72,8 @@ func (Engine) Spec() engines.Spec {
 		// ProjectDiscovery tool uses underscores.
 		Install: engines.WithChecksumFile(
 			engines.ProjectDiscovery("katana"), "katana-{{.version}}-checksums.txt"),
-		Version:  ">=1.7.0",
-		Sections: catalog,
+		Version: ">=1.7.0",
+		Options: engines.OptionsFromSections(catalog),
 		Defaults: engines.DefaultProfile{
 			Name: "default",
 			Comment: "Shallow, bounded crawl. Depth and duration are both capped: this fetches\n" +

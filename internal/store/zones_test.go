@@ -94,7 +94,7 @@ var _ = Describe("the configured zones", Ordered, Label("db"), func() {
 		Expect(st.SaveTarget(ctx, api.TargetDocument{
 			Schema: api.TargetSchemaRef, Version: api.TargetVersion,
 			Host: "app.example.test", Class: api.ClassProd,
-			Profiles: []string{"safe"}, Tags: []string{},
+			Profiles: []string{"scan:nuclei:safe"}, Tags: []string{},
 		})).To(Succeed())
 
 		_, err := st.AddZone(ctx, "example.test")

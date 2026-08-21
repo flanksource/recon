@@ -74,7 +74,13 @@ export function createApiHandler(
 ): Connect.NextHandleFunction {
   const { profileConfigDir, ...inventoryOptions } = options;
   const store = createInventoryStore(inventoryOptions);
-  const schemaPath = resolve(import.meta.dirname, "..", "inventory", "target.schema.json");
+  const schemaPath = resolve(
+    import.meta.dirname,
+    "..",
+    "internal",
+    "schema",
+    "target.schema.json",
+  );
   return async (req, res, next) => {
     if (!req.url?.startsWith("/api/")) return next();
     const pathname = new URL(req.url, "http://localhost").pathname;
@@ -86,9 +92,9 @@ export function createApiHandler(
         return json(res, 200, JSON.parse(readFileSync(schemaPath, "utf8")) as unknown);
       }
       if (pathname.startsWith("/api/inventory/") && req.method === "GET") {
-        const host = decodeURIComponent(pathname.slice("/api/inventory/".length));
+        const id = decodeURIComponent(pathname.slice("/api/inventory/".length));
         try {
-          return json(res, 200, store.get(host));
+          return json(res, 200, store.get(id));
         } catch (error) {
           if ((error as Error).message.startsWith("target not found:")) {
             return json(res, 404, { error: (error as Error).message });
@@ -97,13 +103,13 @@ export function createApiHandler(
         }
       }
       if (pathname.startsWith("/api/inventory/") && req.method === "PUT") {
-        const host = decodeURIComponent(pathname.slice("/api/inventory/".length));
+        const id = decodeURIComponent(pathname.slice("/api/inventory/".length));
         try {
           const curated = bodyObject(await readBody(req));
           return json(
             res,
             200,
-            store.updateCurated({ host, curated: curated as CuratedTarget }),
+            store.updateCurated({ id, curated: curated as CuratedTarget }),
           );
         } catch (error) {
           return json(res, 400, { error: (error as Error).message });

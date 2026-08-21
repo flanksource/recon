@@ -20,7 +20,7 @@ var _ = Describe("serving the interface from a dev server", func() {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			seen = *r
 			w.Header().Set("content-type", "text/javascript")
-			w.Write([]byte("export const path = " + r.URL.Path))
+			_, _ = w.Write([]byte("export const path = " + r.URL.Path))
 		}))
 		DeferCleanup(server.Close)
 		return server, &seen

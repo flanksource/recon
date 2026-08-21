@@ -212,7 +212,7 @@ var _ = Describe("recording that a run covered a host", Ordered, Label("db"), fu
 		row.FinishedAt = &finished
 		row.DurationMS = 1000
 		Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
-			Scan: row, Findings: findings, Hosts: hosts, CountFindings: count,
+			Scan: row, Findings: findings, TargetIDs: hosts, CountFindings: count,
 		})).To(Succeed())
 		return row.ID
 	}

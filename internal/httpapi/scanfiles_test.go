@@ -88,6 +88,17 @@ var _ = Describe("serving a run's retained artifacts", func() {
 		Expect(io.ReadAll(response.Body)).To(BeEquivalentTo(`{"template-id":"tls-version"}` + "\n"))
 	})
 
+	It("serves nested provider output by its relative artifact path", func() {
+		nested := filepath.Join(dir, "contexts", "0001", "output")
+		Expect(os.MkdirAll(nested, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(nested, "report.ocsf.json"), []byte("[]\n"), 0o644)).To(Succeed())
+		serve(api.Scan{ID: "01", Name: "prowler-cis", Result: dir})
+
+		response := get("/api/scan/01/files/contexts/0001/output/report.ocsf.json")
+		Expect(response.StatusCode).To(Equal(http.StatusOK))
+		Expect(io.ReadAll(response.Body)).To(BeEquivalentTo("[]\n"))
+	})
+
 	// The directory comes from the database and the name from the URL, so the
 	// route must not be one `..` away from serving whatever the process can read.
 	It("refuses to serve anything outside the run's own directory", func() {

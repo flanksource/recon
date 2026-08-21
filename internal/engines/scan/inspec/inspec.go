@@ -80,9 +80,9 @@ func (Engine) Spec() engines.Spec {
 		// same as any other scan.
 		Subject: engines.SubjectAccounts,
 
-		Install:  cincAuditor(),
-		Version:  ">=7.0.0",
-		Sections: catalog,
+		Install: cincAuditor(),
+		Version: ">=7.0.0",
+		Options: engines.OptionsFromSections(catalog),
 
 		ValidateOptions: validateConfig,
 
@@ -171,10 +171,6 @@ var inputKeys = map[string]string{
 	"gce-zones":                   "gce_zones",
 	"gcp-gke-locations":           "gcp_gke_locations",
 }
-
-// runtimeKeys drive the run rather than the command line, so they are neither
-// flags nor inputs.
-var runtimeKeys = map[string]bool{"max-time": true}
 
 // validateConfig applies the constraints the field catalog cannot express.
 func validateConfig(config map[string]any) error {

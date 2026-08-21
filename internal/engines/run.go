@@ -2,13 +2,37 @@ package engines
 
 import (
 	"fmt"
+
+	dbcontext "github.com/flanksource/commons-db/context"
+
+	"github.com/flanksource/recon/internal/api"
+	credentialstore "github.com/flanksource/recon/internal/credentials"
 )
+
+// ProviderContext is one provider-native execution subject. Credentials stay
+// in this in-memory form and are never rendered into a scan input artifact.
+type ProviderContext struct {
+	ID             string
+	Provider       string
+	CredentialMode api.CredentialMode
+	Arguments      map[string]any
+	Class          api.Class
+	Credentials    *credentialstore.ProviderCredentials `json:"-" yaml:"-"`
+}
 
 // Run is everything one engine invocation needs. It stays deliberately small:
 // nuclei's stats streaming, SARIF export and tag excludes are nuclei's business,
 // not every engine's, and putting them here would make tlsx or katana implement
 // fields that mean nothing to them.
 type Run struct {
+	// Context resolves commons-db EnvVars and connection references at the
+	// execution boundary. It carries the run cancellation, database, and
+	// configured namespace.
+	Context dbcontext.Context
+	// ProviderContexts are the typed provider-native subjects selected for this
+	// run. The input file is sanitized evidence, not a credential transport.
+	ProviderContexts []ProviderContext `json:"-" yaml:"-"`
+
 	// Bin is the resolved absolute path to the engine binary.
 	Bin string
 

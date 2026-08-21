@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 
 	"github.com/flanksource/clicky"
@@ -17,6 +18,7 @@ import (
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/entities"
 	"github.com/flanksource/recon/internal/probes"
+	"github.com/flanksource/recon/internal/runtimecontext"
 	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -76,6 +78,7 @@ func New() *cobra.Command {
 	}
 	registry.Register()
 	registerEngineCommands()
+	registerTargetCommands()
 	clicky.GenerateCLI(cmd)
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
@@ -95,6 +98,7 @@ func New() *cobra.Command {
 		st := store.New(handle.Gorm)
 		registry.SetStore(st)
 		scans.Store = st
+		scans.ContextFactory = runtimecontext.New(st, namespaceFromEnvironment(os.LookupEnv))
 		sweeps.Store = st
 		liveness.Store = st
 

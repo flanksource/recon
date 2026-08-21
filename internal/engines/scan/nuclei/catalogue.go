@@ -25,7 +25,10 @@ func (Engine) Templates() ([]api.Template, error) {
 // engine listing says "templates are not installed" instead of showing an engine
 // that looks ready and scans nothing.
 func (Engine) Corpus() api.EngineTemplates {
-	corpus := api.EngineTemplates{Version: TemplateVersion(), Path: TemplatesDir()}
+	corpus := api.EngineTemplates{
+		Version: TemplateVersion(), Path: TemplatesDir(),
+		ItemLabel: "template", ProfileLabel: "profile",
+	}
 	index, err := SharedIndex()
 	if err != nil {
 		corpus.Problem = err.Error()

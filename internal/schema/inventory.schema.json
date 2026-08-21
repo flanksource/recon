@@ -7,7 +7,7 @@
   "required": ["$schema", "version", "zones"],
   "properties": {
     "$schema": { "const": "./inventory.schema.json" },
-    "version": { "const": 1 },
+    "version": { "const": 3 },
     "zones": {
       "type": "array",
       "items": { "$ref": "#/$defs/hostname" },

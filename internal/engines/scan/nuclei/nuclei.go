@@ -41,7 +41,7 @@ func (Engine) Spec() engines.Spec {
 		// resolve. What still has to be present is the template corpus.
 		InProcess:       true,
 		Version:         nucleiconfig.Version,
-		Sections:        catalog,
+		Options:         engines.OptionsFromSections(catalog),
 		ValidateOptions: validateConfig,
 		Defaults: engines.DefaultProfile{
 			Name: "safe",

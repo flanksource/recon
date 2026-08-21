@@ -102,8 +102,9 @@ func localTimestamp(t time.Time) string {
 
 // Finding is one row of the findings table.
 type Finding struct {
-	ID     string `gorm:"column:id;primaryKey;default:generate_ulid()"`
-	ScanID string `gorm:"column:scan_id"`
+	ID       string `gorm:"column:id;primaryKey;default:generate_ulid()"`
+	ScanID   string `gorm:"column:scan_id"`
+	TargetID string `gorm:"column:target_id"`
 	// LineNo preserves the order the engine emitted findings in, which is the
 	// order the results file has and the UI renders.
 	LineNo int `gorm:"column:line_no"`
@@ -137,6 +138,7 @@ func (f Finding) Document() api.Finding {
 	finding := api.Finding{
 		ScanID:      f.ScanID,
 		LineNo:      f.LineNo,
+		TargetID:    f.TargetID,
 		TemplateID:  f.TemplateID,
 		Name:        f.Name,
 		Severity:    api.Severity(f.Severity),
@@ -174,6 +176,7 @@ func FindingFrom(scanID string, lineNo int, finding api.Finding) Finding {
 	row := Finding{
 		ScanID:      scanID,
 		LineNo:      lineNo,
+		TargetID:    scrub(finding.TargetID),
 		TemplateID:  scrub(finding.TemplateID),
 		Name:        scrub(finding.Name),
 		Severity:    string(finding.Severity),

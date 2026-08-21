@@ -80,4 +80,17 @@ var _ = Describe("the built-in profile catalog", Ordered, Label("db"), func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(after.Config["rate-limit"]).To(BeEquivalentTo(5))
 	})
+
+	It("rejects a profile before writing when its full option schema fails", func() {
+		profile, err := st.GetProfile(ctx, "scan:nuclei:safe")
+		Expect(err).ToNot(HaveOccurred())
+		profile.Config["rate-limit"] = "fast"
+
+		_, err = st.SaveProfile(ctx, profile)
+		Expect(err).To(MatchError(ContainSubstring("rate-limit")))
+
+		stored, err := st.GetProfile(ctx, "scan:nuclei:safe")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(stored.Config["rate-limit"]).To(BeEquivalentTo(5))
+	})
 })

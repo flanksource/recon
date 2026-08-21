@@ -11,14 +11,14 @@ import "encoding/json"
 // on the wire is what lets the golden documents compare equal.
 const (
 	TargetSchemaRef = "../target.schema.json"
-	TargetVersion   = 1
+	TargetVersion   = 3
 )
 
 // TargetKind is what a target addresses.
 //
 // It is separate from Class because the two answer different questions: Class
-// is how exposed a target is, TargetKind is what kind of thing it is — a GCP
-// project can be production or a sandbox exactly as a host can. Spelled out in
+// is how exposed a target is, TargetKind is what kind of thing it is — a cloud
+// context can be production or a sandbox exactly as a host can. Spelled out in
 // full because Kind already names the two engine registries.
 type TargetKind string
 
@@ -27,24 +27,69 @@ const (
 	// discovery engine and every endpoint-driven scan works on these.
 	KindHost TargetKind = "host"
 
-	// KindGCPProject is a Google Cloud project, audited through the Google APIs
-	// rather than contacted over the network. It has no address and no ports.
-	KindGCPProject TargetKind = "gcp-project"
+	// KindProviderContext is one explicitly configured scope for a provider
+	// scanner. It may cover an account, project, organization, repository or
+	// another provider-native scope; the generated provider argument schema owns
+	// that shape rather than recon growing one target kind per provider.
+	KindProviderContext TargetKind = "provider-context"
 )
+
+// kindTraits is one entry in the kind vocabulary: what a target of this kind
+// is, and what can be done to it.
+type kindTraits struct {
+	Name TargetKind
+
+	// Addressable targets are reachable over the network, so they resolve to
+	// endpoints and discovery, probes and endpoint-driven scans see them.
+	Addressable bool
+
+	// ProviderContext targets are consumed by a provider scanner rather than
+	// resolved to a network endpoint.
+	ProviderContext bool
+}
+
+// kindTable is the vocabulary, in schema order.
+//
+// One table rather than a predicate each: between them the questions have three
+// answers, and deriving "a scan can audit it" from "it has no address" is
+// exactly how an organization ends up in front of an engine that wants a
+// project id.
+var kindTable = []kindTraits{
+	{Name: KindHost, Addressable: true},
+	{Name: KindProviderContext, ProviderContext: true},
+}
 
 // TargetKinds lists every valid kind in schema order.
 func TargetKinds() []TargetKind {
-	return []TargetKind{KindHost, KindGCPProject}
+	names := make([]TargetKind, 0, len(kindTable))
+	for _, entry := range kindTable {
+		names = append(names, entry.Name)
+	}
+	return names
+}
+
+// traits resolves the vocabulary entry, normalising through String so the
+// absent-means-host default lives in exactly one place. An unknown kind gets
+// the zero entry: neither addressable nor auditable, which is the safe reading
+// of a value nothing here recognises.
+func (k TargetKind) traits() kindTraits {
+	name := TargetKind(k.String())
+	for _, entry := range kindTable {
+		if entry.Name == name {
+			return entry
+		}
+	}
+	return kindTraits{}
 }
 
 // Addressable reports whether a target of this kind can be reached over the
 // network — which is what decides whether it resolves to endpoints, and so
 // whether discovery, probes and endpoint-driven scans see it at all.
-func (k TargetKind) Addressable() bool {
-	// An empty kind means host: it is the column default, and the only rows
-	// that predate the column are hosts.
-	return k == KindHost || k == ""
-}
+func (k TargetKind) Addressable() bool { return k.traits().Addressable }
+
+// ProviderContext reports whether the target is a provider-native execution
+// scope rather than a network address.
+func (k TargetKind) ProviderContext() bool { return k.traits().ProviderContext }
 
 // String renders the kind, resolving the absent-means-host default so callers
 // storing or displaying it never have to.
@@ -80,7 +125,7 @@ func (c Class) Risky() bool {
 	return c == ClassProd || c == ClassPublic || c == ClassUnclassified || c == ""
 }
 
-// TargetDocument is one host as the API returns it.
+// TargetDocument is one inventory target as the API returns it.
 //
 // Pointer fields are not decoration. The schema gives http.title, every tls
 // string and the cpe product/vendor no minLength, and the observation
@@ -94,21 +139,29 @@ func (c Class) Risky() bool {
 type TargetDocument struct {
 	Schema  string `json:"$schema"`
 	Version int    `json:"version"`
-	Host    string `json:"host"`
+	// ID is the stable inventory identity. It is independent of a host address
+	// and of the provider resources one context happens to cover.
+	ID   string `json:"id"`
+	Host string `json:"host,omitempty"`
 
-	// Kind is omitempty so a host document is byte-identical to what it was
-	// before cloud accounts existed — which is what keeps contract/golden/
-	// comparing equal without rewriting every fixture.
+	// Kind is omitempty because host is the schema default.
 	Kind     TargetKind `json:"kind,omitempty"`
-	Class    Class      `json:"class"`
-	App      string     `json:"app,omitempty"`
-	Cluster  string     `json:"cluster,omitempty"`
-	Source   string     `json:"source,omitempty"`
-	Profiles []string   `json:"profiles"`
-	Ports    []int      `json:"ports,omitempty"`
-	Tags     []string   `json:"tags"`
-	Notes    string     `json:"notes,omitempty"`
-	Reason   string     `json:"reason,omitempty"`
+	Provider string     `json:"provider,omitempty"`
+	// CredentialMode makes ambient credential use an explicit choice. Arguments
+	// contains provider-native non-secret selectors and paths; provider schemas
+	// reject direct credential values before they are stored.
+	CredentialMode CredentialMode       `json:"credentialMode,omitempty"`
+	Arguments      map[string]any       `json:"arguments,omitempty"`
+	Credentials    *ProviderCredentials `json:"credentials,omitempty"`
+	Class          Class                `json:"class"`
+	App            string               `json:"app,omitempty"`
+	Cluster        string               `json:"cluster,omitempty"`
+	Source         string               `json:"source,omitempty"`
+	Profiles       []string             `json:"profiles"`
+	Ports          []int                `json:"ports,omitempty"`
+	Tags           []string             `json:"tags"`
+	Notes          string               `json:"notes,omitempty"`
+	Reason         string               `json:"reason,omitempty"`
 
 	Observed *Observed  `json:"observed,omitempty"`
 	Network  *Network   `json:"network,omitempty"`
@@ -128,6 +181,9 @@ func (t TargetDocument) MarshalJSON() ([]byte, error) {
 	out := alias(t)
 	out.Schema = TargetSchemaRef
 	out.Version = TargetVersion
+	if out.ID == "" && out.Host != "" {
+		out.ID = out.Host
+	}
 	if out.Profiles == nil {
 		out.Profiles = []string{}
 	}
@@ -135,6 +191,20 @@ func (t TargetDocument) MarshalJSON() ([]byte, error) {
 		out.Tags = []string{}
 	}
 	return json.Marshal(out)
+}
+
+// CredentialMode says where a provider process obtains credentials. Neither
+// mode permits secret material in the inventory: configured means non-secret
+// profile names, role names or credential-file paths in Arguments.
+type CredentialMode string
+
+const (
+	CredentialAmbient    CredentialMode = "ambient"
+	CredentialConfigured CredentialMode = "configured"
+)
+
+func (m CredentialMode) Valid() bool {
+	return m == CredentialAmbient || m == CredentialConfigured
 }
 
 // MarshalJSON applies the same required-array rule to the editable projection.

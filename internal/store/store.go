@@ -8,15 +8,29 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
+
+	"github.com/flanksource/recon/internal/api"
 )
+
+// ProviderContextValidator applies the selected engine's ContextSchema after
+// generic target validation and before a provider context is written.
+type ProviderContextValidator func(context.Context, api.TargetDocument) error
 
 // Store holds the database handle. It is safe for concurrent use.
 type Store struct {
-	db *gorm.DB
+	db                       *gorm.DB
+	providerContextValidator ProviderContextValidator
 }
 
 // New wraps an existing gorm handle.
 func New(db *gorm.DB) *Store { return &Store{db: db} }
+
+// SetProviderContextValidator connects provider-specific ContextSchema
+// validation. Configure it while constructing the process, before serving
+// concurrent requests.
+func (s *Store) SetProviderContextValidator(validator ProviderContextValidator) {
+	s.providerContextValidator = validator
+}
 
 // DB exposes the handle for callers that need to compose a query — the entity
 // layer's filter pushdown, mainly.

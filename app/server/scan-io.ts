@@ -130,6 +130,16 @@ function groupFor(hosts: string[], classByHost: Map<string, string>): string {
   return classes.length <= 2 ? classes.join("+") : "mixed";
 }
 
+export function addressableClasses(
+  targets: Array<{ host?: string; class: string }>,
+): Map<string, string> {
+  return new Map(
+    targets.flatMap((target) =>
+      target.host ? [[target.host, target.class] as const] : [],
+    ),
+  );
+}
+
 export function scanInvocation(options: {
   profile: ScanProfile;
   resultFile: string | null;
@@ -245,11 +255,7 @@ export function startScan(opts: {
   const invalid = hosts.filter((h) => !HOST_RE.test(h));
   if (invalid.length) throw new Error(`invalid host(s): ${invalid.join(", ")}`);
 
-  const classByHost = new Map(
-    inventoryStore
-      .list()
-      .rows.map((target) => [target.host, target.class as string]),
-  );
+  const classByHost = addressableClasses(inventoryStore.list().rows);
   const unsaved = hosts.filter((host) => !classByHost.has(host));
   if (opts.profile === "discovery" && unsaved.length > 0) {
     throw new Error(

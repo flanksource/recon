@@ -14,7 +14,9 @@ import (
 // combined in one run.
 type runTarget struct {
 	Selector string   `flag:"selector" help:"Kubernetes label selector over target tags"`
-	Kind     []string `flag:"kind" help:"Only inventory targets of these kinds (host, gcp-project)"`
+	ID       []string `flag:"id" help:"Only inventory targets with these stable IDs"`
+	Kind     []string `flag:"kind" help:"Only inventory targets of these kinds (host, provider-context)"`
+	Provider []string `flag:"provider" help:"Only provider contexts for these providers"`
 	Class    []string `flag:"class" help:"Only inventory targets in these classes"`
 	Tags     []string `flag:"tags" help:"Only inventory targets carrying any of these tags"`
 	Profiles []string `flag:"profiles" help:"Only inventory targets assigned these scan profiles"`
@@ -43,7 +45,9 @@ func (t runTarget) resolve() (resolvedTarget, error) {
 	resolved := resolvedTarget{
 		Inventory: store.TargetOpts{
 			Selector: t.Selector,
+			IDs:      uniqueStrings(t.ID),
 			Kind:     t.Kind,
+			Provider: t.Provider,
 			Class:    t.Class, Tags: t.Tags, Profiles: t.Profiles, Ports: t.Ports,
 			Status: t.Status, LastSeen: t.LastSeen, Live: t.Live,
 		},

@@ -2,7 +2,7 @@ import {
   Badge,
   type DataTableColumn,
   type BadgeStatus,
-} from "@flanksource/clicky-ui";
+} from "@flanksource/clicky-ui/data";
 import type {
   ProbeFailure,
   TableRow,
@@ -32,7 +32,7 @@ function classPill(cls: TargetClass) {
 
 const KIND_LABELS: Record<TargetKind, string> = {
   host: "Host",
-  "gcp-project": "GCP project",
+  "provider-context": "Provider context",
 };
 
 function kindPill(kind: TargetKind) {
@@ -103,14 +103,18 @@ function findingsStatus(raw: unknown): BadgeStatus | null {
 
 export const columns: DataTableColumn<TableRow>[] = [
   {
-    key: "host",
-    label: "Host",
+    key: "id",
+    label: "Target",
     grow: true,
     sortable: true,
     render: (value, row) => (
       <div className="flex flex-col">
-        <span className="font-medium text-foreground">{String(value)}</span>
-        {row.http?.title ? (
+        <span className="font-medium text-foreground">
+          {String(value)}
+        </span>
+        {targetKind(row) === "provider-context" && row.provider ? (
+          <span className="truncate text-xs text-muted-foreground">{row.provider}</span>
+        ) : row.http?.title ? (
           <span className="truncate text-xs text-muted-foreground">
             {row.http.title}
           </span>

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, DataTable } from "@flanksource/clicky-ui";
+import { AppShell, Button } from "@flanksource/clicky-ui/components";
+import { DataTable } from "@flanksource/clicky-ui/data";
 import { columns } from "./columns";
 import { BulkEditBar, type BulkEdit } from "./BulkEditBar";
+import { AddTargetDialog } from "./AddTargetDialog";
 import { DiscoverDialog } from "./DiscoverDialog";
 import { PingDialog } from "./PingDialog";
 import { ScanDialog } from "./ScanDialog";
@@ -10,6 +12,9 @@ import { useScanStatus } from "./useScanStatus";
 import { fetchTargets, saveTargets } from "./api";
 import {
   curatedTarget,
+  targetHost,
+  targetId,
+  targetKind,
   type TableRow,
   type TargetRow,
   type TargetSelector,
@@ -44,11 +49,11 @@ export function InventoryView({
   onOpenTarget,
 }: {
   onOpenScan: (file: string) => void;
-  onOpenTarget: (host: string) => void;
+  onOpenTarget: (id: string) => void;
 }) {
   const routeParams = new URLSearchParams(window.location.search);
   // Two states, deliberately. `served` is what the database says; `edits` is
-  // what the user has changed and not yet saved, keyed by host. Keeping them
+  // what the user has changed and not yet saved, keyed by stable target id. Keeping them
   // apart is what makes a reload safe: the server's answer replaces `served`
   // and the edits are re-applied on top, so narrowing a filter or finishing a
   // scan can no longer throw away typing.
@@ -63,6 +68,7 @@ export function InventoryView({
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [pingOpen, setPingOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const { filters, selection, error: filterError } = useEntityFilters("target");
 
@@ -97,9 +103,11 @@ export function InventoryView({
     if (hosts.length === 0) return;
     try {
       const refreshed = await fetchTargets({ hosts: hosts.join(",") });
-      const byHost = new Map(refreshed.map((row) => [row.host, row]));
+      const byHost = new Map(refreshed.map((row) => [targetHost(row), row]));
       setServed((current) =>
-        current.map((row) => byHost.get(row.host) ?? row),
+        current.map((row) =>
+          targetKind(row) === "host" ? (byHost.get(targetHost(row)) ?? row) : row,
+        ),
       );
     } catch (e) {
       setError((e as Error).message);
@@ -119,7 +127,7 @@ export function InventoryView({
   // The rows the table shows: what the server returned, with unsaved edits laid
   // over it. Discovery inserts new unclassified targets directly in the store.
   const rows = useMemo<TargetRow[]>(() => {
-    return served.map((row) => edits[row.host] ?? row);
+    return served.map((row) => edits[targetId(row)] ?? row);
   }, [edits, served]);
 
   const dirty = Object.keys(edits).length > 0;
@@ -147,7 +155,7 @@ export function InventoryView({
         known_paths: r.http?.known_paths,
         login_methods: r.http?.login_methods,
         findings: r.scan?.last_findings,
-        dirty: r.host in edits,
+        dirty: targetId(r) in edits,
       })),
     [edits, rows],
   );
@@ -155,19 +163,19 @@ export function InventoryView({
   const applyBulk = useCallback(
     (edit: BulkEdit) => {
       const selected = new Set(selectedIds);
-      const current = new Map(rows.map((row) => [row.host, row]));
-      const stored = new Map(served.map((row) => [row.host, row]));
+      const current = new Map(rows.map((row) => [targetId(row), row]));
+      const stored = new Map(served.map((row) => [targetId(row), row]));
       setEdits((prev) => {
         const next = { ...prev };
-        for (const host of selected) {
-          const row = current.get(host);
+        for (const id of selected) {
+          const row = current.get(id);
           if (!row) continue;
           const edited = applyEdit(row, edit);
           // An edit that lands back on what the database already has is not a
           // change, and leaving it in would keep claiming unsaved work.
-          const saved = stored.get(host);
-          if (saved && sameDefinition(edited, saved)) delete next[host];
-          else next[host] = edited;
+          const saved = stored.get(id);
+          if (saved && sameDefinition(edited, saved)) delete next[id];
+          else next[id] = edited;
         }
         return next;
       });
@@ -200,12 +208,22 @@ export function InventoryView({
   const selectedTags = useMemo(() => {
     const sel = new Set(selectedIds);
     const tags = new Set<string>();
-    rows.forEach((r) => sel.has(r.host) && r.tags.forEach((t) => tags.add(t)));
+    rows.forEach((r) => sel.has(targetId(r)) && r.tags.forEach((t) => tags.add(t)));
     return [...tags].sort();
   }, [rows, selectedIds]);
 
   const scannedCount = tableRows.filter((r) => r.last_scan).length;
-  const savedHosts = useMemo(() => served.map((r) => r.host), [served]);
+  const savedTargetIds = useMemo(() => served.map(targetId), [served]);
+  const hostRows = useMemo(
+    () => rows.filter((row) => targetKind(row) === "host"),
+    [rows],
+  );
+  const selectedHosts = useMemo(() => {
+    const selected = new Set(selectedIds);
+    return hostRows
+      .filter((row) => selected.has(targetId(row)))
+      .map(targetHost);
+  }, [hostRows, selectedIds]);
 
   const scanActive = scan?.phase === "queued" || scan?.phase === "running";
   const scanLabel = selectedIds.length
@@ -215,64 +233,92 @@ export function InventoryView({
       : "Scan now";
 
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
-      <header className="flex items-center gap-3 border-b border-border px-4 py-3">
-        <h1 className="text-lg font-semibold">Target Inventory</h1>
-        <span className="text-sm text-muted-foreground">
-          {rows.length} targets · {scannedCount} scanned ·{" "}
-          {tagVocabulary.length} tags
-        </span>
-        <span className="flex-1" />
-        {(error ?? filterError) && (
-          <span className="text-sm text-destructive" role="alert">
-            {error ?? filterError}
+    <AppShell
+      bodyHeader={
+        <div className="flex min-w-0 items-baseline gap-3">
+          <h1 className="text-lg font-semibold">Target Inventory</h1>
+          <span className="truncate text-sm text-muted-foreground">
+            {rows.length} targets · {scannedCount} scanned ·{" "}
+            {tagVocabulary.length} tags
           </span>
-        )}
-        {dirty && (
-          <span className="text-sm text-amber-600 dark:text-amber-400">
-            Unsaved changes
-          </span>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setDiscoverOpen(true)}
-          disabled={busy}
-        >
-          Discover targets
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setPingOpen(true)}
-          disabled={busy}
-        >
-          Ping hosts
-        </Button>
-        <Button
-          variant={scanActive ? "default" : "outline"}
-          size="sm"
-          onClick={() => setScanOpen(true)}
-        >
-          {scanLabel}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void load()}
-          disabled={busy}
-        >
-          Reload
-        </Button>
-        <Button
-          size="sm"
-          onClick={() => void save()}
-          disabled={busy || !dirty}
-          loading={busy}
-        >
-          Save inventory
-        </Button>
-      </header>
+        </div>
+      }
+      bodyActions={
+        <div className="flex items-center gap-3">
+          {(error ?? filterError) && (
+            <span className="text-sm text-destructive" role="alert">
+              {error ?? filterError}
+            </span>
+          )}
+          {dirty && (
+            <span className="text-sm text-amber-600 dark:text-amber-400">
+              Unsaved changes
+            </span>
+          )}
+          <Button size="sm" onClick={() => setAddOpen(true)} disabled={busy}>
+            Add target
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDiscoverOpen(true)}
+            disabled={busy}
+          >
+            Discover targets
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPingOpen(true)}
+            disabled={busy}
+          >
+            Ping hosts
+          </Button>
+          <Button
+            variant={scanActive ? "default" : "outline"}
+            size="sm"
+            onClick={() => setScanOpen(true)}
+          >
+            {scanLabel}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            disabled={busy}
+          >
+            Reload
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void save()}
+            disabled={busy || !dirty}
+            loading={busy}
+          >
+            Save inventory
+          </Button>
+        </div>
+      }
+      // The inventory table is the widest in the app — target, kind, class,
+      // tags, profiles, app, cluster, status, ports, paths, findings and two
+      // timestamps — so the centred default spent most of a wide window on
+      // margins while the columns fought over what was left.
+      contentWidth="full"
+      contentClassName="overflow-hidden p-3"
+    >
+      {/* h-full, not flex-1: AppShell puts its content-width wrapper between
+          `main` and these children, and that wrapper is a block — so a flex
+          class on contentClassName never reaches here and `flex-1` has no flex
+          context to resolve against. Taking the wrapper's height directly is
+          what lets the table own the scroll and keep its header pinned;
+          without it the rows past the first screen are simply clipped. */}
+      <div className="flex h-full min-h-0 flex-col">
+      <AddTargetDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreated={() => void load()}
+        tagVocabulary={tagVocabulary}
+      />
 
       <DiscoverDialog
         open={discoverOpen}
@@ -283,8 +329,8 @@ export function InventoryView({
       <PingDialog
         open={pingOpen}
         onClose={() => setPingOpen(false)}
-        rows={tableRows}
-        selectedHosts={selectedIds}
+        rows={tableRows.filter((row) => targetKind(row) === "host")}
+        selectedHosts={selectedHosts}
         onProbed={refreshHosts}
       />
 
@@ -293,8 +339,8 @@ export function InventoryView({
           open={scanOpen}
           onClose={() => setScanOpen(false)}
           rows={rows}
-          savedHosts={savedHosts}
-          selectedHosts={selectedIds}
+          savedTargetIds={savedTargetIds}
+          selectedTargetIds={selectedIds}
           status={scan}
           onStatus={setScan}
           onOpenScan={(file) => {
@@ -304,13 +350,13 @@ export function InventoryView({
         />
       )}
 
-      <main className="min-h-0 flex-1 p-3">
-        <DataTable<TableRow>
+      <DataTable<TableRow>
+          className="min-h-0 flex-1"
           data={tableRows}
           columns={columns}
-          getRowId={(row) => row.host}
-          getRowHref={(row) => `/inventory/${encodeURIComponent(row.host)}`}
-          onRowClick={(row) => onOpenTarget(row.host)}
+          getRowId={targetId}
+          getRowHref={(row) => `/inventory/${encodeURIComponent(targetId(row))}`}
+          onRowClick={(row) => onOpenTarget(targetId(row))}
           // The controls come from the entity's own filter declaration and the
           // database answers them, so these rows arrived narrowed. DataTable
           // never applies caller-supplied filters itself, which is what lets
@@ -319,7 +365,7 @@ export function InventoryView({
           showGlobalFilter
           globalFilter={query}
           onGlobalFilterChange={setQuery}
-          globalFilterPlaceholder="Search hosts, tags, apps…"
+          globalFilterPlaceholder="Search targets, hosts, tags, apps…"
           defaultSort={{ key: "class" }}
           hideableColumns
           persistColumnVisibility
@@ -343,7 +389,7 @@ export function InventoryView({
             />
           )}
         />
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
