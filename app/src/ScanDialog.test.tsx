@@ -64,6 +64,7 @@ describe("ScanDialog", () => {
             profile: "safe",
             "discovery-profile": ["default"],
             confirm: false,
+            "no-mutes": false,
             wait: false,
           }),
         }),
@@ -262,6 +263,7 @@ describe("ScanDialog", () => {
             profile: "full",
             "discovery-profile": ["default"],
             confirm: false,
+            "no-mutes": false,
             wait: false,
           }),
         }),
@@ -314,6 +316,55 @@ describe("ScanDialog", () => {
             profile: "full",
             "discovery-profile": ["default"],
             confirm: true,
+            "no-mutes": false,
+            wait: false,
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("runs with the mute rules ignored when the operator asks for everything", async () => {
+    // A muted finding is never recorded, so this is the only way to see what
+    // the rules are hiding without deleting them first.
+    const fetchMock = mockFetch({
+      "/api/v1/engine": [nucleiEngine],
+      "/api/v1/profile": [safeProfile],
+      "/api/v1/scan": createdScan,
+    });
+
+    render(
+      <ScanDialog
+        open
+        onClose={vi.fn()}
+        rows={rows}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
+        status={null}
+        onStatus={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Scan 1 host" })).toBeEnabled(),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Ignore mute rules for this run" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Scan 1 host" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/scan",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            id: ["api.example.com"],
+            engine: "nuclei",
+            profile: "safe",
+            "discovery-profile": ["default"],
+            confirm: false,
+            "no-mutes": true,
             wait: false,
           }),
         }),
@@ -476,6 +527,7 @@ describe("ScanDialog", () => {
             profile: "safe",
             "discovery-profile": ["default", "naabu=full-ports"],
             confirm: false,
+            "no-mutes": false,
             wait: false,
           }),
         }),

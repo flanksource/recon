@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { saveTarget } from "./api";
+import { fetchScanParameters, saveTarget } from "./api";
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("target API", () => {
-  it("addresses an update by path without sending immutable identity fields", async () => {
+  it("sends an update to the collection route with its identity", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -31,10 +31,11 @@ describe("target API", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/target/gcp%20production",
+      "/api/v1/target",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({
+          id: "gcp production",
           class: "prod",
           profiles: ["scan:prowler:cis"],
           tags: [],
@@ -51,7 +52,7 @@ describe("target API", () => {
         JSON.stringify({
           $schema: "../target.schema.json",
           version: 2,
-          id: "cloudflare-production",
+          id: "cloudflare",
           kind: "provider-context",
           provider: "cloudflare",
           credentialMode: "configured",
@@ -63,19 +64,50 @@ describe("target API", () => {
       ),
     );
 
-    await saveTarget("cloudflare-production", {
+    await saveTarget("cloudflare", {
       class: "prod",
       profiles: ["scan:prowler:cloudflare"],
       tags: [],
       credentials: null,
     });
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/v1/target");
     expect(JSON.parse(init.body as string)).toEqual({
+      id: "cloudflare",
       class: "prod",
       profiles: ["scan:prowler:cloudflare"],
       tags: [],
       credentials: null,
     });
+  });
+});
+
+describe("scan parameters API", () => {
+  it("reads the effective config artifact retained with the run", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ "rate-limit": 50, headless: true }), {
+        status: 200,
+      }),
+    );
+
+    await expect(fetchScanParameters("scan one")).resolves.toEqual({
+      "rate-limit": 50,
+      headless: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/scan/scan%20one/files/config.json",
+      undefined,
+    );
+  });
+
+  it("rejects a config artifact whose root is not an object", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(["rate-limit", 50]), { status: 200 }),
+    );
+
+    await expect(fetchScanParameters("scan-1")).rejects.toThrow(
+      "scan scan-1 config.json must contain a JSON object",
+    );
   });
 });

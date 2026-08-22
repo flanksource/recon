@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FindingDetail } from "./FindingDetail";
 import type { Finding } from "./types";
@@ -83,6 +83,36 @@ describe("FindingDetail", () => {
     expect(screen.getByText("203.0.113.7:443")).toBeInTheDocument();
     expect(screen.getByText("product")).toBeInTheDocument();
     expect(screen.getByText("dotnetnuke")).toBeInTheDocument();
+  });
+
+  it("renders finding descriptions and recommended actions as markdown", async () => {
+    render(
+      <FindingDetail
+        finding={{
+          ...HTTP_FINDING,
+          remediation:
+            "1. Rotate the **affected key**.\n2. Follow the [response runbook](https://example.test/runbook).",
+          raw: {
+            ...HTTP_FINDING.raw,
+            info: {
+              ...(HTTP_FINDING.raw?.info as Record<string, unknown>),
+              description: "The **service account** can access `production` resources.",
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("service account")).toHaveAttribute("data-streamdown", "strong");
+      expect(screen.getByText("affected key")).toHaveAttribute("data-streamdown", "strong");
+    });
+    expect(screen.getByText("production").tagName).toBe("CODE");
+    expect(screen.getByRole("button", { name: "response runbook" })).toHaveAttribute(
+      "data-streamdown",
+      "link",
+    );
+    expect(screen.getByText("affected key").closest("ol")).not.toBeNull();
   });
 
   it("keeps curl, request and response on an Evidence tab counted by what the finding carries", () => {
@@ -249,6 +279,24 @@ const VULNERABILITY_FINDING: Finding = {
 describe("an artifact finding", () => {
   afterEach(cleanup);
 
+  it("renders top-level engine descriptions as markdown", async () => {
+    render(
+      <FindingDetail
+        finding={{
+          ...VULNERABILITY_FINDING,
+          raw: {
+            ...VULNERABILITY_FINDING.raw,
+            Description: "The **affected package** is vulnerable.",
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("affected package")).toHaveAttribute("data-streamdown", "strong");
+    });
+  });
+
   it("shows the lines of the file the secret is in", () => {
     render(<FindingDetail finding={SECRET_FINDING} />);
 
@@ -284,5 +332,54 @@ describe("an artifact finding", () => {
 
     expect(screen.queryByText("Request")).toBeNull();
     expect(screen.queryByText("Reproduce (curl)")).toBeNull();
+  });
+
+  it("asks how far a mute should reach rather than deciding for the operator", () => {
+    // This URL being expected and this check being noise everywhere are
+    // different facts, and only one of them is about this finding.
+    render(<FindingDetail finding={HTTP_FINDING} engine="nuclei" onMute={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute this finding" }));
+
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual([
+      "This check on this resource",
+      "This check on this host",
+      "This check everywhere",
+      "Anything on this resource",
+    ]);
+  });
+
+  it("opens a draft scoped to the choice rather than muting on the spot", () => {
+    // The editor previews before it commits: a rule drops what it matches, so
+    // the click has to open a draft, not create a rule.
+    const onMute = vi.fn();
+    render(<FindingDetail finding={HTTP_FINDING} engine="nuclei" onMute={onMute} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute this finding" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "This check everywhere" }));
+
+    expect(onMute).toHaveBeenCalledTimes(1);
+    expect(onMute).toHaveBeenCalledWith("/mutes/new?templates=CVE-2018-15811&engines=nuclei");
+  });
+
+  it("scopes to the matched URL, not the host, when the choice says this resource", () => {
+    const onMute = vi.fn();
+    render(<FindingDetail finding={HTTP_FINDING} engine="nuclei" onMute={onMute} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute this finding" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "This check on this resource" }));
+
+    expect(onMute).toHaveBeenCalledWith(
+      "/mutes/new?templates=CVE-2018-15811" +
+        "&resources=https%3A%2F%2Fapi.example.test%2Fdnn&engines=nuclei",
+    );
+  });
+
+  it("offers no mute action where there is nowhere to navigate to", () => {
+    render(<FindingDetail finding={HTTP_FINDING} />);
+
+    expect(screen.queryByRole("button", { name: "Mute this finding" })).toBeNull();
   });
 });

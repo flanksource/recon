@@ -4,7 +4,9 @@ import { TaskManagerButton } from "@flanksource/clicky-ui/data";
 import { useBrowserRouter } from "@flanksource/clicky-ui/rpc";
 import { InventoryView } from "./TargetsView";
 import { ScanDetailView, ScansView } from "./ScansView";
+import { MutesView } from "./MutesView";
 import { ProfilesView } from "./ProfilesView";
+import { ReportPlayground } from "./ReportPlayground";
 import { TargetView } from "./TargetView";
 import { TasksView } from "./TasksView";
 import { TemplatesView } from "./TemplatesView";
@@ -12,8 +14,10 @@ import { TemplatesView } from "./TemplatesView";
 const TABS = [
   { path: "/inventory", label: "Inventory" },
   { path: "/scans", label: "Scans" },
+  { path: "/reports", label: "Reports" },
   { path: "/profiles", label: "Profiles" },
   { path: "/templates", label: "Templates" },
+  { path: "/mutes", label: "Mutes" },
 ];
 
 export function App() {
@@ -33,8 +37,15 @@ function AppContent() {
 
   const targetMatch = router.pathname.match(/^\/inventory\/([^/]+)$/);
   const scanMatch = router.pathname.match(/^\/scans\/([^/]+)$/);
+  // The run is optional: /reports opens on a sample so the report can be
+  // designed before there is a run worth printing.
+  const reportMatch = router.pathname.match(/^\/reports(?:\/([^/]+))?$/);
   const taskMatch = router.pathname.match(/^\/tasks(?:\/([^/]+))?$/);
   const templateMatch = router.pathname.match(/^\/templates(?:\/([^/]+))?$/);
+  // A rule is addressable so it can be linked to, and `new` is a rule that does
+  // not exist yet: muting a finding from the results is a link into a prefilled
+  // draft rather than a second editor somewhere else.
+  const muteMatch = router.pathname.match(/^\/mutes(?:\/([^/]+))?$/);
   const templateEngine = templateMatch
     ? new URLSearchParams(window.location.search).get("engine") ?? undefined
     : undefined;
@@ -42,9 +53,13 @@ function AppContent() {
     ? "/inventory"
     : scanMatch
       ? "/scans"
-      : templateMatch
-        ? "/templates"
-        : router.pathname;
+      : reportMatch
+        ? "/reports"
+        : templateMatch
+          ? "/templates"
+          : muteMatch
+            ? "/mutes"
+            : router.pathname;
   // The primary nav, built once so it can go either in the bar below or into
   // the top bar of a view that renders its own AppShell.
   const tabs = TABS.map((tab) =>
@@ -67,9 +82,10 @@ function AppContent() {
     />
   );
 
-  // Which routes own their chrome. Only the scan detail view does so far; the
-  // rest still get the standalone nav bar below.
-  const ownsShell = Boolean(scanMatch);
+  // Which routes own their chrome. The scan detail view and the report
+  // playground render their own AppShell; the rest still get the standalone nav
+  // bar below.
+  const ownsShell = Boolean(scanMatch || reportMatch);
 
   const content = taskMatch ? (
     <TasksView
@@ -82,6 +98,19 @@ function AppContent() {
     <ScanDetailView
       id={decodeURIComponent(scanMatch[1])}
       onBack={() => router.navigate("/scans")}
+      onOpenPlayground={(scanId) =>
+        router.navigate(`/reports/${encodeURIComponent(scanId)}`)
+      }
+      onMuteFinding={(path) => router.navigate(path)}
+      tabs={tabs}
+      taskButton={taskButton}
+    />
+  ) : reportMatch ? (
+    <ReportPlayground
+      scanId={reportMatch[1] ? decodeURIComponent(reportMatch[1]) : undefined}
+      onSelectScan={(scanId) =>
+        router.navigate(scanId ? `/reports/${encodeURIComponent(scanId)}` : "/reports")
+      }
       tabs={tabs}
       taskButton={taskButton}
     />
@@ -92,6 +121,14 @@ function AppContent() {
     />
   ) : router.pathname === "/scans" ? (
     <ScansView onOpenScan={(id) => router.navigate(`/scans/${encodeURIComponent(id)}`)} />
+  ) : muteMatch ? (
+    <MutesView
+      selected={muteMatch[1] ? decodeURIComponent(muteMatch[1]) : undefined}
+      search={window.location.search}
+      onSelect={(name) =>
+        router.navigate(name ? `/mutes/${encodeURIComponent(name)}` : "/mutes")
+      }
+    />
   ) : router.pathname === "/profiles" ? (
     <ProfilesView
       onBrowseTemplates={(profile) =>

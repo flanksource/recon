@@ -1,0 +1,18 @@
+{
+  "name": "recon-scan-report",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "facet template for the recon scan report. Rendered by `reconctl serve` through the facet CLI, and by the in-app report playground.",
+  "scripts": {
+    "html": "facet html ScanReport.tsx -d sample.json -o dist",
+    "pdf": "facet pdf ScanReport.tsx -d sample.json -o dist"
+  },
+  "dependencies": {
+    "@flanksource/clicky-ui": "0.3.22",
+    "@flanksource/facet": "0.1.71",
+    "markdown-to-jsx": "7.7.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}

@@ -15,17 +15,21 @@ import type {
   Scan,
   ScanFiles,
   ScanStatus,
+  Severity,
   Target,
   TargetDocument,
   TargetSelector,
   TargetUpdate,
   Template,
   TemplatePreview,
+  Upload,
   FilterVocabulary,
   Zone,
 } from "./types";
-import { overrideFields } from "./api-helpers";
+import { overrideFields, scanFileUrl } from "./api-helpers";
 import type { EngineConfig, NewTarget, RunTarget } from "./api-run-types";
+import type { ScanReportData } from "../reports/scan-report-types";
+import { reportDataUrl } from "./scan-report";
 import { curatedTarget, targetKind } from "./types";
 
 export { scanFileUrl } from "./api-helpers";
@@ -36,7 +40,10 @@ const API = "/api/v1";
 // status code alone does not tell us whether the call worked.
 type ExecutorFailure = { success?: boolean; error?: string; message?: string };
 
-async function request<T>(
+// request, query and json are exported so a listing that lives in its own
+// module — this file is already at the size the repo splits at — reaches the
+// API the same way rather than growing a second fetch layer beside it.
+export async function request<T>(
   path: string,
   init?: RequestInit,
   ...rest: never[]
@@ -73,7 +80,7 @@ async function request<T>(
   return body as T;
 }
 
-function query(params: Record<string, unknown> | undefined): string {
+export function query(params: Record<string, unknown> | undefined): string {
   if (!params) return "";
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -90,7 +97,7 @@ function query(params: Record<string, unknown> | undefined): string {
   return encoded ? `?${encoded}` : "";
 }
 
-function json(method: string, body: unknown): RequestInit {
+export function json(method: string, body: unknown): RequestInit {
   return {
     method,
     headers: { "content-type": "application/json" },
@@ -192,15 +199,13 @@ export function fetchTargetSchema(): Promise<Record<string, unknown>> {
 }
 
 // A save replaces the curated fields wholesale and may atomically update a
-// provider context's mutable configuration. Identity stays in the route.
+// provider context's mutable configuration. The generated entity update route
+// takes identity in the body.
 export function saveTarget(
   id: string,
   update: TargetUpdate,
 ): Promise<Target> {
-  return request<Target>(
-    `${API}/target/${encodeURIComponent(id)}`,
-    json("PUT", update),
-  );
+  return request<Target>(`${API}/target`, json("PUT", { id, ...update }));
 }
 
 // Classifying a host a sweep found is a create, not an edit: an update refuses
@@ -348,12 +353,49 @@ export function fetchScan(id: string): Promise<Scan> {
   return request<Scan>(`${API}/scan/${encodeURIComponent(id)}`);
 }
 
+// Pushes a run's findings to Mission Control as insights.
+//
+// The credential is the one `faro auth login` stored on the machine serving
+// this app, not anything the browser holds — so a server without a faro context
+// fails the call with a message saying which command fixes it.
+export function uploadScan(
+  id: string,
+  options?: { dryRun?: boolean; severity?: Severity; context?: string },
+): Promise<Upload> {
+  return request<Upload>(
+    `${API}/scan/${encodeURIComponent(id)}/upload`,
+    json("POST", {
+      "dry-run": options?.dryRun ?? false,
+      ...(options?.severity ? { severity: options.severity } : {}),
+      ...(options?.context ? { context: options.context } : {}),
+    }),
+  );
+}
+
 // A run's retained artifacts: the engine's own findings file, the target list,
 // the effective configuration and the log. Served from the directory the run
 // recorded rather than rebuilt from the database, so what a download returns is
 // byte-for-byte what the engine wrote.
 export function fetchScanFiles(id: string): Promise<ScanFiles> {
   return request<ScanFiles>(`/api/scan/${encodeURIComponent(id)}/files`);
+}
+
+export async function fetchScanParameters(
+  id: string,
+): Promise<Record<string, unknown>> {
+  const parameters = await request<unknown>(scanFileUrl(id, "config.json"));
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
+    throw new Error(`scan ${id} config.json must contain a JSON object`);
+  }
+  return parameters as Record<string, unknown>;
+}
+
+// The payload the printed report is rendered from — the run, its findings, and
+// when the export was taken. Fetched rather than assembled here so the preview
+// and the PDF describe the run identically: the same JSON reaches the same
+// template, whether facet renders it or the playground does.
+export function fetchReportData(id: string): Promise<ScanReportData> {
+  return request<ScanReportData>(reportDataUrl(id));
 }
 
 // Findings are queried rather than read out of a result file, so the same call
@@ -395,6 +437,12 @@ export function startScan(args: {
   /** Run-only discovery configuration, keyed by engine. */
   discoveryOverride?: Record<string, EngineConfig>;
   confirm?: boolean;
+  /**
+   * Runs with every mute rule ignored. A muted finding is never recorded, so
+   * this is how someone sees what the rules are currently hiding without
+   * deleting them first.
+   */
+  noMutes?: boolean;
 }): Promise<Scan> {
   return request<Scan>(
     `${API}/scan`,
@@ -409,6 +457,7 @@ export function startScan(args: {
       ...overrideFields("override", args.override),
       ...overrideFields("discovery-override", args.discoveryOverride),
       confirm: args.confirm ?? false,
+      "no-mutes": args.noMutes ?? false,
       wait: false,
     }),
   );

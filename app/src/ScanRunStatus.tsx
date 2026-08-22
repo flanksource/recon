@@ -238,6 +238,14 @@ export function ScanRunStatus({
                 {status.findings} finding
                 {status.findings === 1 ? "" : "s"}
               </span>
+              {/* Only once something was actually removed. Rules are applied to
+                  the results, so a run still in flight has nothing to report
+                  here and a standing "0 muted" would just be noise. */}
+              {status.muted ? (
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {status.muted} muted
+                </span>
+              ) : null}
             </>
           )}
         </div>

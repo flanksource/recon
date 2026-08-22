@@ -1,4 +1,5 @@
 import type { DataTableColumn, BadgeStatus } from "@flanksource/clicky-ui/data";
+import { findingSearchTokens } from "./finding-markdown";
 import type { Finding, Severity } from "./types";
 
 export const SEVERITY_RANK: Record<Severity, number> = {
@@ -59,6 +60,7 @@ export const findingColumns: DataTableColumn<Finding>[] = [
     label: "Finding",
     grow: true,
     sortable: true,
+    filterValue: (_value, row) => findingSearchTokens(row),
     render: (value, row) => (
       <div className="flex flex-col">
         <span className="font-medium text-foreground">{String(value)}</span>

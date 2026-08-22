@@ -1,0 +1,222 @@
+{
+  "generatedAt": "2026-03-14T09:30:00.000Z",
+  "findingLimit": 500,
+  "sourceURL": "http://localhost:8280/scans/9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+  "parameters": {
+    "bulk-size": 20,
+    "headless": false,
+    "rate-limit": 50,
+    "severity": ["critical", "high", "medium", "low"]
+  },
+  "options": {
+    "title": "Attack Surface Scan Report",
+    "classification": "Confidential",
+    "preparedBy": "Security Engineering",
+    "audience": "Platform Operations",
+    "scope": "Unauthenticated web scan of every internet-facing host in the production class, using the safe nuclei profile."
+  },
+  "scan": {
+    "id": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+    "name": "nuclei-safe-214",
+    "engine": "nuclei",
+    "engineVersion": "3.4.10",
+    "profile": "scan:nuclei:safe",
+    "selectorLabel": "class prod",
+    "endpointCount": 86,
+    "phase": "done",
+    "startedAt": "2026-03-14T08:41:12.000Z",
+    "finishedAt": "2026-03-14T09:12:47.000Z",
+    "durationMs": 1895000,
+    "command": [
+      "nuclei",
+      "-config",
+      "config/safe.yaml",
+      "-l",
+      ".gen/prod.txt",
+      "-severity",
+      "critical,high,medium,low",
+      "-jsonl"
+    ],
+    "exitCode": 0,
+    "findings": 11,
+    "severities": { "critical": 1, "high": 2, "medium": 4, "low": 3, "info": 1, "unknown": 0 },
+    "hosts": [
+      "billing.example.com",
+      "docs.example.com",
+      "id.example.com",
+      "legacy.example.com",
+      "status.example.com"
+    ],
+    "stats": {
+      "requests": 41280,
+      "total": 41280,
+      "percent": 100,
+      "rps": 21.8,
+      "matched": 11,
+      "errors": 143,
+      "hosts": 86,
+      "templates": 1204,
+      "duration": "31m 35s",
+      "http": {
+        "requests": 41280,
+        "responses": 40012,
+        "failed": 1268,
+        "bytes": 734003200,
+        "statusCodes": { "200": 21044, "404": 14988, "301": 2610, "403": 1102, "500": 268 },
+        "protocols": { "http": 38820, "ssl": 1980, "dns": 480 },
+        "errors": { "timeout": 812, "connection refused": 331, "tls handshake": 125 },
+        "waf": { "cloudflare": 9, "aws-waf": 3 }
+      }
+    }
+  },
+  "findings": [
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 1,
+      "templateId": "http/exposures/configs/git-config",
+      "name": "Exposed .git configuration",
+      "severity": "critical",
+      "host": "legacy.example.com",
+      "matchedAt": "https://legacy.example.com/.git/config",
+      "matcherName": "status",
+      "type": "http",
+      "tags": ["exposure", "config", "git"],
+      "timestamp": "2026-03-14T08:47:03.000Z",
+      "extracted": ["url = https://git.example.com/platform/legacy-portal.git"],
+      "remediation": "1. **Block dotfile paths** at the edge.\n2. Remove the `.git` directory from the deployed artifact.\n3. Follow the [incident response guide](https://owasp.org/www-project-web-security-testing-guide/) and rotate exposed credentials.",
+      "reference": ["https://owasp.org/www-project-web-security-testing-guide/"],
+      "curl": "curl -sS -i 'https://legacy.example.com/.git/config'",
+      "raw": {
+        "info": {
+          "description": "The deployed site exposes its **Git configuration**, which can reveal repository metadata and `credential` values."
+        }
+      }
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 2,
+      "templateId": "http/misconfiguration/server-status",
+      "name": "Apache server-status exposed",
+      "severity": "high",
+      "host": "legacy.example.com",
+      "matchedAt": "https://legacy.example.com/server-status",
+      "matcherName": "word",
+      "type": "http",
+      "tags": ["misconfig", "apache", "disclosure"],
+      "timestamp": "2026-03-14T08:47:09.000Z",
+      "remediation": "Restrict mod_status to localhost or remove the module from the production build.",
+      "curl": "curl -sS -i 'https://legacy.example.com/server-status'"
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 3,
+      "templateId": "ssl/expired-certificate",
+      "name": "TLS certificate expires in 6 days",
+      "severity": "high",
+      "host": "status.example.com",
+      "matchedAt": "status.example.com:443",
+      "type": "ssl",
+      "tags": ["ssl", "expiry"],
+      "timestamp": "2026-03-14T08:52:41.000Z",
+      "extracted": ["notAfter=2026-03-20T00:00:00Z"],
+      "remediation": "Renew the certificate and confirm the ACME renewal hook is scheduled."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 4,
+      "templateId": "http/misconfiguration/missing-hsts",
+      "name": "Strict-Transport-Security header missing",
+      "severity": "medium",
+      "host": "billing.example.com",
+      "matchedAt": "https://billing.example.com/",
+      "type": "http",
+      "tags": ["headers", "hsts"],
+      "remediation": "Add Strict-Transport-Security with a max-age of at least 31536000 at the edge."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 5,
+      "templateId": "http/misconfiguration/missing-hsts",
+      "name": "Strict-Transport-Security header missing",
+      "severity": "medium",
+      "host": "docs.example.com",
+      "matchedAt": "https://docs.example.com/",
+      "type": "http",
+      "tags": ["headers", "hsts"],
+      "remediation": "Add Strict-Transport-Security with a max-age of at least 31536000 at the edge."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 6,
+      "templateId": "http/technologies/version-disclosure",
+      "name": "Server version disclosed in response headers",
+      "severity": "medium",
+      "host": "legacy.example.com",
+      "matchedAt": "https://legacy.example.com/",
+      "type": "http",
+      "tags": ["disclosure", "headers"],
+      "extracted": ["Server: Apache/2.4.29 (Ubuntu)"],
+      "remediation": "Set ServerTokens Prod so the banner no longer advertises the patch level."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 7,
+      "templateId": "http/exposures/files/directory-listing",
+      "name": "Directory listing enabled",
+      "severity": "medium",
+      "host": "docs.example.com",
+      "matchedAt": "https://docs.example.com/assets/",
+      "type": "http",
+      "tags": ["exposure", "listing"],
+      "remediation": "Disable autoindex for the assets prefix."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 8,
+      "templateId": "http/misconfiguration/cookies-without-secure",
+      "name": "Session cookie set without the Secure attribute",
+      "severity": "low",
+      "host": "id.example.com",
+      "matchedAt": "https://id.example.com/login",
+      "type": "http",
+      "tags": ["cookies", "session"],
+      "remediation": "Set Secure, HttpOnly and SameSite on every session cookie."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 9,
+      "templateId": "http/misconfiguration/missing-csp",
+      "name": "Content-Security-Policy header missing",
+      "severity": "low",
+      "host": "billing.example.com",
+      "matchedAt": "https://billing.example.com/",
+      "type": "http",
+      "tags": ["headers", "csp"],
+      "remediation": "Publish a Content-Security-Policy, starting in report-only mode."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 10,
+      "templateId": "http/misconfiguration/missing-csp",
+      "name": "Content-Security-Policy header missing",
+      "severity": "low",
+      "host": "status.example.com",
+      "matchedAt": "https://status.example.com/",
+      "type": "http",
+      "tags": ["headers", "csp"],
+      "remediation": "Publish a Content-Security-Policy, starting in report-only mode."
+    },
+    {
+      "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
+      "lineNo": 11,
+      "templateId": "dns/caa-fingerprint",
+      "name": "No CAA record published",
+      "severity": "info",
+      "host": "billing.example.com",
+      "matchedAt": "billing.example.com",
+      "type": "dns",
+      "tags": ["dns", "caa"],
+      "remediation": "Publish a CAA record naming the issuers permitted for this zone."
+    }
+  ]
+}

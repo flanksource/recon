@@ -32,7 +32,10 @@ describe("App routes", () => {
         return new Response(JSON.stringify([activeRun]), { status: 200 });
       }
       if (path === "/api/schema/target") {
-        return new Response(JSON.stringify({ type: "object", properties: {} }), { status: 200 });
+        return new Response(
+          JSON.stringify({ type: "object", properties: {} }),
+          { status: 200 },
+        );
       }
       if (path === "/api/v1/target/api.example.com") {
         return new Response(
@@ -53,9 +56,16 @@ describe("App routes", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "api.example.com" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Inventory" })).toHaveAttribute("href", "/inventory");
-    const tasksButton = await screen.findByRole("button", { name: "Tasks (1 active)" });
+    expect(
+      await screen.findByRole("heading", { name: "api.example.com" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Inventory" })).toHaveAttribute(
+      "href",
+      "/inventory",
+    );
+    const tasksButton = await screen.findByRole("button", {
+      name: "Tasks (1 active)",
+    });
     expect(tasksButton.querySelector("svg")).not.toBeNull();
   });
 
@@ -65,14 +75,26 @@ describe("App routes", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const path = String(input);
       if (path === "/api/v1/tasks") {
-        return new Response(JSON.stringify([{ ...activeRun, status: "success", completed: 1, running: 0 }]), {
-          status: 200,
-        });
+        return new Response(
+          JSON.stringify([
+            { ...activeRun, status: "success", completed: 1, running: 0 },
+          ]),
+          {
+            status: 200,
+          },
+        );
       }
       if (path === "/api/v1/tasks/scan-1") {
         return new Response(
           JSON.stringify([
-            { id: "nuclei-safe-1", groupId: "scan-1", name: "nuclei-safe-1", type: "group", status: "success", total: 1 },
+            {
+              id: "nuclei-safe-1",
+              groupId: "scan-1",
+              name: "nuclei-safe-1",
+              type: "group",
+              status: "success",
+              total: 1,
+            },
             {
               id: "engine-1",
               groupId: "scan-1",
@@ -93,10 +115,14 @@ describe("App routes", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Tasks" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Tasks" }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("run nuclei")).toBeInTheDocument();
     expect(screen.getByText(/25\/100 · 25%/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop run nuclei" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Stop run nuclei" }),
+    ).toBeInTheDocument();
   });
 
   it("renders a deep-linked scan with findings, and its execution evidence behind a tab", async () => {
@@ -136,11 +162,30 @@ describe("App routes", () => {
             startedAt: "2026-08-10T12:00:00",
             finishedAt: "2026-08-10T12:00:02",
             durationMs: 2500,
-            command: ["/opt/recon/bin/nuclei", "-target", "api.example.test", "-stats"],
+            command: [
+              "/opt/recon/bin/nuclei",
+              "-target",
+              "api.example.test",
+              "-stats",
+            ],
             exitCode: 0,
             findings: 0,
-            severities: { critical: 0, high: 0, medium: 0, low: 0, info: 0, unknown: 0 },
-            stats: { requests: 40, total: 60, templates: 18, matched: 0, errors: 2, rps: 12 },
+            severities: {
+              critical: 0,
+              high: 0,
+              medium: 0,
+              low: 0,
+              info: 0,
+              unknown: 0,
+            },
+            stats: {
+              requests: 40,
+              total: 60,
+              templates: 18,
+              matched: 0,
+              errors: 2,
+              rps: 12,
+            },
             hosts: [],
             outputCaptured: false,
           }),
@@ -152,9 +197,16 @@ describe("App routes", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "nuclei-safe-1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Back to scans" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Scans" })).toHaveAttribute("href", "/scans");
+    expect(
+      await screen.findByRole("heading", { name: "nuclei-safe-1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Back to scans" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Scans" })).toHaveAttribute(
+      "href",
+      "/scans",
+    );
     expect(screen.getByText("No findings in this scan.")).toBeInTheDocument();
 
     // The run's own evidence lives on the Execution tab so the findings table
@@ -168,7 +220,9 @@ describe("App routes", () => {
   it("collapses every repeated finding row without reusing row identities", async () => {
     window.history.replaceState(null, "", "/scans/scan-1");
     vi.stubGlobal("EventSource", undefined);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn().mockReturnValue({
@@ -236,7 +290,14 @@ describe("App routes", () => {
             command: ["prowler", "gcp"],
             exitCode: 0,
             findings: 2,
-            severities: { critical: 0, high: 2, medium: 0, low: 0, info: 0, unknown: 0 },
+            severities: {
+              critical: 0,
+              high: 2,
+              medium: 0,
+              low: 0,
+              info: 0,
+              unknown: 0,
+            },
             stats: {},
             hosts: [],
             outputCaptured: false,
@@ -253,20 +314,43 @@ describe("App routes", () => {
       .map((label) => label.closest("button"))
       .find((button) => button !== null);
     if (!group) {
-      throw new Error("result-type group label is not inside its toggle button");
+      throw new Error(
+        "result-type group label is not inside its toggle button",
+      );
     }
-    expect(screen.getByRole("link", { name: "https://prod.example.test/one" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "https://prod.example.test/two" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "https://prod.example.test/one" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "https://prod.example.test/two" }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(group);
+    const picker = screen.getByRole("combobox", { name: "Group rows by" });
+    expect(picker.closest('[data-slot="filter-bar"]')).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse all groups" }),
+    );
     expect(group).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("link", { name: "https://prod.example.test/one" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "https://prod.example.test/two" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "https://prod.example.test/one" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "https://prod.example.test/two" }),
+    ).not.toBeInTheDocument();
 
-    fireEvent.click(group);
+    fireEvent.click(screen.getByRole("button", { name: "Expand all groups" }));
     expect(group).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("link", { name: "https://prod.example.test/one" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "https://prod.example.test/two" })).toBeInTheDocument();
-    expect(consoleError.mock.calls.some(([message]) => String(message).includes("same key"))).toBe(false);
+    expect(
+      screen.getByRole("link", { name: "https://prod.example.test/one" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "https://prod.example.test/two" }),
+    ).toBeInTheDocument();
+    expect(
+      consoleError.mock.calls.some(([message]) =>
+        String(message).includes("same key"),
+      ),
+    ).toBe(false);
   });
 });

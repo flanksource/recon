@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { Tabs, type TabItem } from "@flanksource/clicky-ui/components";
-import { Badge, CodeBlock, Properties } from "@flanksource/clicky-ui/data";
+import { DropdownMenu, Tabs, type TabItem } from "@flanksource/clicky-ui/components";
+import { Badge, CodeBlock, Markdown, Properties } from "@flanksource/clicky-ui/data";
+import { muteScopeOptions } from "./mute-prefill";
 import { severityBadge } from "./scanColumns";
 import type { Finding } from "./types";
 
@@ -32,7 +33,7 @@ function Prose({ title, body }: { title: string; body: string }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-xs font-semibold uppercase text-muted-foreground">{title}</span>
-      <p className="whitespace-pre-wrap text-sm text-foreground">{body}</p>
+      <Markdown text={body} className="text-sm text-foreground" />
     </div>
   );
 }
@@ -180,7 +181,7 @@ function overviewProperties(
 
 function Overview({ finding, raw }: { finding: Finding; raw: Record<string, unknown> }) {
   const info = record(raw.info);
-  const description = text(info.description);
+  const description = text(info.description) ?? text(raw.description) ?? text(raw.Description);
   const impact = text(info.impact);
   const remediation = finding.remediation ?? text(info.remediation);
   const references = finding.reference?.length ? finding.reference : list(info.reference);
@@ -196,7 +197,7 @@ function Overview({ finding, raw }: { finding: Finding; raw: Record<string, unkn
       )}
       {description && <Prose title="Description" body={description} />}
       {impact && <Prose title="Impact" body={impact} />}
-      {remediation && <Prose title="Remediation" body={remediation} />}
+      {remediation && <Prose title="Recommended action" body={remediation} />}
       {finding.extracted?.length ? (
         <div className="flex flex-col gap-1">
           <span className="text-xs font-semibold uppercase text-muted-foreground">Extracted</span>
@@ -289,7 +290,19 @@ function artifactEvidence(raw: Record<string, unknown>) {
   ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
 }
 
-export function FindingDetail({ finding }: { finding: Finding }) {
+export function FindingDetail({
+  finding,
+  engine,
+  onMute,
+}: {
+  finding: Finding;
+  // The scan engine the run used, which scopes the rule to the engine that
+  // reported the finding. Not finding.type, which is the protocol family.
+  engine?: string;
+  // Optional: this renders wherever a finding does, and not every one of those
+  // places can navigate to the rule editor.
+  onMute?: (path: string) => void;
+}) {
   const raw = record(finding.raw);
   const requestLanguage = REQUEST_LANGUAGE[finding.type ?? ""] ?? "http";
   const evidence = finding.type === "inspec"
@@ -315,6 +328,7 @@ export function FindingDetail({ finding }: { finding: Finding }) {
     { id: "raw", label: "Raw JSON" },
   ];
   const [tab, setTab] = useState("overview");
+  const muteOptions = muteScopeOptions(finding, engine);
 
   return (
     // `w-0 min-w-full` keeps the detail out of the table's width calculation:
@@ -322,7 +336,29 @@ export function FindingDetail({ finding }: { finding: Finding }) {
     // otherwise stretch the table past its scroll container and shift every
     // column the moment a row is expanded.
     <div className="flex w-0 min-w-full flex-col gap-3 px-4 py-3">
-      <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Tabs tabs={tabs} value={tab} onChange={setTab} />
+        <span className="flex-1" />
+        {/* A menu rather than a button because how much to hide is the actual
+            decision: this bucket being public by design and this check being
+            noise everywhere are different facts, and only one of them is about
+            this finding. Each choice opens the editor on a prefilled draft
+            rather than muting on the spot — muting drops findings instead of
+            marking them, so what a rule would take is worth seeing first. */}
+        {onMute && muteOptions.length > 0 && (
+          <DropdownMenu
+            variant="outline"
+            size="sm"
+            label="Mute this finding"
+            menuLabel="Mute scope"
+            items={muteOptions.map((option) => ({
+              label: option.label,
+              title: option.title,
+              onSelect: () => onMute(option.path),
+            }))}
+          />
+        )}
+      </div>
       {tab === "overview" && <Overview finding={finding} raw={raw} />}
       {tab === "evidence" && (
         <div className="flex flex-col gap-3">

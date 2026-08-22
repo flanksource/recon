@@ -62,6 +62,12 @@ type Confirmation = {
   onConfirmedChange: (confirmed: boolean) => void;
 };
 
+// Absent for a discovery-only run, which produces no findings to mute.
+type Mutes = {
+  ignored: boolean;
+  onIgnoredChange: (ignored: boolean) => void;
+};
+
 type Props = {
   selection: Selection;
   scanner?: Scanner;
@@ -70,6 +76,7 @@ type Props = {
   classCounts: Array<[string, number]>;
   controlsLocked: boolean;
   confirmation?: Confirmation;
+  mutes?: Mutes;
 };
 
 export function ScanDialogSetup({
@@ -80,6 +87,7 @@ export function ScanDialogSetup({
   classCounts,
   controlsLocked,
   confirmation,
+  mutes,
 }: Props) {
   return (
     <>
@@ -207,6 +215,30 @@ export function ScanDialogSetup({
             {discovery.editing ? "Done editing" : "Edit profiles"}
           </Button>
         </span>
+
+        {/* A muted finding is never recorded, so turning the rules off for one
+            run is the only way to see what they are currently hiding without
+            deleting them. */}
+        {mutes ? (
+          <span className="flex flex-col gap-1 text-xs">
+            Mute rules
+            <span className="flex h-control-h items-center gap-2 rounded-md border border-input bg-background px-3 text-sm">
+              <input
+                type="checkbox"
+                aria-label="Ignore mute rules for this run"
+                checked={mutes.ignored}
+                disabled={controlsLocked}
+                onChange={(event) => mutes.onIgnoredChange(event.target.checked)}
+              />
+              Ignore for this run
+            </span>
+            <span className="text-muted-foreground">
+              {mutes.ignored
+                ? "Reports everything the engine finds"
+                : "Accepted findings stay hidden"}
+            </span>
+          </span>
+        ) : null}
         <span className="flex flex-wrap items-center gap-1 pb-1.5 text-xs text-muted-foreground">
           {classCounts.map(([targetClass, count]) => (
             <span key={targetClass} className="rounded bg-muted px-1.5 py-0.5">

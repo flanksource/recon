@@ -107,6 +107,7 @@ describe("ScanRunStatus", () => {
         errors: 0,
         hosts: 1,
         templates: 0,
+        passed: 0,
         duration: "0:00:01",
       },
       findings: 0,
@@ -179,5 +180,48 @@ describe("ScanRunStatus", () => {
     expect(screen.getByText("1 finding")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Deprecated TLS version")).toBeInTheDocument());
     expect(screen.getByText("tls-version")).toBeInTheDocument();
+  });
+
+  it("reports what a rule removed beside the findings it kept", async () => {
+    fetchFindingsMock.mockResolvedValue([]);
+
+    const finished: ScanStatus = {
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      name: "safe-prod-20260809-080000",
+      engine: "nuclei",
+      profile: "safe",
+      selector: { class: ["prod"] },
+      selectorLabel: "class prod",
+      endpointCount: 1,
+      phase: "done",
+      startedAt: "2026-08-09T08:00:00.000Z",
+      finishedAt: "2026-08-09T08:00:03.000Z",
+      durationMs: 3000,
+      findings: 2,
+      muted: 5,
+      severities: { ...emptySeverities(), high: 2 },
+      hosts: ["api.example.com"],
+      running: false,
+      log: "",
+      output: [],
+    };
+
+    const { rerender } = render(
+      <ScanRunStatus status={finished} logRef={createRef<HTMLDivElement>()} />,
+    );
+
+    expect(screen.getByText("2 findings")).toBeInTheDocument();
+    expect(screen.getByText("5 muted")).toBeInTheDocument();
+
+    // Nothing removed is nothing to say: a standing "0 muted" on every run
+    // would be noise, and a run still in flight has not applied its rules yet.
+    rerender(
+      <ScanRunStatus
+        status={{ ...finished, phase: "running", running: true, muted: 0 }}
+        logRef={createRef<HTMLDivElement>()}
+      />,
+    );
+
+    expect(screen.queryByText(/muted/)).toBeNull();
   });
 });

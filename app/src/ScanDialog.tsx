@@ -56,6 +56,9 @@ export function ScanDialog({
   const [newProfileName, setNewProfileName] = useState("");
   const [keeping, setKeeping] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  // Off by default: the rules exist because someone accepted those findings,
+  // and a run that quietly ignored them would report work already triaged.
+  const [ignoreMutes, setIgnoreMutes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [discovering, setDiscovering] = useState(false);
@@ -259,6 +262,7 @@ export function ScanDialog({
         discoveryEngines: sweep.engine,
         discoveryOverride: sweep.override,
         confirm: confirmed,
+        noMutes: ignoreMutes,
       });
     } catch (e) {
       setError((e as Error).message);
@@ -277,6 +281,7 @@ export function ScanDialog({
     engineName,
     profileName,
     confirmed,
+    ignoreMutes,
   ]);
 
   const stop = useCallback(async () => {
@@ -411,6 +416,11 @@ export function ScanDialog({
           }}
           classCounts={classCounts}
           controlsLocked={controlsLocked}
+          mutes={
+            discoveryOnly
+              ? undefined
+              : { ignored: ignoreMutes, onIgnoredChange: setIgnoreMutes }
+          }
           confirmation={
             needsConfirm
               ? {

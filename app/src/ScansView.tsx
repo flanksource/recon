@@ -1,31 +1,30 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  AppShell,
-  Button,
-  Select,
-  Tabs,
-} from "@flanksource/clicky-ui/components";
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { AppShell, Button, Tabs } from "@flanksource/clicky-ui/components";
 import {
   DataTable,
-  type DataTableGrouping,
+  type DataTableGroupingMode,
 } from "@flanksource/clicky-ui/data";
 import { fetchFindings, fetchScan, fetchScans } from "./api";
+import { findingMatchesSearch } from "./finding-markdown";
 import { selectionQuery, useEntityFilters } from "./filters";
-import { findingColumns, severityBadge, SEVERITY_RANK, worstSeverity } from "./scanColumns";
+import {
+  findingColumns,
+  severityBadge,
+  SEVERITY_RANK,
+  worstSeverity,
+} from "./scanColumns";
 import { FindingDetail } from "./FindingDetail";
+import { FindingCopyButton } from "./FindingCopyButton";
+import { UploadInsightsButton } from "./UploadInsightsButton";
+import { ScanExportMenu } from "./ScanExportMenu";
 import { SEVERITIES, type Finding, type Scan, type Severity } from "./types";
 import { ScanExecutionDetails } from "./ScanExecutionDetails";
-
-type GroupBy = "type" | "severity" | "host" | "none";
-
-// The select carries no visible label — the header row has no room for one — so
-// each option says what it groups by rather than naming a bare dimension.
-const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: "type", label: "By result type" },
-  { value: "severity", label: "By severity" },
-  { value: "host", label: "By affected domain" },
-  { value: "none", label: "No grouping" },
-];
 
 function uniqueHosts(findings: Finding[]): string[] {
   return [...new Set(findings.map((f) => f.host).filter(Boolean))].sort();
@@ -41,47 +40,27 @@ function DomainChips({ hosts }: { hosts: string[] }) {
   return (
     <span className="flex items-center gap-1" title={hosts.join("\n")}>
       {shown.map((h) => (
-        <span key={h} className="max-w-52 truncate rounded bg-muted px-1.5 py-0.5 text-xs">
+        <span
+          key={h}
+          className="max-w-52 truncate rounded bg-muted px-1.5 py-0.5 text-xs"
+        >
           {h}
         </span>
       ))}
-      {extra > 0 && <span className="text-xs text-muted-foreground">+{extra}</span>}
+      {extra > 0 && (
+        <span className="text-xs text-muted-foreground">+{extra}</span>
+      )}
     </span>
   );
 }
 
 // DataTable already renders the row count beside every group header, so the meta
 // slot carries what it does not know: which hosts the group touches.
-function buildGrouping(groupBy: GroupBy): DataTableGrouping<Finding> | undefined {
-  if (groupBy === "none") return undefined;
-
-  if (groupBy === "host") {
-    return {
-      getGroupKey: (row) => row.host || "(no host)",
-      getGroupLabel: (key, rows) => (
-        <span className="flex items-center gap-2">
-          {severityBadge(worstSeverity(rows))}
-          <span className="font-medium">{key}</span>
-        </span>
-      ),
-      compareGroups: (a, b) =>
-        SEVERITY_RANK[worstSeverity(a.rows)] - SEVERITY_RANK[worstSeverity(b.rows)] ||
-        b.rows.length - a.rows.length,
-    };
-  }
-
-  if (groupBy === "severity") {
-    return {
-      getGroupKey: (row) => row.severity,
-      getGroupLabel: (key) => severityBadge(key as Severity),
-      getGroupMeta: (_key, rows) => <DomainChips hosts={uniqueHosts(rows)} />,
-      compareGroups: (a, b) =>
-        SEVERITY_RANK[a.key as Severity] - SEVERITY_RANK[b.key as Severity],
-    };
-  }
-
-  // Default: group by result type (template), show affected domains in the header.
-  return {
+const FINDING_GROUPING_MODES: Array<DataTableGroupingMode<Finding>> = [
+  {
+    type: "custom",
+    value: "type",
+    label: "By result type",
     getGroupKey: (row) => row.templateId,
     getGroupLabel: (key, rows) => (
       <span className="flex items-center gap-2">
@@ -92,10 +71,36 @@ function buildGrouping(groupBy: GroupBy): DataTableGrouping<Finding> | undefined
     ),
     getGroupMeta: (_key, rows) => <DomainChips hosts={uniqueHosts(rows)} />,
     compareGroups: (a, b) =>
-      SEVERITY_RANK[worstSeverity(a.rows)] - SEVERITY_RANK[worstSeverity(b.rows)] ||
-      b.rows.length - a.rows.length,
-  };
-}
+      SEVERITY_RANK[worstSeverity(a.rows)] -
+        SEVERITY_RANK[worstSeverity(b.rows)] || b.rows.length - a.rows.length,
+  },
+  {
+    type: "custom",
+    value: "severity",
+    label: "By severity",
+    getGroupKey: (row) => row.severity,
+    getGroupLabel: (key) => severityBadge(key as Severity),
+    getGroupMeta: (_key, rows) => <DomainChips hosts={uniqueHosts(rows)} />,
+    compareGroups: (a, b) =>
+      SEVERITY_RANK[a.key as Severity] - SEVERITY_RANK[b.key as Severity],
+  },
+  {
+    type: "custom",
+    value: "host",
+    label: "By affected domain",
+    getGroupKey: (row) => row.host || "(no host)",
+    getGroupLabel: (key, rows) => (
+      <span className="flex items-center gap-2">
+        {severityBadge(worstSeverity(rows))}
+        <span className="font-medium">{key}</span>
+      </span>
+    ),
+    compareGroups: (a, b) =>
+      SEVERITY_RANK[worstSeverity(a.rows)] -
+        SEVERITY_RANK[worstSeverity(b.rows)] || b.rows.length - a.rows.length,
+  },
+  { type: "none", value: "none", label: "No grouping" },
+];
 
 const SEVERITY_BAR: Record<Severity, string> = {
   critical: "bg-red-600",
@@ -145,14 +150,22 @@ function RunCard({ run, onClick }: { run: Scan; onClick: () => void }) {
         <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">
           {run.profile}
         </span>
-        <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{run.selectorLabel}</span>
+        <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
+          {run.selectorLabel}
+        </span>
         <span className="flex-1" />
-        <span className="text-xs text-muted-foreground">{relative(run.finishedAt ?? "")}</span>
+        <span className="text-xs text-muted-foreground">
+          {relative(run.finishedAt ?? "")}
+        </span>
       </div>
       <div className="flex items-center gap-2 text-sm">
         <span className="font-semibold">{run.findings}</span>
         <span className="text-muted-foreground">
-          findings · {run.endpointCount} targets · {run.hosts.length} affected hosts
+          findings · {run.endpointCount} targets · {run.hosts.length} affected
+          hosts
+          {/* A muted finding is not recorded, so a run that was filtered would
+              otherwise be indistinguishable from one that was clean. */}
+          {run.muted ? ` · ${run.muted} muted` : ""}
         </span>
       </div>
       <SeverityBar run={run} />
@@ -160,7 +173,11 @@ function RunCard({ run, onClick }: { run: Scan; onClick: () => void }) {
   );
 }
 
-export function ScansView({ onOpenScan }: { onOpenScan: (id: string) => void }) {
+export function ScansView({
+  onOpenScan,
+}: {
+  onOpenScan: (id: string) => void;
+}) {
   const [runs, setRuns] = useState<Scan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -188,9 +205,16 @@ export function ScansView({ onOpenScan }: { onOpenScan: (id: string) => void }) 
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold">Scans</h1>
-            <p className="text-sm text-muted-foreground">{runs.length} scan runs</p>
+            <p className="text-sm text-muted-foreground">
+              {runs.length} scan runs
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void loadRuns()} disabled={busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void loadRuns()}
+            disabled={busy}
+          >
             Refresh
           </Button>
         </div>
@@ -202,7 +226,11 @@ export function ScansView({ onOpenScan }: { onOpenScan: (id: string) => void }) 
         )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {runs.map((run) => (
-            <RunCard key={run.id} run={run} onClick={() => onOpenScan(run.id)} />
+            <RunCard
+              key={run.id}
+              run={run}
+              onClick={() => onOpenScan(run.id)}
+            />
           ))}
         </div>
       </div>
@@ -221,7 +249,9 @@ function SeveritySummary({ scan }: { scan: Scan }) {
       {present.map((severity) => (
         <span key={severity} className="flex items-center gap-1">
           {severityBadge(severity)}
-          <span className="text-xs font-medium tabular-nums">{scan.severities[severity]}</span>
+          <span className="text-xs font-medium tabular-nums">
+            {scan.severities[severity]}
+          </span>
         </span>
       ))}
     </span>
@@ -239,11 +269,20 @@ const FINDING_LIMIT = 500;
 export function ScanDetailView({
   id,
   onBack,
+  onOpenPlayground,
+  onMuteFinding,
   tabs,
   taskButton,
 }: {
   id: string;
   onBack: () => void;
+  // Opening the report playground is a navigation the app owns, like onBack:
+  // this view knows which run to design a report for, not where that route is.
+  onOpenPlayground: (scanId: string) => void;
+  // Same arrangement for the rule editor: this view knows which finding a rule
+  // would be written about and how far it should reach, not where that route
+  // lives, so it hands up a path rather than the finding.
+  onMuteFinding?: (path: string) => void;
   // The app's primary nav, handed down so it renders inside this view's shell
   // rather than in a second header band above it.
   tabs?: ReactNode;
@@ -251,12 +290,20 @@ export function ScanDetailView({
 }) {
   const [scan, setScan] = useState<Scan | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
-  const [groupBy, setGroupBy] = useState<GroupBy>("type");
   const [tab, setTab] = useState<DetailTab>("findings");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
-  const grouping = useMemo(() => buildGrouping(groupBy), [groupBy]);
-  const { filters, selection, error: filterError } = useEntityFilters("finding", { exclude: ["scan"] });
+  const [findingsBusy, setFindingsBusy] = useState(true);
+  const [findingQuery, setFindingQuery] = useState("");
+  const {
+    filters,
+    selection,
+    error: filterError,
+  } = useEntityFilters("finding", { exclude: ["scan"] });
+  const visibleFindings = useMemo(
+    () => findings.filter((finding) => findingMatchesSearch(finding, findingQuery)),
+    [findingQuery, findings],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -273,28 +320,59 @@ export function ScanDetailView({
 
   useEffect(() => {
     let cancelled = false;
-    fetchFindings({ scan: id, limit: FINDING_LIMIT, ...selectionQuery(selection) })
+    setFindingsBusy(true);
+    setFindings([]);
+    fetchFindings({
+      scan: id,
+      limit: FINDING_LIMIT,
+      ...selectionQuery(selection),
+    })
       .then((result) => !cancelled && setFindings(result))
-      .catch((reason) => !cancelled && setError((reason as Error).message));
+      .catch((reason) => !cancelled && setError((reason as Error).message))
+      .finally(() => !cancelled && setFindingsBusy(false));
     return () => {
       cancelled = true;
     };
   }, [id, selection]);
 
+  useEffect(() => {
+    setFindingQuery("");
+  }, [id]);
+
   return (
     <AppShell
       nav={
         <div className="flex min-w-0 items-center gap-3">
-          {tabs && <div className="flex shrink-0 items-center gap-1">{tabs}</div>}
-          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs">
+          {tabs && (
+            <div className="flex shrink-0 items-center gap-1">{tabs}</div>
+          )}
+          <nav
+            aria-label="Breadcrumb"
+            className="flex min-w-0 items-center gap-1 text-xs"
+          >
             <span className="shrink-0 text-muted-foreground">Scans</span>
             <span className="shrink-0 text-muted-foreground/60">›</span>
-            <span className="truncate font-medium text-foreground">{scan?.name ?? id}</span>
+            <span className="truncate font-medium text-foreground">
+              {scan?.name ?? id}
+            </span>
           </nav>
         </div>
       }
       actions={
         <div className="flex items-center gap-2">
+          {tab === "findings" && (
+            <FindingCopyButton
+              scan={scan}
+              findings={visibleFindings}
+              loadedFindingCount={findings.length}
+              selection={selection}
+              search={findingQuery}
+              findingLimit={FINDING_LIMIT}
+              loading={findingsBusy}
+            />
+          )}
+          <ScanExportMenu scan={scan} onOpenPlayground={onOpenPlayground} />
+          <UploadInsightsButton scan={scan} />
           <Button variant="outline" size="sm" onClick={onBack}>
             Back to scans
           </Button>
@@ -304,9 +382,13 @@ export function ScanDetailView({
       bodyHeader={
         <div className="flex min-w-0 flex-col gap-2">
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold">{scan?.name ?? "Scan details"}</h1>
+            <h1 className="truncate text-lg font-semibold">
+              {scan?.name ?? "Scan details"}
+            </h1>
             <p className="truncate text-xs text-muted-foreground">
-              {scan ? `${scan.engine} · ${scan.profile} · ${scan.selectorLabel}` : id}
+              {scan
+                ? `${scan.engine} · ${scan.profile} · ${scan.selectorLabel}`
+                : id}
             </p>
           </div>
           <Tabs
@@ -320,19 +402,7 @@ export function ScanDetailView({
         </div>
       }
       bodyActions={
-        tab === "findings" && (
-          <div className="flex items-center gap-3">
-            {scan && <SeveritySummary scan={scan} />}
-            <Select
-              id="scan-findings-group"
-              aria-label="Group findings by"
-              className="w-40 shrink-0"
-              value={groupBy}
-              options={GROUP_OPTIONS}
-              onChange={(event) => setGroupBy(event.target.value as GroupBy)}
-            />
-          </div>
-        )
+        tab === "findings" && scan ? <SeveritySummary scan={scan} /> : null
       }
       // A findings table is wide — severity, finding, host, type and a tag list
       // — and the default centred width caps it well below what it needs, which
@@ -351,39 +421,56 @@ export function ScanDetailView({
       <div className="flex h-full min-h-0 flex-col gap-density-2">
       {(error ?? filterError) && (
         <div role="alert" className="text-sm text-destructive">
-          {error ?? filterError}
-        </div>
-      )}
-      {busy && !scan && <p className="text-sm text-muted-foreground">Loading scan…</p>}
+            {error ?? filterError}
+          </div>
+        )}
+        {busy && !scan && (
+          <p className="text-sm text-muted-foreground">Loading scan…</p>
+        )}
 
-      {tab === "execution" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {tab === "execution" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
           {scan && <ScanExecutionDetails scan={scan} />}
-        </div>
-      ) : (
-        <>
-          {scan && findings.length >= FINDING_LIMIT && scan.findings > findings.length && (
-            <p className="text-xs text-muted-foreground">
-              Showing the first {findings.length} of {scan.findings} findings — narrow the list
-              with a filter to see the rest.
-            </p>
-          )}
-          <DataTable<Finding>
+          </div>
+        ) : (
+          <>
+            {scan &&
+              findings.length >= FINDING_LIMIT &&
+              scan.findings > findings.length && (
+                <p className="text-xs text-muted-foreground">
+                  Showing the first {findings.length} of {scan.findings}{" "}
+                  findings — narrow the list with a filter to see the rest.
+                </p>
+              )}
+            <DataTable<Finding>
             className="min-h-0 flex-1"
             data={findings}
             columns={findingColumns}
+            loading={findingsBusy}
             getRowId={(row) => `${row.scanId}#${row.lineNo}`}
             externalFilters={filters}
-            showGlobalFilter
-            globalFilterPlaceholder="Search findings, hosts, templates…"
-            defaultSort={{ key: "severity" }}
-            grouping={grouping}
-            // A pentest run reports hundreds of findings; rendering them all on
-            // first paint locks the tab up for seconds.
-            clientReveal={{ batchSize: 100 }}
+              showGlobalFilter
+              globalFilter={findingQuery}
+              onGlobalFilterChange={setFindingQuery}
+              globalFilterPlaceholder="Search findings, hosts, templates…"
+              defaultSort={{ key: "severity" }}
+              groupingModes={FINDING_GROUPING_MODES}
+              defaultGroupingMode="type"
+              // A pentest run reports hundreds of findings; rendering them all on
+              // first paint locks the tab up for seconds.
+              clientReveal={{ batchSize: 100 }}
             emptyMessage="No findings in this scan."
             detailStyle="row"
-            renderExpandedRow={(row) => <FindingDetail finding={row} />}
+            renderExpandedRow={(row) => (
+              <FindingDetail
+                finding={row}
+                // The engine comes from the run rather than the finding: a
+                // rule is scoped by scan engine, and a finding's `type` is
+                // the protocol family, which is a different vocabulary.
+                engine={scan?.engine}
+                onMute={onMuteFinding}
+              />
+            )}
             isRowClickable={() => true}
           />
         </>

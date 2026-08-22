@@ -14,6 +14,8 @@ const DESCRIPTIONS: Record<string, string> = {
   "scan.json": "The run's record: timings, command, counts, statistics",
   "output.log": "The engine's log output",
   "inputs.yml": "The benchmark inputs this run was given",
+  "mutes.json": "The mute rules in force, and which lines of findings.jsonl they removed",
+  ".trivyignore": "The checks trivy was told to skip, generated from the mute rules",
 };
 
 // Some artifacts are named after what they describe rather than what they are,

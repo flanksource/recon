@@ -137,6 +137,10 @@ export function ScanExecutionDetails({ scan }: { scan: Scan }) {
         <EvidenceStat label="errors" value={scan.stats?.errors ?? "—"} />
         <EvidenceStat label="rps" value={scan.stats?.rps ?? "—"} />
         <EvidenceStat label="findings" value={scan.findings} />
+        {/* A muted finding is dropped before the run is recorded, so without
+            this a filtered run reads as a clean one. Absent on runs recorded
+            before muting existed, which is not the same as none. */}
+        <EvidenceStat label="muted" value={scan.muted ?? "—"} />
         <EvidenceStat label="affected hosts" value={scan.hosts.length} />
         <EvidenceStat label="exit" value={scan.exitCode ?? "—"} />
         {scan.engineVersion && <EvidenceStat label="engine" value={`${scan.engine} ${scan.engineVersion}`} />}

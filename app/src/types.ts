@@ -233,7 +233,14 @@ export type SeverityCounts = Record<Severity, number>;
 export type Finding = {
   _id?: string;
   scanId: string;
+  // The line of the engine's own findings.jsonl this came from. Runs whose mute
+  // rules removed something have gaps here rather than renumbered survivors, so
+  // the artifact and the database still address the same evidence.
   lineNo: number;
+  // The inventory subject the finding was attributed to. Distinct from host,
+  // which is the provider's own identity in the evidence — for a cloud account
+  // they differ, and a mute rule's target scope matches on this one.
+  targetId?: string;
   templateId: string;
   name: string;
   severity: Severity;
@@ -286,6 +293,15 @@ export type ScanStats = {
   hosts: number;
   templates: number;
   duration: string;
+
+  // Checks that ran and returned a clean verdict. Only compliance engines count
+  // it: a benchmark control and a Prowler check each have a verdict, while a
+  // network scanner's template that matched nothing did not "pass". Read it
+  // only when `passRecorded` says a count was taken — zero otherwise means
+  // nobody counted, not that nothing passed.
+  passed: number;
+  passRecorded?: boolean;
+
   // Absent for an engine that does not report its requests individually — which
   // is not the same as a scan that sent nothing.
   http?: HTTPStats;
@@ -323,6 +339,11 @@ export type Scan = Identified & {
   exitCode?: number;
   error?: string;
   findings: number;
+  // Findings a mute rule removed after the engine reported them. They are not
+  // recorded, so without this a filtered run looks like a clean one. Checks a
+  // rule stopped from running are not counted — the run's mutes.json names the
+  // rules that did that.
+  muted?: number;
   severities: SeverityCounts;
   stats?: ScanStats;
   hosts: string[];
@@ -349,6 +370,48 @@ export type ScanStatus = Scan & {
   running: boolean;
   log: string;
   output: ScanOutputEvent[];
+};
+
+// One catalog config item an upload attached insights to.
+export type UploadConfig = {
+  id: string;
+  name?: string;
+  type?: string;
+  insights: number;
+  // True when this config is the cluster, account or project containing the
+  // thing the finding was about, rather than that thing itself.
+  rolledUp?: boolean;
+};
+
+// A finding nothing in the Mission Control catalog claims, and every identity
+// that was tried for it.
+export type UploadUnresolved = {
+  finding: string;
+  host?: string;
+  severity?: Severity;
+  tried: string[];
+  reason: string;
+};
+
+// The result of pushing a run's findings to Mission Control as insights.
+// `resolved` landed on the resource the finding is about and `rolledUp` on the
+// scope containing it — a run where everything rolled up means the catalog does
+// not hold what recon scanned.
+export type Upload = {
+  scanId: string;
+  engine: string;
+  context?: string;
+  server?: string;
+  agent: string;
+  dryRun?: boolean;
+  findings: number;
+  total: number;
+  pushed: number;
+  resolved: number;
+  rolledUp: number;
+  configs: UploadConfig[];
+  unresolved: UploadUnresolved[];
+  notes?: string[];
 };
 
 export type Zone = Identified & { zone: string };

@@ -1,0 +1,128 @@
+{
+  "generatedAt": "2026-03-14T10:05:00.000Z",
+  "findingLimit": 500,
+  "parameters": {
+    "compliance": ["cis_2.0_aws"],
+    "excluded-services": ["bedrock"],
+    "provider": "aws"
+  },
+  "options": {
+    "title": "Cloud Compliance Report",
+    "classification": "Confidential",
+    "preparedBy": "Security Engineering",
+    "audience": "Cloud Platform Team",
+    "scope": "CIS benchmark audit of every production cloud account reachable from the configured provider contexts."
+  },
+  "scan": {
+    "id": "4a7d2e91-8b33-4f0c-9d21-6b5a0c7e4419",
+    "name": "prowler-cis-37",
+    "engine": "prowler",
+    "engineVersion": "5.14.0",
+    "profile": "scan:prowler:cis-2.0",
+    "selectorLabel": "class prod, kind provider-context",
+    "endpointCount": 6,
+    "phase": "done",
+    "startedAt": "2026-03-14T09:38:00.000Z",
+    "finishedAt": "2026-03-14T10:02:31.000Z",
+    "durationMs": 1471000,
+    "command": ["prowler", "aws", "--compliance", "cis_2.0_aws", "--output-formats", "json-ocsf"],
+    "exitCode": 3,
+    "findings": 6,
+    "severities": { "critical": 1, "high": 2, "medium": 2, "low": 1, "info": 0, "unknown": 0 },
+    "hosts": ["platform-prod", "data-prod", "payments-prod"],
+    "stats": {
+      "requests": 1836,
+      "total": 1836,
+      "percent": 100,
+      "rps": 1.25,
+      "matched": 6,
+      "errors": 2,
+      "hosts": 6,
+      "templates": 306,
+      "duration": "24m 31s",
+      "passed": 1830,
+      "passRecorded": true
+    }
+  },
+  "findings": [
+    {
+      "scanId": "4a7d2e91-8b33-4f0c-9d21-6b5a0c7e4419",
+      "lineNo": 1,
+      "templateId": "aws/iam_root_mfa_enabled",
+      "name": "Root account does not have MFA enabled",
+      "severity": "critical",
+      "host": "payments-prod",
+      "matchedAt": "arn:aws:iam::payments-prod:root",
+      "matcherName": "FAIL",
+      "type": "prowler",
+      "tags": ["cis-2.0", "iam", "identity", "compliance:cis-aws-foundations"],
+      "remediation": "Enable a hardware MFA device on the root user and store it in the break-glass safe. Do not use the root user for day-to-day access.",
+      "reference": ["https://docs.aws.amazon.com/IAM/latest/UserGuide/id_root-user.html"]
+    },
+    {
+      "scanId": "4a7d2e91-8b33-4f0c-9d21-6b5a0c7e4419",
+      "lineNo": 2,
+      "templateId": "aws/s3_bucket_public_access",
+      "name": "Bucket allows public read access",
+      "severity": "high",
+      "host": "data-prod",
+      "matchedAt": "arn:aws:s3:::analytics-exports-data-prod",
+      "matcherName": "FAIL",
+      "type": "prowler",
+      "tags": ["cis-2.0", "s3", "exposure", "compliance:cis-aws-foundations"],
+      "remediation": "Enable the account-level public access block and remove the public grant from the bucket policy."
+    },
+    {
+      "scanId": "4a7d2e91-8b33-4f0c-9d21-6b5a0c7e4419",
+      "lineNo": 3,
+      "templateId": "aws/cloudtrail_multi_region_enabled",
+      "name": "CloudTrail is not enabled in all regions",
+      "severity": "high",
+      "host": "platform-prod",
+      "matchedAt": "platform-prod/eu-west-1",
+      "matcherName": "FAIL",
+      "type": "prowler",
+      "tags": ["cis-2.0", "logging", "audit"],
+      "remediation": "Create a multi-region trail with log file validation enabled and ship it to the central audit account."
+    },
+    {
+      "scanId": "4a7d2e91-8b33-4f0c-9d21-6b5a0c7e4419",
+      "lineNo": 4,
+      "templateId": "aws/ec2_securitygroup_open_ssh",
+      "name": "Security group allows SSH from the internet",
+      "severity": "medium",
+      "host": "platform-prod",
+      "matchedAt": "sg-0d4a19f2c7b83e001",
+      "matcherName": "FAIL",
+      "type": "prowler",
+      "tags": ["cis-2.0", "network", "ingress"],
+      "remediation": "Replace the 0.0.0.0/0 rule with the bastion prefix list, or move the workload behind Session Manager."
+    },
+    {
+      "scanId": "4a7d2e91-8b33-4f0c-9d21-6b5a0c7e4419",
+      "lineNo": 5,
+      "templateId": "aws/rds_instance_backup_enabled",
+      "name": "Automated backups are disabled",
+      "severity": "medium",
+      "host": "data-prod",
+      "matchedAt": "arn:aws:rds:eu-west-1:data-prod:db:reporting-replica",
+      "matcherName": "FAIL",
+      "type": "prowler",
+      "tags": ["cis-2.0", "rds", "resilience"],
+      "remediation": "Set a backup retention period of at least seven days on the instance."
+    },
+    {
+      "scanId": "4a7d2e91-8b33-4f0c-9d21-6b5a0c7e4419",
+      "lineNo": 6,
+      "templateId": "aws/iam_password_policy_reuse",
+      "name": "Password policy permits reuse of the last 24 passwords",
+      "severity": "low",
+      "host": "payments-prod",
+      "matchedAt": "payments-prod/account-password-policy",
+      "matcherName": "MANUAL",
+      "type": "prowler",
+      "tags": ["cis-2.0", "iam", "policy"],
+      "remediation": "Set PasswordReusePrevention to 24 on the account password policy."
+    }
+  ]
+}

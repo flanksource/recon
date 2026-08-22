@@ -1,0 +1,50 @@
+/* The stylesheet for the report preview frame.
+ *
+ * A build of its own, scanning only app/reports, so the preview shows the
+ * template's utilities — including arbitrary values like `text-[7.5pt]`, which
+ * no prebuilt stylesheet can carry — without the report's classes leaking into
+ * the app or the app's clicky-ui theme leaking into the report. It is injected
+ * into an iframe with `?inline`, never linked from the document.
+ *
+ * `source(none)` turns off automatic detection: without it this build would also
+ * scan the app and pull in every clicky-ui utility, which is exactly the
+ * cross-contamination the preview frame exists to prevent.
+ */
+@import "tailwindcss" source(none);
+@source "../reports";
+
+/* The page frame. facet's CLI writes an equivalent rule into its own output —
+ * this mirrors it so the preview breaks lines where the PDF will. */
+body {
+  max-width: 210mm;
+  margin: 0 auto;
+  background: #fff;
+  color: #374151;
+  font-size: 10pt;
+  line-height: 14pt;
+  font-family: "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
+}
+
+/* Each Page sets `break-after: page`, which a screen has no way to show. Drawing
+ * the boundary is what makes the preview answer "where does page 2 start". */
+[data-page-size] + [data-page-size] {
+  border-top: 1px dashed #cbd5e1;
+  margin-top: 8mm;
+  padding-top: 8mm;
+}
+
+/* facet lifts the header and footer into every physical page's margin. A
+ * browser cannot paginate, so here they are simply the document's first two
+ * elements. The header is shown — it does sit at the top of page one — and the
+ * footer is hidden, because its page counter is still the `_PG_` placeholder
+ * facet substitutes during the PDF pass, and a visible placeholder reads as a
+ * bug in the report rather than a limit of the preview. */
+[data-footer-type] {
+  display: none;
+}
+
+[data-header-type] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}

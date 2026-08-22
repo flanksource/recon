@@ -9,20 +9,23 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "inventory": "tsx server/inventory-cli.ts",
-    "lint": "oxlint src server profile-schema vite-plugin-targets.ts vite.config.ts",
+    "lint": "oxlint src server reports profile-schema vite-plugin-targets.ts vite.config.ts",
     "test": "vitest run",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.262",
     "@flanksource/clicky-ui": "^0.3.22",
+    "@flanksource/facet": "0.1.71",
     "@flanksource/icons": "1.0.63",
     "@tanstack/react-query": "^5.101.4",
     "ai": "^6.0.259",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
+    "markdown-to-jsx": "7.7.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "streamdown": "^2.5.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

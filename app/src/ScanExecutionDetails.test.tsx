@@ -38,6 +38,8 @@ const SCAN: Scan = {
     errors: 2,
     hosts: 3,
     templates: 18,
+    // nuclei has no per-check verdict, so it counts no passes.
+    passed: 0,
     duration: "2s",
   },
   hosts: ["api.example.test", "admin.example.test"],
@@ -77,5 +79,22 @@ describe("ScanExecutionDetails", () => {
     render(<ScanExecutionDetails scan={{ ...SCAN, outputCaptured: false, stdout: undefined, stderr: undefined }} />);
 
     expect(screen.getByText("Process output was not captured for this scan.")).toBeInTheDocument();
+  });
+
+  it("says how many findings a rule removed, so a filtered run does not read as a clean one", () => {
+    render(<ScanExecutionDetails scan={{ ...SCAN, findings: 4, muted: 11 }} />);
+
+    expect(screen.getByText("findings").parentElement).toHaveTextContent("4");
+    expect(screen.getByText("muted").parentElement).toHaveTextContent("11");
+  });
+
+  it("distinguishes a run recorded before muting existed from one that muted nothing", () => {
+    // Absent is not zero: an older run cannot say either way, and claiming it
+    // dropped nothing would be an assertion the record does not support.
+    const { rerender } = render(<ScanExecutionDetails scan={{ ...SCAN, muted: undefined }} />);
+    expect(screen.getByText("muted").parentElement).toHaveTextContent("—");
+
+    rerender(<ScanExecutionDetails scan={{ ...SCAN, muted: 0 }} />);
+    expect(screen.getByText("muted").parentElement).toHaveTextContent("0");
   });
 });
