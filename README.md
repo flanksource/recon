@@ -36,7 +36,7 @@ nuclei/
   .agents/skills/           reconctl inventory maintenance skill
   results/                  retained scan artifacts (gitignored)
     <engine>/<date>/<run>/  targets.txt, findings.jsonl, config.json,
-                            scan.json, output.log
+                            scan.json, output.log, mutes.json
   .gen/                     rendered target lists (gitignored)
 ```
 
@@ -72,7 +72,7 @@ task app:dev                      # admin UI: tag/bulk-edit targets, see observe
 ## Admin app
 
 `task app:dev` (or `make nuclei-app`) opens a local Vite + clicky-ui UI at
-`localhost:5280` with three tabs:
+`localhost:5280` with these tabs:
 
 - **Inventory** — filter and bulk-edit targets by kind and class, or open `/inventory/:host` for a
   preview-first detail page. Edit mode is driven by `target.schema.json`; host identity
@@ -90,6 +90,11 @@ task app:dev                      # admin UI: tag/bulk-edit targets, see observe
 - **Profiles** — edit the tracked Nuclei, Naabu, and httpx discovery profiles
   through a clicky-ui JSON Schema form backed by the upstream CLI options. Saves are
   type-checked and written directly to `config/*.yaml`.
+- **Mutes** — the findings that have been accepted, and what each rule covers. The
+  form refuses a rule that would match everything, and **What would this hide?**
+  reports what a rule would have removed from runs that already finished — which is
+  the only way to see its reach, because a muted finding is never recorded. See
+  [Muting findings](#muting-findings).
 
 See [app/README.md](app/README.md).
 
@@ -202,6 +207,59 @@ Every scan sends `User-Agent: flanksource-security-scan/nuclei` and
 `X-Flanksource-Scan`, so its requests are attributable in `telemetry.nginx_access_logs`
 (the `client_ip` column added in `clickhouse/schema/001-nginx-access-logs-client-ip.sql`).
 
+## Muting findings
+
+A **mute rule** records a finding nobody intends to act on. Rules are stored in the
+database and edited on the **Mutes** tab, on the CLI, or over the API:
+
+```bash
+reconctl mute create name=accepted-open-redirect templates=open-redirect engines=nuclei \
+    comment='httpbin is a deliberate fixture'
+reconctl mute list
+reconctl mute preview accepted-open-redirect
+```
+
+A rule selects on any combination of `templates` (the check), `resources` (the thing
+the evidence names), `tags`, `severity`, and a `targets` selector over the inventory.
+The rows are ANDed and the values within a row are ORed; a row left empty is not part
+of the rule. `engines` says which engines the rule is considered for and selects no
+finding on its own, so a rule carrying only an engine is refused — as is a rule that
+selects nothing at all, because that would mute everything.
+
+`expr` narrows the rows above with a [CEL](https://github.com/google/cel-spec)
+expression over a single `finding` variable, holding the finding exactly as the API
+renders it. It is what reaches detail the columns cannot:
+
+```bash
+reconctl mute create name=logs-buckets templates=gcp/bucket_public \
+    'expr=finding.raw.resources[0].uid.startsWith("logs-")'
+```
+
+> On the CLI an argument containing `==` is read as a query parameter, so escape it as
+> `\=\=` — `'expr=finding.severity \=\= "high"'`. The API and the Mutes tab take the
+> expression verbatim.
+
+A rule has two effects. Where the engine can express the same exclusion natively the
+**check is never run** — nuclei's `exclude-id`/`exclude-tags`/`exclude-severity`,
+Prowler's `excluded-checks`, a generated `.trivyignore` for trivy. That only happens
+when the rule names exactly one row and scopes no targets or resources: engine
+exclusions are a union while a rule is an intersection, so approximating one would
+suppress findings the rule does not cover. Everything else — every rule with an
+expression, and every rule InSpec sees, since it has no exclusion mechanism — is
+applied to the results instead.
+
+**A muted finding is not recorded.** It is dropped before the run is written, so it
+does not appear in the database, the counts, the report or a Mission Control upload.
+The engine's own `findings.jsonl` still holds every line it produced, and
+`results/<run>/mutes.json` says which rule removed which of those lines, so the
+artifact directory still explains itself without Postgres. The runs list shows
+`N muted` alongside the finding count, and `reconctl scan --no-mutes` runs with every
+rule ignored.
+
+Because muting drops rather than marks, `reconctl mute preview <name>` — and the
+**What would this hide?** button — is the way to check a rule's reach before trusting
+it. It reports what the rule would have taken out of runs that already finished.
+
 ## Safety notes
 
 - `internal` hosts are private GKE endpoints. Scanning them is only meaningful **from
@@ -243,3 +301,34 @@ execute, while `GET /api/v1/discover` and `GET /api/v1/scan` list history. Reque
 bodies use the flag names, for example
 `{"domain":["flanksource.com"],"profile":"default"}` or
 `{"selector":"env=prod","profile":"safe"}`.
+
+## Uploading findings to Mission Control
+
+A finished run can be pushed to Mission Control, where each finding becomes an
+**insight** (`config_analysis`) attached to the config item it is about:
+
+```bash
+faro auth login --server https://mission-control.example.com
+reconctl scan upload <scan-id> --dry-run     # what would land, nothing written
+reconctl scan upload <scan-id>
+```
+
+The credential is faro's — there is no server or token flag, and `--context`
+picks between configured servers. The endpoint requires the `agent-push`
+permission, which Mission Control grants to the `admin` and `agent` roles only;
+`faro whoami` shows what the current context holds.
+
+Each finding is resolved against the catalog rather than given a config item of
+recon's own: the resource the engine named, then the host, then the target's
+cluster and finally the target itself. A finding that only matches one of the
+later rungs is **rolled up** — recorded against the cluster or account
+containing it — and one that matches nothing is reported, not uploaded. An
+insight attached to the wrong resource is worse than one that is missing and
+accounted for, so `--dry-run` reports the same coverage a real upload would
+achieve. `--severity` sets a floor and `--unresolved=error` refuses to push
+anything unless every finding resolved.
+
+Uploading twice does not duplicate: an insight's identity is derived from the
+config, the analyzer and the location, so a re-scan updates the row it wrote
+last time and its `first_observed` survives. The Scans tab exposes the same
+operation as a button, and the API as `POST /api/v1/scan/{id}/upload`.

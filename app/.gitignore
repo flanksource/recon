@@ -14,3 +14,10 @@ dist/*
 .vite/
 .vite-dev.log
 .tmp/
+
+# facet's build cache for the report template, and what a local render writes.
+# `.facet/` holds an .npmrc that can inherit registry auth tokens, so it must
+# never be committed. `!dist/` above re-includes every dist directory in the
+# tree, which is why the report's own output has to be excluded again here.
+.facet/
+reports/dist/
