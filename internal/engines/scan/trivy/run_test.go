@@ -31,7 +31,7 @@ var _ = Describe("building a trivy command line", func() {
 		GinkgoHelper()
 		entry, err := find(providerID)
 		Expect(err).ToNot(HaveOccurred())
-		argv, err := entry.argv(profile, arguments, "/results/report.json")
+		argv, err := entry.argv(profile, arguments, runnerOptions{Report: "/results/report.json"})
 		Expect(err).ToNot(HaveOccurred())
 		return argv
 	}
@@ -106,7 +106,7 @@ var _ = Describe("building a trivy command line", func() {
 		entry, err := find(ProviderImage)
 		Expect(err).ToNot(HaveOccurred())
 
-		_, err = entry.argv(map[string]any{}, map[string]any{"image": "  "}, "/results/report.json")
+		_, err = entry.argv(map[string]any{}, map[string]any{"image": "  "}, runnerOptions{Report: "/results/report.json"})
 		Expect(err).To(MatchError(ContainSubstring("image is required")))
 	})
 
@@ -116,7 +116,7 @@ var _ = Describe("building a trivy command line", func() {
 
 		// A scan runs with its working directory set to its own artifact
 		// directory, so "src" would resolve there and quietly scan nothing.
-		_, err = entry.argv(map[string]any{}, map[string]any{"path": "src"}, "/results/report.json")
+		_, err = entry.argv(map[string]any{}, map[string]any{"path": "src"}, runnerOptions{Report: "/results/report.json"})
 		Expect(err).To(MatchError(ContainSubstring("is relative")))
 	})
 })

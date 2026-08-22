@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -93,6 +94,14 @@ func serve(cmd *cobra.Command, st *store.Store, host string, port int, namespace
 		defer stopVite()
 		config.DevServer = target
 		cmd.Printf("serving the web interface from vite at %s\n", target)
+
+		// The report template is part of that working tree. Without this an
+		// exported PDF would still come from the copy compiled into the binary,
+		// so the report playground would preview an edit the export ignored.
+		if dir, err := appDir(); err == nil {
+			config.ReportSourceDir = filepath.Join(dir, "reports")
+			cmd.Printf("rendering scan reports from %s\n", config.ReportSourceDir)
+		}
 	}
 
 	handler := server.Handler(config)

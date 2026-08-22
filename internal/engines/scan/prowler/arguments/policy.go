@@ -44,6 +44,14 @@ var commonPolicies = map[string]Policy{
 	"list_categories":              forbiddenPolicy(reasonListingControl, false),
 	"list_resource_groups":         forbiddenPolicy(reasonListingControl, false),
 	"list_fixer":                   forbiddenPolicy(reasonListingControl, false),
+	// Stays forbidden even though recon now has mute rules of its own, and the
+	// reason is not the file. Prowler's mutelist does not stop a check running
+	// — it relabels the finding as muted in the output — so it cannot serve the
+	// half of a mute rule that saves any work, and recon already drops records
+	// Prowler marked Suppressed. Adopting it would leave one flag meaning both
+	// "a recon rule muted this" and "Prowler's own configuration muted this",
+	// with no way to tell which. Check exclusion is expressed through
+	// excluded_checks instead, which does stop the check running.
 	"mutelist_file":                forbiddenPolicy(reasonArbitraryFile, true),
 	"config_file":                  forbiddenPolicy(reasonArbitraryFile, true),
 	"fixer_config":                 forbiddenPolicy(reasonRemediation, true),

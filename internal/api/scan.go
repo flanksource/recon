@@ -52,7 +52,15 @@ type Scan struct {
 	ExitCode *int     `json:"exitCode,omitempty"`
 	Error    string   `json:"error,omitempty"`
 
-	Findings   int            `json:"findings"`
+	Findings int `json:"findings"`
+
+	// Muted counts findings a rule removed after the engine reported them.
+	// Recorded because the findings themselves are not: without it a run whose
+	// results were filtered is indistinguishable from a clean one. Checks a
+	// rule stopped from running are not counted — they produced nothing — and
+	// the run's mutes.json names the rules that did that instead.
+	Muted int `json:"muted"`
+
 	Severities map[string]int `json:"severities"`
 	Stats      *ScanStats     `json:"stats,omitempty"`
 	Hosts      []string       `json:"hosts"`

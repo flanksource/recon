@@ -19,6 +19,7 @@ import (
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
 	"github.com/flanksource/recon/internal/models"
+	"github.com/flanksource/recon/internal/mute"
 	"github.com/flanksource/recon/internal/runtimecontext"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -41,6 +42,11 @@ type Request struct {
 	// Confirmed acknowledges an intrusive scan of hosts that matter. Without
 	// it, such a run is refused rather than started.
 	Confirmed bool
+
+	// NoMutes runs with every mute rule ignored. A muted finding is not
+	// recorded, so this is how someone finds out what the rules are currently
+	// hiding without deleting them first.
+	NoMutes bool
 }
 
 // Publisher receives a snapshot whenever a run changes. The SSE broadcaster
@@ -83,6 +89,12 @@ type Run struct {
 	// deduplicated. Distinct from Scan.Hosts, which are provider or network
 	// identities found in the evidence.
 	targetIDs []string
+
+	// mutes are the rules in force, resolved when the run was queued so a long
+	// scan is judged by the rules it started under. pushdown names the ones the
+	// engine took on itself, which are therefore not applied to the results.
+	mutes    []mute.Rule
+	pushdown mute.Plan
 
 	// done closes when the run reaches a terminal phase. Wait blocks on it.
 	done     chan struct{}
@@ -262,33 +274,12 @@ func (r *Runtime) Start(ctx context.Context, request Request) (api.Scan, error) 
 		}
 	}
 
-	return r.enqueue(ctx, engine, config, subjects, request)
-}
-
-// resolveConfig layers the run-only overrides over the stored profile and
-// validates the result, so a run cannot use a configuration the engine's own
-// catalog would reject.
-func (r *Runtime) resolveConfig(ctx context.Context, spec engines.Spec, request Request) (map[string]any, error) {
-	profile, err := r.Store.GetProfile(ctx, "scan:"+spec.Name+":"+request.Profile)
+	rules, err := r.muteRules(ctx, spec.Name, request)
 	if err != nil {
-		return nil, err
-	}
-	if err := spec.ValidateOverrides(profile.Config, request.Overrides); err != nil {
-		return nil, fmt.Errorf("scan configuration: %w", err)
+		return api.Scan{}, err
 	}
 
-	config := map[string]any{}
-	for key, value := range profile.Config {
-		config[key] = value
-	}
-	for key, value := range request.Overrides {
-		config[key] = value
-	}
-
-	if err := spec.ValidateConfig(config); err != nil {
-		return nil, fmt.Errorf("scan configuration: %w", err)
-	}
-	return config, nil
+	return r.enqueue(ctx, engine, config, subjects, rules, request)
 }
 
 func (r *Runtime) enqueue(
@@ -296,6 +287,7 @@ func (r *Runtime) enqueue(
 	engine enginescan.Engine,
 	config map[string]any,
 	subjects resolvedSubjects,
+	rules []mute.Rule,
 	request Request,
 ) (api.Scan, error) {
 	spec := engine.Spec()
@@ -329,6 +321,16 @@ func (r *Runtime) enqueue(
 		artifacts.Remove()
 		return api.Scan{}, r.failQueuedScan(ctx, row, err)
 	}
+	// Offered to the engine before the configuration is recorded, so config.json
+	// shows the exclusions a rule added rather than only the ones the profile
+	// carried — and so an engine that expresses a rule natively is the same
+	// configuration its own preview and its rendered command line describe.
+	pushdown, err := offerMutes(engine, spec, config, artifacts.Dir, rules)
+	if err != nil {
+		artifacts.Remove()
+		return api.Scan{}, r.failQueuedScan(ctx, row, err)
+	}
+
 	// The effective configuration, not the stored profile: overrides are
 	// run-only and are otherwise lost the moment the run ends.
 	if err := artifacts.WriteJSON(ConfigFile, config); err != nil {
@@ -349,6 +351,7 @@ func (r *Runtime) enqueue(
 	out := artifacts.Path(FindingsFile)
 	engineRun := engines.Run{
 		Bin: bin, WorkDir: artifacts.Dir, Config: config, In: in, Out: out,
+		Mutes:            pushdown.File,
 		ProviderContexts: engineProviderContexts(subjects.ProviderContexts),
 	}
 	output := NewOutput()
@@ -361,6 +364,8 @@ func (r *Runtime) enqueue(
 		session:   current,
 		row:       row,
 		targetIDs: subjects.targetIDs(),
+		mutes:     rules,
+		pushdown:  pushdown.Plan,
 		done:      make(chan struct{}),
 	}
 	run.Scan.Command = current.Command

@@ -49,6 +49,11 @@ type Run struct {
 
 	// Out is where the engine should write its machine-readable output.
 	Out string
+
+	// Mutes is a generated exclusion file an engine asked for when the run's
+	// mute rules were offered to it, empty when it needed none. It lives in
+	// WorkDir and is the engine's own format, not recon's.
+	Mutes string
 }
 
 // Flag reads a config value as a string.

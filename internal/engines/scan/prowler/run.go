@@ -272,6 +272,8 @@ func (a *aggregateStats) add(report ocsfReport) {
 	a.stats.Total += report.Stats.Total
 	a.stats.Matched += report.Stats.Matched
 	a.stats.Errors += report.Stats.Errors
+	a.stats.Passed += report.Stats.Passed
+	a.stats.PassRecorded = a.stats.PassRecorded || report.Stats.PassRecorded
 	for host := range report.hosts {
 		a.hosts[host] = struct{}{}
 	}

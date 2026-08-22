@@ -15,12 +15,14 @@ var _ = Describe("Prowler OCSF output", func() {
 		report, err := readOCSF(filepath.Join("testdata", "findings.ocsf.json"), "target-gcp", "gcp")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(report.Stats).To(Equal(api.ScanStats{
-			Requests:  4,
-			Total:     4,
-			Percent:   100,
-			Matched:   2,
-			Hosts:     2,
-			Templates: 4,
+			Requests:     4,
+			Total:        4,
+			Percent:      100,
+			Matched:      2,
+			Hosts:        2,
+			Templates:    4,
+			Passed:       1,
+			PassRecorded: true,
 		}))
 		Expect(report.Findings).To(HaveLen(2))
 
@@ -56,6 +58,39 @@ var _ = Describe("Prowler OCSF output", func() {
 		Expect(kubernetes.TargetID).To(Equal("target-gcp"))
 		Expect(kubernetes.TemplateID).To(Equal("gcp/k8s_manual_admission_policy"))
 		Expect(kubernetes.MatcherName).To(Equal("MANUAL"))
+	})
+
+	// A passing check leaves no finding behind, so without a count of them a
+	// clean audit and an audit that never ran look identical in the report.
+	It("counts a passing check rather than only dropping it", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "passes.ocsf.json")
+		record := func(code, check string) string {
+			return `{"status":"New","status_code":"` + code + `","metadata":{"event_code":"` + check + `"},` +
+				`"finding_info":{"title":"Check"},"unmapped":{"provider":"gcp","provider_uid":"example"}}`
+		}
+		body := []byte("[" + record("PASS", "a") + "," + record("PASS", "b") + "," + record("FAIL", "c") + "]")
+		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
+
+		report, err := readOCSF(path, "target", "gcp")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(report.Stats.Passed).To(BeEquivalentTo(2))
+		Expect(report.Stats.Matched).To(BeEquivalentTo(1))
+		Expect(report.Stats.PassRecorded).To(BeTrue())
+	})
+
+	// Zero passes and "nobody counted" are different facts, and only the flag
+	// separates them — a report that inferred a 0% pass rate from the count
+	// alone would be reporting on the engine rather than on the account.
+	It("records that passes were counted even when none passed", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "none.ocsf.json")
+		body := []byte(`[{"status":"New","status_code":"FAIL","metadata":{"event_code":"a"},` +
+			`"finding_info":{"title":"Check"},"unmapped":{"provider":"gcp","provider_uid":"example"}}]`)
+		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
+
+		report, err := readOCSF(path, "target", "gcp")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(report.Stats.Passed).To(BeZero())
+		Expect(report.Stats.PassRecorded).To(BeTrue())
 	})
 
 	It("rejects an unknown status instead of silently dropping it", func() {

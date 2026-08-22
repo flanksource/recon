@@ -112,8 +112,11 @@ var _ = Describe("a Prowler run", func() {
 		Expect(sink.findings).To(HaveLen(4))
 		Expect([]string{sink.findings[0].TargetID, sink.findings[2].TargetID}).
 			To(Equal([]string{"gcp-prod", "gcp-dev"}))
+		// Passed aggregates across contexts alongside the findings: two accounts
+		// audited, one passing check each.
 		Expect(sink.stats).To(Equal(api.ScanStats{
 			Requests: 8, Total: 8, Percent: 100, Matched: 4, Hosts: 2, Templates: 4,
+			Passed: 2, PassRecorded: true,
 		}))
 		output, err := os.ReadFile(run.Out)
 		Expect(err).ToNot(HaveOccurred())

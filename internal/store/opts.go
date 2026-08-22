@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -344,7 +345,14 @@ func TargetOptsFrom(stored map[string]any) (TargetOpts, error) {
 		return TargetOpts{}, fmt.Errorf("encode stored target selector: %w", err)
 	}
 	var opts TargetOpts
-	if err := json.Unmarshal(encoded, &opts); err != nil {
+	// Strict, because the failure it prevents is silent and inverted: an
+	// unrecognised key is dropped, the selector decodes empty, and an empty
+	// selector is every target. A mute rule scoped to one host would quietly
+	// cover the whole inventory. The near-miss is the realistic case — the flag
+	// is `--id` and the stored field is `ids`.
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&opts); err != nil {
 		return TargetOpts{}, fmt.Errorf("decode stored target selector: %w", err)
 	}
 	if err := opts.Validate(); err != nil {

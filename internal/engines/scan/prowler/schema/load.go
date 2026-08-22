@@ -128,12 +128,16 @@ func validateManifest(manifest Manifest) error {
 		return fmt.Errorf("prowler schema commit drift: expected %s, got %s", PinnedCommit, manifest.SourceCommit)
 	case manifest.ProviderCount != len(manifest.Providers):
 		return fmt.Errorf("prowler schema provider count drift: manifest=%d ids=%d", manifest.ProviderCount, len(manifest.Providers))
+	case manifest.ProfileProjectionCount != len(manifest.BuiltInProfiles):
+		return fmt.Errorf("prowler schema profile count drift: manifest=%d profiles=%d", manifest.ProfileProjectionCount, len(manifest.BuiltInProfiles))
 	case len(manifest.Digests) != manifest.ProviderCount:
 		return fmt.Errorf("prowler schema digest count drift: manifest=%d digests=%d", manifest.ProviderCount, len(manifest.Digests))
 	case manifest.SourceDigest != "" && manifest.CatalogDigest == "":
 		return fmt.Errorf("prowler schema catalog digest is required")
 	case manifest.SourceDigest != "" && len(manifest.ProviderArgumentCounts) != manifest.ProviderCount:
 		return fmt.Errorf("prowler schema argument count drift: providers=%d argument counts=%d", manifest.ProviderCount, len(manifest.ProviderArgumentCounts))
+	case manifest.SourceDigest != "" && manifest.ProfileProjectionCount == 0:
+		return fmt.Errorf("prowler schema built-in profiles are required")
 	}
 	for index, provider := range manifest.Providers {
 		if provider == "" {
@@ -145,6 +149,16 @@ func validateManifest(manifest Manifest) error {
 		if manifest.Digests[provider] == "" {
 			return fmt.Errorf("missing Prowler schema digest for %s", provider)
 		}
+	}
+	profileNames := map[string]bool{}
+	for index, profile := range manifest.BuiltInProfiles {
+		if profile.Name == "" || profile.Provider == "" || profile.ComplianceID == "" {
+			return fmt.Errorf("prowler schema built-in profile %d is incomplete", index)
+		}
+		if profileNames[profile.Name] {
+			return fmt.Errorf("prowler schema built-in profile %q is duplicated", profile.Name)
+		}
+		profileNames[profile.Name] = true
 	}
 	return nil
 }

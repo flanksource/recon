@@ -95,6 +95,7 @@ func (r *Registry) Register() {
 	r.registerDiscover()
 	r.registerProbe()
 	r.registerProfile()
+	r.registerMute()
 	r.registerTemplate()
 	r.registerEngine()
 	r.registerZone()
@@ -202,6 +203,12 @@ func (r *Registry) registerScan() {
 		builder.WithPrimaryAction(entity.PrimaryActionWithContext(scanRunOpts{}, r.scanSelection).
 			WithShort("Discover targets, then scan their endpoints"))
 	}
+	// Uploading is an action on a run rather than a resource of its own, and it
+	// is offered over HTTP as well as on the CLI so the Scans tab can push a run
+	// from the browser. It reaches Mission Control with faro's own credential,
+	// so a server that has none simply fails the call.
+	builder.WithAction(entity.TypedActionWithContext("upload", uploadFlags{}, r.uploadScan).
+		WithShort("Upload the run's findings to Mission Control as insights"))
 	builder.Register()
 }
 

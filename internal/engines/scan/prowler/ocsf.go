@@ -89,6 +89,9 @@ func readOCSF(path, targetID, provider string) (report ocsfReport, err error) {
 		report.Stats.Total++
 		report.hosts[recordHost(record)] = struct{}{}
 		report.templates[provider+"/"+record.Metadata.EventCode] = struct{}{}
+		if record.StatusCode == "PASS" {
+			report.Stats.Passed++
+		}
 		if actionable {
 			report.Findings = append(report.Findings, finding)
 		}
@@ -105,6 +108,9 @@ func readOCSF(path, targetID, provider string) (report ocsfReport, err error) {
 	report.Stats.Matched = float64(len(report.Findings))
 	report.Stats.Hosts = float64(len(report.hosts))
 	report.Stats.Templates = float64(len(report.templates))
+	// Every OCSF record carries a verdict, so a report that parsed at all has
+	// counted the passes — including a report in which nothing passed.
+	report.Stats.PassRecorded = true
 	return report, nil
 }
 

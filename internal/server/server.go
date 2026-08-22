@@ -20,6 +20,7 @@ import (
 	"github.com/flanksource/recon/internal/entities"
 	"github.com/flanksource/recon/internal/httpapi"
 	"github.com/flanksource/recon/internal/probes"
+	"github.com/flanksource/recon/internal/report"
 	"github.com/flanksource/recon/internal/runtimecontext"
 	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
@@ -72,6 +73,12 @@ type Config struct {
 	// instead of UI. Set by `serve --dev`, so that what is served is the working
 	// tree rather than whatever was embedded when the binary was compiled.
 	DevServer *url.URL
+
+	// ReportSourceDir renders scan reports from a template directory on disk
+	// instead of the copy embedded in the binary — the same reason DevServer
+	// exists, for the printed document rather than the interface. Empty uses the
+	// embedded template.
+	ReportSourceDir string
 }
 
 // Handler builds the mux.
@@ -159,6 +166,8 @@ func Handler(config Config) http.Handler {
 	httpapi.RegisterTemplatePreview(mux, config.Registry)
 	if config.Store != nil {
 		httpapi.RegisterScanFiles(mux, config.Store)
+		httpapi.RegisterScanReport(mux, config.Store,
+			report.New(report.Options{SourceDir: config.ReportSourceDir}))
 	}
 
 	// The interface claims "/", so it is the fallback for everything the API did

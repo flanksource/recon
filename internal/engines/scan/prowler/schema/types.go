@@ -93,6 +93,13 @@ type ProviderSchema struct {
 	CredentialComponentRef string `json:"-"`
 }
 
+type BuiltInProfile struct {
+	Name         string `json:"name"`
+	Comment      string `json:"comment"`
+	Provider     string `json:"provider"`
+	ComplianceID string `json:"complianceId"`
+}
+
 func (p *ProviderSchema) complete() {
 	if p.ComponentName == "" {
 		p.ComponentName = "Prowler" + componentToken(p.Title)
@@ -130,6 +137,8 @@ type Manifest struct {
 	SourceCommit           string            `json:"sourceCommit"`
 	ProviderCount          int               `json:"providerCount"`
 	Providers              []string          `json:"providers"`
+	ProfileProjectionCount int               `json:"profileProjectionCount"`
+	BuiltInProfiles        []BuiltInProfile  `json:"builtInProfiles"`
 	CommonArgumentCount    int               `json:"commonArgumentCount"`
 	ProviderArgumentCounts map[string]int    `json:"providerArgumentCounts,omitempty"`
 	SourceDigest           string            `json:"sourceDigest"`
@@ -154,6 +163,21 @@ func (r *Registry) Provider(id string) (ProviderSchema, bool) {
 
 func (r *Registry) ProviderSchemas() []ProviderSchema {
 	return append([]ProviderSchema(nil), r.ordered...)
+}
+
+func (r *Registry) BuiltInProfiles() []engines.DefaultProfile {
+	profiles := make([]engines.DefaultProfile, 0, len(r.Manifest.BuiltInProfiles))
+	for _, profile := range r.Manifest.BuiltInProfiles {
+		profiles = append(profiles, engines.DefaultProfile{
+			Name:    profile.Name,
+			Comment: profile.Comment,
+			Config: map[string]any{
+				"provider":   profile.Provider,
+				"compliance": []any{profile.ComplianceID},
+			},
+		})
+	}
+	return profiles
 }
 
 func (r *Registry) OpenAPIComponents() map[string]JSONSchema {

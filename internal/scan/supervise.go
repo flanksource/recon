@@ -11,6 +11,7 @@ import (
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
 	"github.com/flanksource/recon/internal/models"
+	"github.com/flanksource/recon/internal/mute"
 	"github.com/flanksource/recon/internal/store"
 )
 
@@ -41,7 +42,19 @@ func (r *Runtime) supervise(
 	stopProgress()
 	run.Output.Flush()
 
-	findings := run.session.Findings()
+	// Applied here, over the whole slice, rather than in the sink: the sink is
+	// the engine's hot path — nuclei calls it from its worker pool for every
+	// match — and its contract is that an error aborts the run, so a mistyped
+	// expression would kill a scan halfway through. Applied before the counts
+	// below, so a muted finding is absent from every one of them.
+	muted := mute.Apply(run.pushdown.Deferred(run.mutes), run.session.Findings())
+	findings := muted.Kept
+	run.Output.Append(StreamSystem, muted.Summary(run.mutes)+"\n")
+	for name, reason := range muted.Errors {
+		run.Output.Append(StreamSystem,
+			fmt.Sprintf("[!] mute rule %s was not applied: %s\n", name, reason))
+	}
+
 	captured := retainedScanOutput(run.session.OutputSnapshot())
 
 	r.mu.Lock()
@@ -49,6 +62,7 @@ func (r *Runtime) supervise(
 	run.Scan.FinishedAt = finished.Format("2006-01-02T15:04:05")
 	run.Scan.DurationMS = finished.Sub(row.StartedAt).Milliseconds()
 	run.Scan.Findings = len(findings)
+	run.Scan.Muted = muted.Muted
 	run.Scan.Severities = api.SeverityCounts(findings)
 	run.Scan.Hosts = hostsOf(findings)
 	run.Scan.Stats = run.Output.Snapshot().Stats
@@ -86,6 +100,7 @@ func (r *Runtime) supervise(
 	row.ExitCode = &exitCode
 	row.Command = run.Scan.Command
 	row.Severities = models.Wrap(&run.Scan.Severities)
+	row.Muted = run.Scan.Muted
 	row.Stats = models.Wrap(run.Scan.Stats)
 	row.ResultPath = &run.artifacts.Dir
 	if run.Scan.Error != "" {
@@ -95,7 +110,7 @@ func (r *Runtime) supervise(
 	// The engine wrote its own findings file as it went; these are what recon
 	// knows that the engine does not. Written before the database so a
 	// terminal run's directory is complete whether or not the write below is.
-	if err := run.retainArtifacts(captured); err != nil {
+	if err := run.retainArtifacts(captured, muteRecord(run.mutes, run.pushdown, muted)); err != nil {
 		run.Scan.Phase = api.PhaseFailed
 		// Appended rather than assigned: a run that both failed and could not
 		// write its evidence has two problems, and the engine's own error is
@@ -128,12 +143,20 @@ func (r *Runtime) supervise(
 // The log is stored as a file rather than only in the database because the
 // directory has to stand on its own: someone reading `results/` a month later
 // should not need Postgres running to find out what the scan said.
-func (r *Run) retainArtifacts(captured models.ScanOutput) error {
+func (r *Run) retainArtifacts(captured models.ScanOutput, mutes MuteRecord) error {
 	log := captured.Stdout
 	if captured.Stderr != "" {
 		log += captured.Stderr
 	}
 	if err := r.artifacts.WriteFile(LogFile, []byte(log)); err != nil {
+		return fmt.Errorf("retain scan artifacts: %w", err)
+	}
+
+	// Written whether or not anything was muted, and written here because a
+	// muted finding is not recorded anywhere else: the engine's own findings
+	// file still holds every line it produced, and this is what says which of
+	// those lines the database does not have and which rule removed them.
+	if err := r.artifacts.WriteJSON(MutesFile, mutes); err != nil {
 		return fmt.Errorf("retain scan artifacts: %w", err)
 	}
 

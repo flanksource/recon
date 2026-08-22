@@ -206,6 +206,20 @@ func (r *Registry) findingFilters() []clicky.Filter[store.FindingOpts] {
 	}
 }
 
+// muteFilters narrow the stored rules.
+//
+// The template vocabulary comes from the findings that have actually been
+// recorded rather than from the engines' catalogues: a rule is nearly always
+// written in response to something a run reported, so the checks worth offering
+// are the ones that have fired.
+func (r *Registry) muteFilters() []clicky.Filter[store.MuteOpts] {
+	return []clicky.Filter[store.MuteOpts]{
+		filter[store.MuteOpts]{key: "engine", label: "Engine", values: engineNames(api.KindScan)},
+		filter[store.MuteOpts]{key: "severity", label: "Severity", values: fixed(severityNames()...)},
+		filter[store.MuteOpts]{key: "template", label: "Template", values: r.vocabulary(store.FindingTemplates)},
+	}
+}
+
 func (r *Registry) profileFilters() []clicky.Filter[store.ProfileOpts] {
 	return []clicky.Filter[store.ProfileOpts]{
 		filter[store.ProfileOpts]{key: "kind", label: "Kind", values: fixed(api.Kinds()...)},

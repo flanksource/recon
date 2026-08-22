@@ -6,11 +6,13 @@ backend: claude-agent
 effort: high
 setup:
   cwd: .
-  checkout:
-    url: https://github.com/aquasecurity/trivy
-    ref: "{{#if ref}}{{ref}}{{else}}v0.74.0{{/if}}"
-    path: "{{#if source}}{{source}}{{else}}.tmp/trivy-src{{/if}}"
-    depth: 1
+  # No `checkout:` block. commons-db resolves Checkout.Ref as a branch only
+  # (shell/setup.go sets Branch: c.Ref, and connection/git.go wraps it in
+  # plumbing.NewBranchReferenceName), so a release tag like v0.74.0 becomes
+  # refs/heads/v0.74.0, never resolves, and go-git spins until the run context
+  # expires — reported as "error during git clone: context deadline exceeded".
+  # Step 0 of the task clones with real git instead: tag-capable and far faster
+  # than go-git on a repository this size.
 permissions:
   mode: acceptEdits
   presets:
@@ -25,6 +27,11 @@ permissions:
       - Bash
 budget:
   maxTurns: 80
+  # Bounds the whole run, the step 0 clone included: cloning trivy and reading
+  # pkg/flag comfortably exceeds the 120s request default. This is the only
+  # timeout the spec has — runContext in captain's pkg/cli/ai.go applies it to
+  # the context that setup and the agent turns both run under.
+  timeout: 10m
 input:
   schema:
     type: object
@@ -65,6 +72,27 @@ Two rules override everything else:
 {{role "user"}}
 Regenerate recon's trivy option schemas from the trivy checkout at `{{source}}`
 (pinned to `{{ref}}`) and write them to `{{out}}`.
+
+## 0. Ensure the trivy checkout exists, at the right tag
+
+Before reading anything, make sure `{{source}}` is a trivy checkout at `{{ref}}`.
+
+If the directory does not exist, clone it:
+
+    git clone --depth 1 --branch {{ref}} https://github.com/aquasecurity/trivy {{source}}
+
+If it already exists, confirm it is at the right tag and fetch it if not:
+
+    git -C {{source}} describe --tags --exact-match
+
+Use real `git`, not any built-in checkout helper: `{{ref}}` is a release tag, and
+the setup-level checkout resolves refs as branches only, so it cannot reach a
+tag at all.
+
+Stop and report if the clone fails. Do not fall back to a different ref, and do
+not scan a tree whose tag you could not confirm — a schema generated from an
+unknown trivy revision is worse than no schema, because nothing downstream will
+say which version it describes.
 
 ## 1. Read the flag model
 

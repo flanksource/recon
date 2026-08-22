@@ -32,6 +32,7 @@ type Scan struct {
 
 	Stats      JSON[api.ScanStats]  `gorm:"column:stats;type:jsonb"`
 	Severities JSON[map[string]int] `gorm:"column:severities;type:jsonb"`
+	Muted      int                  `gorm:"column:muted"`
 	ResultPath *string              `gorm:"column:result_path"`
 
 	CreatedAt time.Time `gorm:"column:created_at;<-:create"`
@@ -74,6 +75,7 @@ func (s Scan) Document(findings int, hosts []string, label string) api.Scan {
 		ExitCode:      s.ExitCode,
 		Error:         deref(s.Error),
 		Findings:      findings,
+		Muted:         s.Muted,
 		Severities:    s.Severities.Get(),
 		Stats:         s.Stats.V,
 		Hosts:         hosts,

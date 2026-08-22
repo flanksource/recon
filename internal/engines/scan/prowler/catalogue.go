@@ -23,14 +23,10 @@ func (e Engine) Templates() ([]api.Template, error) {
 }
 
 func (e Engine) Corpus() api.EngineTemplates {
-	loaded, err := e.metadataCatalogue()
-	if err != nil {
-		return api.EngineTemplates{Problem: err.Error()}
-	}
 	return api.EngineTemplates{
-		Version:      loaded.Manifest.Version,
-		Count:        len(loaded.Checks),
-		Path:         "embedded:prowler/catalog.generated.gz.hex",
+		Version:      catalog.ExpectedManifest.Version,
+		Count:        catalog.ExpectedManifest.CheckCount,
+		Path:         "embedded:prowler/catalog.generated.json.xz",
 		ItemLabel:    "check",
 		ProfileLabel: "compliance framework",
 	}
@@ -85,7 +81,11 @@ func (e Engine) selectChecks(config map[string]any) ([]catalog.Check, []string, 
 		return nil, nil, err
 	}
 	excludedServices := valueSet(stringValues(config["excluded-services"]))
-	severities := lowerSet(stringValues(config["severity"]))
+	// severities, not severity: the profile schema names this option after what
+	// it holds, and "severity" is only Prowler's argparse destination. Reading
+	// the destination here matched nothing, so the preview reported every check
+	// a profile selected as if the severity filter were unset.
+	severities := lowerSet(stringValues(config["severities"]))
 	filtered := selected[:0]
 	for _, check := range selected {
 		if excludedChecks[check.ID] || excludedServices[check.Service] {

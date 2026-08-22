@@ -81,6 +81,16 @@ table "scans" {
     default = sql("'{}'::jsonb")
     comment = "per-severity counts, denormalised for the runs list"
   }
+  // Findings a mute rule removed after the engine reported them. Recorded
+  // because the rows themselves are not: without a count, a muted run is
+  // indistinguishable from a clean one. Checks a rule stopped from running are
+  // not counted here — they produced nothing to count — and mutes.json in the
+  // run's artifact directory says which rules those were.
+  column "muted" {
+    null    = false
+    type    = integer
+    default = 0
+  }
   column "result_path" {
     null    = true
     type    = text

@@ -17,7 +17,7 @@ const defaultProfileName = "gcp-cis-5-0-gcp"
 // Engine executes Prowler once for each provider context selected by a run.
 type Engine struct {
 	arguments *arguments.Catalogue
-	catalogue *catalog.Catalog
+	catalogue func() (*catalog.Catalog, error)
 	spec      engines.Spec
 }
 
@@ -35,7 +35,7 @@ func newEngine() (Engine, error) {
 	if catalog.ProwlerVersion != schema.ProwlerVersion || catalog.PinnedCommit != schema.PinnedCommit {
 		return Engine{}, fmt.Errorf("prowler generated schema and catalogue source do not match")
 	}
-	metadata, err := catalog.Embedded()
+	registry, err := schema.Embedded()
 	if err != nil {
 		return Engine{}, err
 	}
@@ -43,15 +43,15 @@ func newEngine() (Engine, error) {
 	if err != nil {
 		return Engine{}, err
 	}
-	options, err := schema.OptionCatalog()
+	options := registry.OptionCatalog()
+	defaults, profiles, err := builtInProfiles(registry.BuiltInProfiles())
 	if err != nil {
 		return Engine{}, err
 	}
-	defaults, profiles, err := builtInProfiles(metadata)
-	if err != nil {
-		return Engine{}, err
+	engine := Engine{
+		arguments: argumentCatalogue,
+		catalogue: catalog.Embedded,
 	}
-	engine := Engine{arguments: argumentCatalogue, catalogue: metadata}
 	engine.spec = engines.Spec{
 		Name:                EngineName,
 		Subject:             engines.SubjectProviderContexts,
@@ -77,8 +77,7 @@ func newEngine() (Engine, error) {
 	return engine, nil
 }
 
-func builtInProfiles(metadata *catalog.Catalog) (engines.DefaultProfile, []engines.DefaultProfile, error) {
-	generated := metadata.BuiltInProfiles()
+func builtInProfiles(generated []engines.DefaultProfile) (engines.DefaultProfile, []engines.DefaultProfile, error) {
 	profiles := make([]engines.DefaultProfile, 0, len(generated)-1)
 	var defaults engines.DefaultProfile
 	for _, profile := range generated {
@@ -123,5 +122,5 @@ func (e Engine) metadataCatalogue() (*catalog.Catalog, error) {
 	if e.catalogue == nil {
 		return nil, fmt.Errorf("prowler metadata catalogue is not loaded")
 	}
-	return e.catalogue, nil
+	return e.catalogue()
 }

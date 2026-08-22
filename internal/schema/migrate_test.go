@@ -55,7 +55,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 
 		Expect(tables).To(ConsistOf(
 			"discoveries", "discovery_hosts",
-			"engine_profiles", "findings", "probe_results", "probes",
+			"engine_profiles", "findings", "mute_rules", "probe_results", "probes",
 			"scan_outputs", "scans", "targets", "zones",
 		))
 	})

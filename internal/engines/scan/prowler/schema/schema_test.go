@@ -27,6 +27,15 @@ var _ = Describe("generated Prowler provider schemas", func() {
 		options := registry.OptionCatalog()
 		Expect(options.Variants).To(HaveLen(23))
 		Expect(options.Validate()).To(Succeed())
+		profiles := registry.BuiltInProfiles()
+		Expect(profiles).To(HaveLen(141))
+		Expect(profiles).To(ContainElement(engines.DefaultProfile{
+			Name:    "gcp-cis-5-0-gcp",
+			Comment: "CIS Google Cloud Platform Foundation Benchmark v5.0.0 5.0",
+			Config: map[string]any{
+				"provider": "gcp", "compliance": []any{"cis_5.0_gcp"},
+			},
+		}))
 
 		components, err := schema.OpenAPIComponents()
 		Expect(err).NotTo(HaveOccurred())

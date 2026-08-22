@@ -28,8 +28,8 @@ var _ = Describe("scan API", func() {
 			"selector":{"hosts":["api.example.test"]},"selectorLabel":"host api.example.test","endpointCount":3,
 			"phase":"failed","startedAt":"2026-08-10T12:00:00","finishedAt":"2026-08-10T12:00:02","durationMs":2500,
 			"command":["/opt/recon/bin/nuclei","-target","api.example.test"],"exitCode":2,"error":"engine exited 2",
-			"findings":1,"severities":{"high":1},
-			"stats":{"requests":40,"total":60,"percent":66.7,"rps":12.3,"matched":1,"errors":2,"hosts":3,"templates":18,"duration":"2s"},
+			"findings":1,"muted":0,"severities":{"high":1},
+			"stats":{"requests":40,"total":60,"percent":66.7,"rps":12.3,"matched":1,"errors":2,"hosts":3,"templates":18,"duration":"2s","passed":0},
 			"hosts":["api.example.test"],"resultPath":"findings.jsonl","outputCaptured":true,
 			"stdout":"scan output\n","stderr":"one warning\n","stdoutTruncated":true
 		}`))

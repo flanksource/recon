@@ -14,6 +14,19 @@ type ScanStats struct {
 	Templates float64 `json:"templates"`
 	Duration  string  `json:"duration,omitempty"`
 
+	// Passed is the checks that ran and reported no problem. Only compliance
+	// engines count it: a benchmark control and a Prowler check each have a
+	// verdict, so "142 of 150 passed" is a fact about the run. A network scanner
+	// has no such verdict — a template that matched nothing did not "pass" — and
+	// leaves this zero rather than inventing one. Report it as coverage only
+	// where PassRecorded says it was counted.
+	Passed float64 `json:"passed"`
+
+	// PassRecorded distinguishes "nothing passed" from "nobody counted", which
+	// Passed alone cannot: both are zero, and reporting a 0% pass rate for an
+	// engine that never had a verdict to report is the misleading one.
+	PassRecorded bool `json:"passRecorded,omitempty"`
+
 	// HTTP is what the traffic itself looked like, when the engine reports its
 	// requests individually. Absent rather than zeroed for an engine that does
 	// not, so the UI can tell "nothing was sent" from "nobody counted".

@@ -45,6 +45,15 @@ const (
 
 	// LogFile is the engine's log output, as far back as the buffer kept it.
 	LogFile = "output.log"
+
+	// MutesFile is what the run's mute rules removed.
+	//
+	// A muted finding is not written to the database, so this is the only
+	// surviving record of it — and it is why the record addresses the lines of
+	// FindingsFile rather than rows: the engine wrote its own output before
+	// anything was muted, so the two files together say exactly what was
+	// dropped and by which rule, without a database.
+	MutesFile = "mutes.json"
 )
 
 // NewArtifacts creates the directory for one run.

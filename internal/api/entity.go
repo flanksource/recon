@@ -60,6 +60,13 @@ func (f Finding) GetID() string { return f.ScanID + "#" + strconv.Itoa(f.LineNo)
 // shows.
 func (f Finding) GetName() string { return f.Name }
 
+// GetID returns the rule's name, which is what mutes.json cites and what a
+// person types.
+func (m MuteRule) GetID() string { return m.Name }
+
+// GetName returns the rule's name.
+func (m MuteRule) GetName() string { return m.Name }
+
 // Zone is a DNS zone discovery enumerates. Zones are configured rather than
 // discovered — they are what a sweep starts from, so there is nothing to infer
 // them from.

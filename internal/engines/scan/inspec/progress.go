@@ -48,6 +48,11 @@ func (p *progress) account(counts Counts, findings int) {
 	p.stats.Requests += float64(counts.Passed + counts.Failed + counts.Skipped + counts.Errored)
 	p.stats.Matched += float64(findings)
 	p.stats.Errors += float64(counts.Errored)
+	// Every assertion in a benchmark has a verdict, so the passes are counted
+	// rather than inferred — an account whose controls all failed still reports
+	// that a count was taken.
+	p.stats.Passed += float64(counts.Passed)
+	p.stats.PassRecorded = true
 	p.stats.Templates = float64(p.controls)
 	p.stats.Total = float64(p.total)
 	p.stats.Percent = float64(p.done_) / float64(p.total) * 100

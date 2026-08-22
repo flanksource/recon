@@ -76,7 +76,9 @@ func (e Engine) scanContext(
 	aggregate *aggregate,
 ) error {
 	report := filepath.Join(run.WorkDir, ReportFile(subject.ID))
-	argv, err := entry.argv(profile, subject.Arguments, report)
+	argv, err := entry.argv(profile, subject.Arguments, runnerOptions{
+		Report: report, IgnoreFile: run.Mutes,
+	})
 	if err != nil {
 		return fmt.Errorf("provider context %s: %w", subject.ID, err)
 	}
@@ -135,8 +137,10 @@ func (e Engine) Command(run engines.Run) []string {
 	if err != nil {
 		return []string{bin, "<invalid trivy command>"}
 	}
-	argv, err := entry.argv(profile, contexts[0].Arguments,
-		filepath.Join(run.WorkDir, ReportFile(contexts[0].ID)))
+	argv, err := entry.argv(profile, contexts[0].Arguments, runnerOptions{
+		Report:     filepath.Join(run.WorkDir, ReportFile(contexts[0].ID)),
+		IgnoreFile: run.Mutes,
+	})
 	if err != nil {
 		return []string{bin, "<invalid trivy command>"}
 	}
@@ -205,7 +209,7 @@ func contextsForRun(subjects []engines.ProviderContext, entry provider) ([]engin
 // Order is subcommand, then the profile's flags, then the context's, then
 // recon's own, then the positional subject. Deterministic within each group so
 // a recorded command is diffable rather than reordering per run.
-func (p provider) argv(profile, arguments map[string]any, report string) ([]string, error) {
+func (p provider) argv(profile, arguments map[string]any, runner runnerOptions) ([]string, error) {
 	subject, err := p.subject(arguments)
 	if err != nil {
 		return nil, err
@@ -224,8 +228,22 @@ func (p provider) argv(profile, arguments map[string]any, report string) ([]stri
 	argv = append(argv, flags(scope)...)
 
 	argv = append(argv, runnerFlags...)
-	argv = append(argv, "--output", report)
+	argv = append(argv, "--output", runner.Report)
+	// After the profile's flags and never from it: a profile that could name an
+	// ignore file could name any file. recon owns this one and writes it into
+	// the run's own directory.
+	if runner.IgnoreFile != "" {
+		argv = append(argv, "--ignorefile", runner.IgnoreFile)
+	}
 	return append(argv, subject), nil
+}
+
+// runnerOptions are the parts of an invocation recon owns rather than the
+// profile: where the machine-readable report goes, and the exclusion list the
+// run's mute rules produced.
+type runnerOptions struct {
+	Report     string
+	IgnoreFile string
 }
 
 // subject reads the positional argument out of the context.

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	catalogArtifactPath = "internal/engines/scan/prowler/catalog/catalog.generated.gz.hex"
+	catalogArtifactPath = "internal/engines/scan/prowler/catalog/catalog.generated.json.xz"
 	schemaArtifactRoot  = "internal/engines/scan/prowler/schema"
 )
 
@@ -38,6 +38,8 @@ func buildArtifacts(argumentCatalog *arguments.Catalogue, checkCatalog *catalog.
 		Version:                schema.ProwlerVersion,
 		SourceCommit:           schema.PinnedCommit,
 		ProviderCount:          len(argumentCatalog.Providers),
+		ProfileProjectionCount: len(checkCatalog.Profiles),
+		BuiltInProfiles:        projectBuiltInProfiles(checkCatalog),
 		CommonArgumentCount:    len(argumentCatalog.Common),
 		ProviderArgumentCounts: map[string]int{},
 		SourceDigest:           hex.EncodeToString(sourceHash.Sum(nil)),
@@ -74,6 +76,19 @@ func buildArtifacts(argumentCatalog *arguments.Catalogue, checkCatalog *catalog.
 	}
 	artifacts[filepath.ToSlash(filepath.Join(schemaArtifactRoot, "manifest.generated.json"))] = manifestData
 	return artifacts, nil
+}
+
+func projectBuiltInProfiles(checkCatalog *catalog.Catalog) []schema.BuiltInProfile {
+	profiles := make([]schema.BuiltInProfile, 0, len(checkCatalog.Profiles))
+	for _, profile := range checkCatalog.Profiles {
+		profiles = append(profiles, schema.BuiltInProfile{
+			Name:         profile.Name,
+			Comment:      strings.TrimSpace(profile.Title + " " + profile.Version),
+			Provider:     profile.Provider,
+			ComplianceID: profile.ComplianceID,
+		})
+	}
+	return profiles
 }
 
 func marshalGenerated(value any) ([]byte, error) {

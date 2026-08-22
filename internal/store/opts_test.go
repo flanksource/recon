@@ -326,6 +326,30 @@ var _ = Describe("stored target selectors", func() {
 		_, err := store.TargetOptsFrom(map[string]any{"ports": "not-a-list"})
 		Expect(err).To(MatchError(ContainSubstring("decode stored target selector")))
 	})
+
+	// A misspelled key used to decode to an empty selector, and an empty
+	// selector is every target. For a mute rule that inverts the meaning of the
+	// scope: "only this one host" silently becomes "the whole inventory", and
+	// nothing in the result says so. The near-miss is the realistic case,
+	// because the flag is `--id` while the stored field is `ids`.
+	It("rejects a key the selector does not define rather than ignoring it", func() {
+		_, err := store.TargetOptsFrom(map[string]any{"id": []string{"t-1"}})
+		Expect(err).To(MatchError(ContainSubstring(`unknown field "id"`)))
+	})
+
+	It("accepts every key the selector does define", func() {
+		opts, err := store.TargetOptsFrom(map[string]any{
+			"ids": []string{"t-1"}, "kind": []string{"host"}, "provider": []string{"aws"},
+			"class": []string{"non-prod"}, "tags": []string{"env=dev"},
+			"profiles": []string{"web"}, "hosts": []string{"a.example.test"},
+			"ports": []int{443}, "status": []int{200}, "selector": "env=dev",
+			"lastSeen": "168h", "live": true, "failure": []string{"dns"},
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(opts.IDs).To(Equal([]string{"t-1"}))
+		Expect(opts.Ports).To(Equal([]int{443}))
+		Expect(opts.Live).To(BeTrue())
+	})
 })
 
 var _ = Describe("Kubernetes tag selectors", func() {

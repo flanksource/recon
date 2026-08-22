@@ -1,7 +1,7 @@
 package catalog_test
 
 import (
-	"encoding/hex"
+	"sync"
 	"testing/fstest"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -16,6 +16,27 @@ var _ = Describe("Prowler catalogue", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(loaded.ValidatePinned()).To(Succeed())
 		Expect(loaded.Manifest.Digest).NotTo(BeEmpty())
+	})
+
+	It("loads the embedded catalogue once for concurrent callers", func() {
+		const callerCount = 8
+		loaded := make([]*catalog.Catalog, callerCount)
+		errors := make([]error, callerCount)
+		var callers sync.WaitGroup
+		callers.Add(callerCount)
+		for index := range callerCount {
+			go func() {
+				defer GinkgoRecover()
+				defer callers.Done()
+				loaded[index], errors[index] = catalog.Embedded()
+			}()
+		}
+		callers.Wait()
+
+		Expect(errors).To(ConsistOf(make([]error, callerCount)))
+		for index := 1; index < callerCount; index++ {
+			Expect(loaded[index]).To(BeIdenticalTo(loaded[0]))
+		}
 	})
 
 	It("matches the pinned upstream corpus", func() {
@@ -136,9 +157,7 @@ var _ = Describe("Prowler catalogue", func() {
 	It("round trips the compact artifact and detects manifest drift", func() {
 		artifact, manifest, err := catalog.GenerateFS(upstreamFixture())
 		Expect(err).NotTo(HaveOccurred())
-		compressed, err := hex.DecodeString(string(artifact))
-		Expect(err).NotTo(HaveOccurred())
-		Expect(compressed[:2]).To(Equal([]byte{0x1f, 0x8b}))
+		Expect(artifact[:6]).To(Equal([]byte{0xfd, '7', 'z', 'X', 'Z', 0x00}))
 		second, _, err := catalog.GenerateFS(upstreamFixture())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(second).To(Equal(artifact))

@@ -342,6 +342,34 @@ func ProfileFrom(body map[string]any) (Profile, error) {
 	return profile, nil
 }
 
+// MuteRuleFrom decodes a mute rule from a request body.
+//
+// targets arrives either as an object — a JSON body posted directly — or as a
+// JSON string, which is what a flag carries and therefore what both the CLI
+// (`targets '{"class":["non-prod"]}'`) and the HTTP executor produce. Same
+// arrangement as a profile's config, for the same reason.
+func MuteRuleFrom(body map[string]any) (MuteRule, error) {
+	if value, present := body["targets"]; present {
+		decoded, err := objectFrom(value, "targets")
+		if err != nil {
+			return MuteRule{}, err
+		}
+		// Copy rather than mutate: the caller's body is not ours to rewrite.
+		replaced := make(map[string]any, len(body))
+		for key, existing := range body {
+			replaced[key] = existing
+		}
+		replaced["targets"] = decoded
+		body = replaced
+	}
+
+	var rule MuteRule
+	if err := decode(body, &rule); err != nil {
+		return MuteRule{}, err
+	}
+	return rule, nil
+}
+
 func decodeConfig(encoded string) (map[string]any, error) {
 	if strings.TrimSpace(encoded) == "" {
 		return map[string]any{}, nil

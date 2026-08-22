@@ -206,6 +206,7 @@ func updateScan(db *gorm.DB, scan models.Scan) error {
 		"command":        scan.Command,
 		"stats":          scan.Stats,
 		"severities":     scan.Severities,
+		"muted":          scan.Muted,
 		"result_path":    scan.ResultPath,
 		"engine_version": scan.EngineVersion,
 		"endpoint_count": scan.EndpointCount,
@@ -338,11 +339,26 @@ func saveFindings(db *gorm.DB, scanID string, findings []api.Finding) error {
 	}
 
 	rows := make([]models.Finding, 0, len(findings))
-	for i, finding := range findings {
+	for _, finding := range findings {
+		// Loudly, because the alternative is silent: unnumbered findings would
+		// all claim line 0 and collide on findings_scan_line_key, and whichever
+		// one won would be the run's only recorded result.
+		if finding.LineNo <= 0 {
+			return fmt.Errorf(
+				"save findings for %s: %q has no line number; a finding is addressed by the line it "+
+					"occupied in the engine's own output, and the caller assigns it",
+				scanID, finding.TemplateID)
+		}
 		if finding.TargetID == "" {
 			finding.TargetID = finding.Host
 		}
-		rows = append(rows, models.FindingFrom(scanID, i+1, finding))
+		// The caller's line number, not this loop's index. line_no is the line
+		// of the engine's own findings file, and a run whose mute rules removed
+		// some findings keeps the survivors on the lines they came from — so
+		// the artifact and the database still address the same evidence, with
+		// gaps where a rule dropped something. Renumbering here would silently
+		// break that correspondence for exactly the runs that need it.
+		rows = append(rows, models.FindingFrom(scanID, finding.LineNo, finding))
 	}
 	// Batched: a broad scan can produce tens of thousands of findings, and one
 	// statement per row would dominate the run's wall clock.

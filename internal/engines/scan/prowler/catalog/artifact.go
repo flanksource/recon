@@ -2,14 +2,17 @@ package catalog
 
 import (
 	"bytes"
-	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/ulikunitz/xz"
 )
+
+const xzDictionarySize = 8 * 1024 * 1024
 
 func Generate(source string) ([]byte, Manifest, error) {
 	loaded, err := Load(source)
@@ -35,7 +38,9 @@ func Marshal(loaded *Catalog) ([]byte, error) {
 		return nil, fmt.Errorf("marshal prowler catalogue: %w", err)
 	}
 	var compressed bytes.Buffer
-	writer, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+	writer, err := (xz.WriterConfig{
+		DictCap: xzDictionarySize,
+	}).NewWriter(&compressed)
 	if err != nil {
 		return nil, fmt.Errorf("compress prowler catalogue: %w", err)
 	}
@@ -45,26 +50,19 @@ func Marshal(loaded *Catalog) ([]byte, error) {
 	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("compress prowler catalogue: %w", err)
 	}
-	encoded := make([]byte, hex.EncodedLen(compressed.Len()))
-	hex.Encode(encoded, compressed.Bytes())
-	return encoded, nil
+	return compressed.Bytes(), nil
 }
 
 func Unmarshal(data []byte) (*Catalog, error) {
-	compressed := make([]byte, hex.DecodedLen(len(data)))
-	decoded, err := hex.Decode(compressed, data)
-	if err != nil {
-		return nil, fmt.Errorf("decode prowler catalogue: %w", err)
-	}
-	reader, err := gzip.NewReader(bytes.NewReader(compressed[:decoded]))
+	reader, err := (xz.ReaderConfig{
+		DictCap:      xzDictionarySize,
+		SingleStream: true,
+	}).NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decompress prowler catalogue: %w", err)
 	}
 	uncompressed, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, fmt.Errorf("decompress prowler catalogue: %w", err)
-	}
-	if err := reader.Close(); err != nil {
 		return nil, fmt.Errorf("decompress prowler catalogue: %w", err)
 	}
 	var loaded Catalog

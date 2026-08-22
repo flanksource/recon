@@ -77,12 +77,6 @@ func (p Profile) Config() map[string]any {
 	}
 }
 
-type BuiltInProfile struct {
-	Name    string
-	Comment string
-	Config  map[string]any
-}
-
 type Control struct {
 	ID                 string              `json:"id"`
 	Name               string              `json:"name"`
@@ -165,18 +159,6 @@ func (c *Catalog) ChecksForProfile(provider, complianceID string) ([]Check, erro
 		checks = append(checks, c.Checks[c.checksByKey[key]])
 	}
 	return checks, nil
-}
-
-func (c *Catalog) BuiltInProfiles() []BuiltInProfile {
-	profiles := make([]BuiltInProfile, 0, len(c.Profiles))
-	for _, profile := range c.Profiles {
-		profiles = append(profiles, BuiltInProfile{
-			Name:    profile.Name,
-			Comment: strings.TrimSpace(profile.Title + " " + profile.Version),
-			Config:  profile.Config(),
-		})
-	}
-	return profiles
 }
 
 func (c *Catalog) ProviderIDs() []string {

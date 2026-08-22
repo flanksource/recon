@@ -450,6 +450,7 @@ var _ = Describe("the target store", Ordered, Label("db"), func() {
 			Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
 				Scan: run,
 				Findings: []api.Finding{{
+					LineNo:     1,
 					TemplateID: "tls-version", Name: "Deprecated TLS version",
 					Severity: api.SeverityHigh, Host: host,
 				}},

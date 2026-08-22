@@ -70,6 +70,7 @@ var _ = Describe("scan execution evidence", Ordered, Label("db"), func() {
 				StdoutTruncated: true, StderrTruncated: false,
 			},
 			Findings: []api.Finding{{
+				LineNo:     1,
 				TemplateID: "tls-version", Name: "Deprecated TLS version",
 				Severity: api.SeverityHigh, Host: "api.example.test",
 			}},
@@ -135,11 +136,11 @@ var _ = Describe("scan execution evidence", Ordered, Label("db"), func() {
 		Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
 			Scan: row,
 			Findings: []api.Finding{
-				{TemplateID: "tls-version", Host: "api.example.test",
+				{LineNo: 1, TemplateID: "tls-version", Host: "api.example.test",
 					Severity: api.SeverityHigh, Tags: []string{"tls", "ssl"}},
-				{TemplateID: "missing-headers", Host: "api.example.test",
+				{LineNo: 2, TemplateID: "missing-headers", Host: "api.example.test",
 					Severity: api.SeverityInfo, Tags: []string{"headers", "misconfig"}},
-				{TemplateID: "weak-cipher", Host: "api.example.test",
+				{LineNo: 3, TemplateID: "weak-cipher", Host: "api.example.test",
 					Severity: api.SeverityMedium, Tags: []string{"tls", "misconfig"}},
 			},
 		})).To(Succeed())
@@ -232,8 +233,8 @@ var _ = Describe("recording that a run covered a host", Ordered, Label("db"), fu
 		// A host that was named but is not in the inventory: it is skipped, not
 		// invented, which is the rule the probe runner already follows.
 		finalize("nuclei", at, []string{covered, quiet, "ghost.example.test"}, true, []api.Finding{
-			{TemplateID: "tls-version", Host: covered, Severity: api.SeverityHigh},
-			{TemplateID: "weak-cipher", Host: covered, Severity: api.SeverityMedium},
+			{LineNo: 1, TemplateID: "tls-version", Host: covered, Severity: api.SeverityHigh},
+			{LineNo: 2, TemplateID: "weak-cipher", Host: covered, Severity: api.SeverityMedium},
 		})
 
 		two := 2

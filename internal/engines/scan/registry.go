@@ -13,6 +13,7 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines"
+	"github.com/flanksource/recon/internal/mute"
 )
 
 // Engine tests endpoints and reports findings.
@@ -51,6 +52,50 @@ type Catalogue interface {
 	// "the templates are missing" is the answer an engine listing needs to show,
 	// not a reason to fail the listing.
 	Corpus() api.EngineTemplates
+}
+
+// PushdownRequest is what an engine is offered before a run starts.
+type PushdownRequest struct {
+	// Config is the effective configuration, modified in place. Appending to
+	// the engine's own exclusion options here — rather than translating them at
+	// execution time — is what keeps a preview, a rendered command line and the
+	// run itself reading the same thing.
+	Config map[string]any
+
+	// WorkDir is the run's scratch directory, for an engine whose exclusions
+	// live in a file rather than in a flag.
+	WorkDir string
+
+	// Rules are the rules in force, already narrowed to this engine.
+	Rules []mute.Rule
+}
+
+// Pushdown is what an engine took on.
+type Pushdown struct {
+	// Plan names the rules the engine will enforce itself. Everything absent
+	// from it is applied to the results instead.
+	Plan mute.Plan
+
+	// File is a generated input the engine needs on disk, empty when it
+	// expressed everything through configuration.
+	File string
+}
+
+// Muter is implemented by an engine that can decline to run a check.
+//
+// Optional, like Catalogue: an engine that cannot express an exclusion is not
+// asked, and its rules are applied to the results instead. Not implementing it
+// is the honest answer — a stub that accepted rules and quietly enforced none
+// would read as a capability.
+//
+// An engine takes on only what it can express exactly. Its exclusions are a
+// union while a rule's dimensions are an intersection, so a rule it cannot
+// express in one option must be left alone rather than approximated: an
+// approximation suppresses findings the rule does not cover, and since the
+// checks never run, nothing is left to notice. mute.Rule.Pushable applies that
+// test so every engine answers it the same way.
+type Muter interface {
+	Pushdown(PushdownRequest) (Pushdown, error)
 }
 
 // Sink receives everything a run produces.

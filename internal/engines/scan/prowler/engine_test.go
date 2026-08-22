@@ -1,6 +1,8 @@
 package prowler
 
 import (
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -32,6 +34,25 @@ var _ = Describe("the Prowler engine", func() {
 		corpus := engine.Corpus()
 		Expect(corpus.ItemLabel).To(Equal("check"))
 		Expect(corpus.ProfileLabel).To(Equal("compliance framework"))
+	})
+
+	It("does not load catalogue metadata for the spec or corpus summary", func() {
+		loads := 0
+		lazy := Engine{
+			arguments: engine.arguments,
+			spec:      engine.spec,
+			catalogue: func() (*catalog.Catalog, error) {
+				loads++
+				return catalog.Embedded()
+			},
+		}
+
+		Expect(lazy.Spec().Name).To(Equal(EngineName))
+		Expect(lazy.Corpus().Count).To(Equal(catalog.ExpectedManifest.CheckCount))
+		Expect(loads).To(BeZero())
+		_, err := lazy.Templates()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(loads).To(Equal(1))
 	})
 
 	It("adapts every generated compliance profile with GCP CIS 5.0 as the default", func() {
@@ -68,5 +89,32 @@ var _ = Describe("the Prowler engine", func() {
 		})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(selected).To(ConsistOf(HaveField("ID", "gcp/apikeys_key_exists")))
+	})
+
+	// The profile schema names this option `severities`; `severity` is only
+	// Prowler's argparse destination. Reading the destination matched nothing,
+	// so a filtered profile previewed as though it ran the whole service.
+	It("narrows a selection by the severities the profile asked for", func() {
+		service := map[string]any{"provider": "gcp", "services": []any{"apikeys"}}
+
+		all, err := engine.Select(service)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(all).ToNot(BeEmpty())
+
+		wanted := strings.ToLower(all[0].Severity)
+		expected := 0
+		for _, check := range all {
+			if strings.EqualFold(check.Severity, wanted) {
+				expected++
+			}
+		}
+		Expect(expected).To(BeNumerically("<", len(all)),
+			"the fixture needs a service carrying more than one severity")
+
+		filtered, err := engine.Select(map[string]any{
+			"provider": "gcp", "services": []any{"apikeys"}, "severities": []any{wanted},
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(filtered).To(HaveLen(expected))
 	})
 })
