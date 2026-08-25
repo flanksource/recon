@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/flanksource/recon/internal/engines/scan/prowler/arguments"
+	"github.com/flanksource/recon/internal/engines/scan/prowler/auth"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/catalog"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/schema"
 )
@@ -129,6 +130,11 @@ func projectProvider(options providerProjectionOptions) (schema.ProviderSchema, 
 			return schema.ProviderSchema{}, fmt.Errorf("provider %s argument %s has unknown owner %q", provider.Name, argument.Key, argument.Policy.Owner)
 		}
 	}
+	context = projectCredentialSettings(provider.Name, context)
+	mutexes := append(
+		append([]arguments.MutualExclusion(nil), provider.MutualExclusions...),
+		options.CommonMutexes...,
+	)
 
 	return schema.ProviderSchema{
 		Provider:      provider.Name,
@@ -137,21 +143,49 @@ func projectProvider(options providerProjectionOptions) (schema.ProviderSchema, 
 		SourceCommit:  schema.PinnedCommit,
 		ComponentName: "Prowler" + componentName(title),
 		CLI: buildObjectSchema(objectSchemaOptions{
-			Title:  title + " Prowler CLI arguments",
-			Fields: cli,
-			Mutexes: append(
-				append([]arguments.MutualExclusion(nil), provider.MutualExclusions...),
-				options.CommonMutexes...,
-			),
+			Title: title + " Prowler CLI arguments", Fields: cli, Mutexes: mutexes,
 		}),
+		// Both documents are offered every group and keep the ones whose keys
+		// they actually hold. Handing the profile only the common groups lost
+		// aws-mutex-2 (resource-tags / resource-arns), whose members are both
+		// profile-owned: the rule still fired at BuildArgv, but no schema
+		// reader could see it coming.
 		Profile: buildObjectSchema(objectSchemaOptions{
-			Title: title + " Prowler profile options", Fields: profile, Mutexes: options.CommonMutexes,
+			Title: title + " Prowler profile options", Fields: profile, Mutexes: mutexes,
 		}),
 		Context: buildObjectSchema(objectSchemaOptions{
-			Title: title + " Prowler context options", Fields: context, Mutexes: provider.MutualExclusions,
+			Title: title + " Prowler context options", Fields: context, Mutexes: mutexes,
 		}),
 		Credential: credential,
 	}, nil
+}
+
+func projectCredentialSettings(provider string, fields []projectedProperty) []projectedProperty {
+	policy, ok := auth.ForProvider(provider)
+	if !ok {
+		return fields
+	}
+	for _, setting := range policy.Settings {
+		found := false
+		for index := range fields {
+			if fields[index].key == setting.Key {
+				fields[index].property.ProwlerEnvironment = setting.Environment
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		fields = append(fields, projectedProperty{
+			key: setting.Key, group: "Credential settings", scope: provider,
+			property: schema.JSONSchema{
+				Type: "string", Title: setting.Title, Owner: string(arguments.OwnerContext),
+				ProwlerEnvironment: setting.Environment, ProwlerOrder: integerPointer(len(fields)),
+			},
+		})
+	}
+	return fields
 }
 
 func projectArgument(options argumentProjectionOptions) (schema.JSONSchema, error) {
@@ -263,7 +297,10 @@ func projectedMutexes(groups []arguments.MutualExclusion, properties map[string]
 			}
 		}
 		if len(keys) > 1 {
-			result = append(result, schema.MutualExclusion{Name: group.Name, Keys: keys, Required: group.Required && len(keys) == len(group.Keys)})
+			result = append(result, schema.MutualExclusion{
+				ID: group.Name, Title: group.Title, Keys: keys,
+				Required: group.Required && len(keys) == len(group.Keys),
+			})
 		}
 	}
 	return result

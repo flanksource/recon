@@ -8,6 +8,7 @@ import {
   saveProfile,
   startScan,
 } from "./api";
+import { overridePatch } from "./api-helpers";
 import { EngineConfigForm, sameConfig } from "./EngineConfigForm";
 import {
   DiscoveryProfiles,
@@ -168,7 +169,8 @@ export function ScanDialog({
   // for every target that scans with it on a schedule.
   const profileEdits = useMemo(() => {
     if (!runConfig || !selectedProfile) return undefined;
-    return sameConfig(runConfig, selectedProfile.config) ? undefined : runConfig;
+    if (sameConfig(runConfig, selectedProfile.config)) return undefined;
+    return overridePatch(selectedProfile.config, runConfig);
   }, [runConfig, selectedProfile]);
 
   // Previewed from the edited config when there is one, so tweaking a profile

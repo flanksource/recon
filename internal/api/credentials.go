@@ -106,15 +106,29 @@ func ProviderCredentialsFromStored(c *credentialstore.ProviderCredentials) *Prov
 	return out
 }
 
-// ValidateWrite rejects response-only sentinels and ambiguous EnvVars before
-// conversion to the commons-db runtime types.
+// ValidateWrite accepts configured markers on updates while rejecting
+// ambiguous EnvVars. The store resolves each marker against the locked row.
 func (c ProviderCredentials) ValidateWrite() error {
 	for _, value := range c.EnvVars {
-		if value.Configured {
-			return fmt.Errorf("credential %q configured is read-only", value.Name)
-		}
 		if value.Value != "" && value.ValueFrom != nil {
 			return fmt.Errorf("credential %q cannot set both value and valueFrom", value.Name)
+		}
+		if value.Configured && (value.Value != "" || value.ValueFrom != nil) {
+			return fmt.Errorf("credential %q configured marker cannot include value or valueFrom", value.Name)
+		}
+	}
+	return nil
+}
+
+// ValidateCreate rejects configured markers because no stored value exists to
+// preserve for a new target.
+func (c ProviderCredentials) ValidateCreate() error {
+	if err := c.ValidateWrite(); err != nil {
+		return err
+	}
+	for _, value := range c.EnvVars {
+		if value.Configured {
+			return fmt.Errorf("credential %q configured marker is not allowed when creating a target", value.Name)
 		}
 	}
 	return nil

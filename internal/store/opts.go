@@ -312,6 +312,58 @@ func tagPredicate(db *gorm.DB, column string, patterns []string) *gorm.DB {
 	return db
 }
 
+// scalarPredicate is tagPredicate's `!` grammar over a plain text column.
+//
+// Separate because the operators are not interchangeable: `&&` is array
+// overlap, and applying it to a text column raises "operator does not exist:
+// text && unknown" rather than matching nothing. The grammar has to be shared
+// even though the operator cannot be, because the browser decides whether to
+// render a filter as a tri-state control from the filter's key alone — so a
+// negatable key over a scalar column must still understand `!x`, or the control
+// sends an exclusion the server reads as a literal value.
+func scalarPredicate(db *gorm.DB, column string, patterns []string) *gorm.DB {
+	include, exclude := partitionTags(patterns)
+	if len(include) > 0 {
+		db = db.Where(column+" = ANY(?)", stringArray(include))
+	}
+	if len(exclude) > 0 {
+		db = db.Where("NOT ("+column+" = ANY(?))", stringArray(exclude))
+	}
+	return db
+}
+
+func labelPredicate(db *gorm.DB, column string, patterns []string) (*gorm.DB, error) {
+	include, exclude := partitionTags(patterns)
+	build := func(values []string) (string, []any, error) {
+		parts := make([]string, 0, len(values))
+		args := make([]any, 0, len(values))
+		for _, value := range values {
+			key, label, found := strings.Cut(value, ":")
+			if !found || key == "" {
+				return "", nil, fmt.Errorf("invalid label %q: expected key:value", value)
+			}
+			encoded, err := json.Marshal(map[string]string{key: label})
+			if err != nil {
+				return "", nil, fmt.Errorf("encode label %q: %w", value, err)
+			}
+			parts = append(parts, column+" @> CAST(? AS jsonb)")
+			args = append(args, string(encoded))
+		}
+		return strings.Join(parts, " OR "), args, nil
+	}
+	if clause, args, err := build(include); err != nil {
+		return nil, err
+	} else if clause != "" {
+		db = db.Where("("+clause+")", args...)
+	}
+	if clause, args, err := build(exclude); err != nil {
+		return nil, err
+	} else if clause != "" {
+		db = db.Where("NOT ("+clause+")", args...)
+	}
+	return db, nil
+}
+
 func partitionTags(patterns []string) (include, exclude []string) {
 	for _, pattern := range patterns {
 		if after, found := strings.CutPrefix(pattern, "!"); found {

@@ -102,6 +102,19 @@ var _ = Describe("deterministic Prowler argv", func() {
 		Expect(err).To(MatchError(ContainSubstring("selection accepts only one")))
 	})
 
+	// The group name is an ordinal over argparse's group list, so an error that
+	// only quotes it leaves the reader nothing to search for and no way to tell
+	// which two of six options collided.
+	It("names the group and the colliding arguments when a selection conflicts", func() {
+		catalogue.CommonMutualExclusions[0].Title = "Specify checks/services to run"
+
+		_, err := catalogue.BuildArgv("gcp", arguments.Inputs{Profile: map[string]any{
+			"checks": []string{"gcp_one"}, "compliance": []string{"cis_5.0_gcp"},
+		}})
+		Expect(err).To(MatchError(
+			"Specify checks/services to run accepts only one of checks, compliance: got checks, compliance"))
+	})
+
 	It("validates nargs, choices, and scalar types without coercion", func() {
 		_, err := catalogue.BuildArgv("gcp", arguments.Inputs{Profile: map[string]any{
 			"output-formats": "csv",

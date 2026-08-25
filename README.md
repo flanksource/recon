@@ -106,6 +106,64 @@ JSON document contains both curated definition fields and machine-owned `observe
 observations and creates conservative `unclassified` records for new targets; clean
 scans update `last_scan` and `last_findings` in the same document.
 
+## Resources
+
+A **resource** is one thing a scan examined — a bucket, a firewall rule, a container image,
+an endpoint — recorded whatever the verdict. That last part is the point: a Prowler report
+naming 190 check results describes 94 distinct resources, and only the ~40 that failed used
+to leave any trace. "Is this bucket clean?" had no answer, because a clean resource and one
+nobody had ever looked at were the same absence.
+
+Resources live on their own **Resources** tab and under `reconctl resource`:
+
+```bash
+reconctl resource list --provider gcp
+reconctl resource list --account flanksource-prod --service storage
+reconctl resource list --type '!*/Bucket'          # everything except buckets
+reconctl resource list --status unchecked          # nothing has reported a verdict
+reconctl resource get gcp/flanksource-prod/tailscale-router
+reconctl finding list --resource <id>              # the evidence behind one resource
+```
+
+A resource is identified by `(provider, account, uid)`. The account is in the key because a
+uid is not unique without it — `default` is a VPC in every project — and the type is *not*,
+because Prowler types the account's own pseudo-resources with whichever service each check
+belongs to, which would split one project into four rows.
+
+Resources are never deleted. When a run that covered the same account, checks and resource
+types no longer sees one, it is marked `absent` and the UI says **last seen**: whether it
+was decommissioned or whether an API call failed is a judgement recon cannot make.
+
+### Open and resolved
+
+Because passing checks are recorded, recon can say which findings a later run **fixed**.
+Two runs of the same profile 1h44m apart reported 65 failures and then 49 — sixteen problems
+genuinely resolved — and nothing in the findings themselves distinguished them.
+
+`finding_states` holds one row per (resource, engine, check) with its current status:
+
+| Status | Meaning |
+|---|---|
+| `open` | the check failed the last time it ran |
+| `resolved` | `passed` (it ran again and passed), `resource-absent`, or `not-reported` |
+| `muted` | a rule accepts it, naming the rule — so an accepted problem is visibly accepted rather than looking clean |
+| `manual` | the verdict is a human's to make |
+
+Only `passed` is a fact; the other two are inferences from a covering run's silence, and a
+run may only draw them when it **finished** and its engine **reports passes**. Prowler and
+InSpec do. nuclei and trivy do not — a template that matched nothing did not pass — so their
+findings stay open with an ageing `last seen` rather than quietly resolving. A cancelled or
+failed run resolves nothing from silence, but the passes it did record still count: cutting
+a run short truncates what it said, it does not falsify it.
+
+### Mission Control identity
+
+Each resource carries the identity Mission Control's catalog would hold the same thing
+under — `configType` (`GCP::Bucket`) and `externalIds` — generated from config-db's own
+conventions by `hack/gen-configdb-identity` with a `--check` drift mode. Recon only ever
+*resolves* against these; it never creates or pushes config items. Where a provider has no
+mapping the fields are empty and resolution falls back to the existing ladder.
+
 ## Compliance benchmarks
 
 Alongside the outside-in scanning, recon runs **CIS benchmarks against cloud
@@ -248,8 +306,9 @@ suppress findings the rule does not cover. Everything else — every rule with a
 expression, and every rule InSpec sees, since it has no exclusion mechanism — is
 applied to the results instead.
 
-**A muted finding is not recorded.** It is dropped before the run is written, so it
-does not appear in the database, the counts, the report or a Mission Control upload.
+**A muted finding is not recorded as historical evidence.** It is dropped before the run is written, so it
+does not appear in the historical findings, counts, or report. Its current state is recorded as `muted`,
+however, so syncing the current posture silences the corresponding Mission Control insight.
 The engine's own `findings.jsonl` still holds every line it produced, and
 `results/<run>/mutes.json` says which rule removed which of those lines, so the
 artifact directory still explains itself without Postgres. The runs list shows
@@ -302,15 +361,16 @@ bodies use the flag names, for example
 `{"domain":["flanksource.com"],"profile":"default"}` or
 `{"selector":"env=prod","profile":"safe"}`.
 
-## Uploading findings to Mission Control
+## Syncing current insights to Mission Control
 
-A finished run can be pushed to Mission Control, where each finding becomes an
-**insight** (`config_analysis`) attached to the config item it is about:
+Resources and current finding states can be synced to Mission Control, where each resource/check pair becomes
+one stable **insight** (`config_analysis`) attached to the config item it is about:
 
 ```bash
 faro auth login --server https://mission-control.example.com
-reconctl scan upload <scan-id> --dry-run     # what would land, nothing written
-reconctl scan upload <scan-id>
+reconctl finding sync --status open --dry-run
+reconctl finding sync --status open
+reconctl resource sync --provider gcp --account example-project --dry-run
 ```
 
 The credential is faro's — there is no server or token flag, and `--context`
@@ -318,17 +378,19 @@ picks between configured servers. The endpoint requires the `agent-push`
 permission, which Mission Control grants to the `admin` and `agent` roles only;
 `faro whoami` shows what the current context holds.
 
-Each finding is resolved against the catalog rather than given a config item of
-recon's own: the resource the engine named, then the host, then the target's
-cluster and finally the target itself. A finding that only matches one of the
-later rungs is **rolled up** — recorded against the cluster or account
-containing it — and one that matches nothing is reported, not uploaded. An
+Each state is resolved against the catalog rather than given a config item of
+recon's own: the resource's typed `externalIds`, its parent account's typed identity,
+then the target's cluster and finally the target itself. A state that only matches one of the
+scope rungs is **rolled up** — recorded against the cluster or account
+containing it — and one that matches nothing is reported, not synced. An
 insight attached to the wrong resource is worse than one that is missing and
-accounted for, so `--dry-run` reports the same coverage a real upload would
-achieve. `--severity` sets a floor and `--unresolved=error` refuses to push
-anything unless every finding resolved.
+accounted for, so `--dry-run` reports the same coverage a real sync would
+achieve. Finding sync defaults to open and manual-review states; `--status resolved`
+and `--status muted` include lifecycle updates, and `--unresolved=error` refuses to push
+anything unless every selected state resolves.
 
-Uploading twice does not duplicate: an insight's identity is derived from the
-config, the analyzer and the location, so a re-scan updates the row it wrote
-last time and its `first_observed` survives. The Scans tab exposes the same
-operation as a button, and the API as `POST /api/v1/scan/{id}/upload`.
+Syncing twice does not duplicate: an insight's identity is derived from the config,
+resource provider/scope/uid, engine, and check ID, so later runs update the same row
+and its `first_observed` survives. The Resources and Findings tabs expose a preview-first
+**Sync insights** action. The API exposes `POST /api/v1/resource/sync` and
+`POST /api/v1/finding/sync`; the Scans tab remains historical and has no sync action.

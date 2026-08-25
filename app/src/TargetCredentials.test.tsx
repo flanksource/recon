@@ -61,6 +61,13 @@ const credentialSchema = {
       },
     },
   },
+  "x-credential-methods": [
+    {
+      id: "api-token",
+      title: "API token",
+      envVars: [{ name: "CLOUDFLARE_API_TOKEN", title: "API token" }],
+    },
+  ],
 };
 
 const engine: Engine = {

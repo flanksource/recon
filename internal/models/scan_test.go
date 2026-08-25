@@ -22,7 +22,7 @@ func TestModels(t *testing.T) {
 // finding in it and leaving the run stuck reporting "running".
 var _ = Describe("storing a finding that saw binary bytes", func() {
 	build := func(finding api.Finding) models.Finding {
-		return models.FindingFrom("scan-1", 0, finding)
+		return models.FindingFrom("scan-1", 0, finding, "")
 	}
 
 	It("keeps a finding Postgres can store, marking where the byte was", func() {
@@ -97,8 +97,11 @@ var _ = Describe("storing a finding that saw binary bytes", func() {
 
 		row := build(finding)
 
-		Expect(row.TargetID).To(Equal(finding.TargetID))
-		Expect(row.Document().TargetID).To(Equal(finding.TargetID))
+		// A pointer, matching the nullable column and the two sibling models: an
+		// unselected target is absent rather than the empty string, which is what
+		// findings_target_idx would otherwise be full of.
+		Expect(row.TargetID).To(HaveValue(Equal(finding.TargetID)))
+		Expect(row.Document(nil).TargetID).To(Equal(finding.TargetID))
 		Expect(row.Name).To(Equal(finding.Name))
 		Expect([]string(row.Tags)).To(Equal(finding.Tags))
 		Expect(row.Raw.Get()).To(Equal(finding.Raw))

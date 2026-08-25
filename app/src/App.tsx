@@ -7,12 +7,21 @@ import { ScanDetailView, ScansView } from "./ScansView";
 import { MutesView } from "./MutesView";
 import { ProfilesView } from "./ProfilesView";
 import { ReportPlayground } from "./ReportPlayground";
+import { ResourcesView } from "./ResourcesView";
+import { FindingsView } from "./FindingsView";
+import { FindingEntityPage } from "./FindingEntityPage";
+import { ResourceView } from "./ResourceView";
 import { TargetView } from "./TargetView";
 import { TasksView } from "./TasksView";
 import { TemplatesView } from "./TemplatesView";
 
 const TABS = [
   { path: "/inventory", label: "Inventory" },
+  // Second, beside Inventory, because it is inventory — the machine-enumerated
+  // half. A target is curated by a person and a resource is found by a scan,
+  // but both outlive any single run, which is what separates them from Scans.
+  { path: "/resources", label: "Resources" },
+  { path: "/findings", label: "Findings" },
   { path: "/scans", label: "Scans" },
   { path: "/reports", label: "Reports" },
   { path: "/profiles", label: "Profiles" },
@@ -46,6 +55,9 @@ function AppContent() {
   // not exist yet: muting a finding from the results is a link into a prefilled
   // draft rather than a second editor somewhere else.
   const muteMatch = router.pathname.match(/^\/mutes(?:\/([^/]+))?$/);
+  // A resource is addressable so a finding can link to the thing it is about.
+  const resourceMatch = router.pathname.match(/^\/resources(?:\/([^/]+))?$/);
+  const findingMatch = router.pathname.match(/^\/findings\/([^/]+)$/);
   const templateEngine = templateMatch
     ? new URLSearchParams(window.location.search).get("engine") ?? undefined
     : undefined;
@@ -59,7 +71,11 @@ function AppContent() {
           ? "/templates"
           : muteMatch
             ? "/mutes"
-            : router.pathname;
+            : resourceMatch
+              ? "/resources"
+              : findingMatch
+                ? "/findings"
+                : router.pathname;
   // The primary nav, built once so it can go either in the bar below or into
   // the top bar of a view that renders its own AppShell.
   const tabs = TABS.map((tab) =>
@@ -121,6 +137,20 @@ function AppContent() {
     />
   ) : router.pathname === "/scans" ? (
     <ScansView onOpenScan={(id) => router.navigate(`/scans/${encodeURIComponent(id)}`)} />
+  ) : findingMatch ? (
+    <FindingEntityPage id={decodeURIComponent(findingMatch[1])} />
+  ) : router.pathname === "/findings" ? (
+    <FindingsView />
+  ) : resourceMatch?.[1] ? (
+    <ResourceView
+      id={decodeURIComponent(resourceMatch[1])}
+      onBack={() => router.navigate("/resources")}
+      onMuteFinding={(path) => router.navigate(path)}
+    />
+  ) : resourceMatch ? (
+    <ResourcesView
+      onOpenResource={(id) => router.navigate(`/resources/${encodeURIComponent(id)}`)}
+    />
   ) : muteMatch ? (
     <MutesView
       selected={muteMatch[1] ? decodeURIComponent(muteMatch[1]) : undefined}

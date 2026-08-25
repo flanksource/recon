@@ -103,6 +103,15 @@ type Spec struct {
 	// ValidateOptions applies engine-specific constraints that the field catalog
 	// cannot express, such as mutually exclusive flags.
 	ValidateOptions func(map[string]any) error
+
+	// ValidateProviderCredentials applies authentication-method constraints and
+	// returns any stored connection references that must be type-checked.
+	ValidateProviderCredentials func(config, context, credentials map[string]any) ([]CredentialConnection, error)
+}
+
+type CredentialConnection struct {
+	Reference string
+	Type      string
 }
 
 // DefaultProfile is the profile seeded for an engine when none exists.

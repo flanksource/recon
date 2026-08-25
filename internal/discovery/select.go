@@ -94,20 +94,3 @@ func seedsFromZones(names []string) (enumerate, probe []string) {
 	return enumerate, probe
 }
 
-// withOverrides layers a run's tweaks over a stored profile without touching it.
-//
-// Run-only by design: a one-off sweep that probed a wider port range should not
-// silently become the port range every later sweep uses.
-func withOverrides(config, overrides map[string]any) map[string]any {
-	if len(overrides) == 0 {
-		return config
-	}
-	merged := make(map[string]any, len(config)+len(overrides))
-	for key, value := range config {
-		merged[key] = value
-	}
-	for key, value := range overrides {
-		merged[key] = value
-	}
-	return merged
-}

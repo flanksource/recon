@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/flanksource/commons/logger"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -63,23 +66,7 @@ func (s *Store) ListScans(ctx context.Context, opts ScanOpts) ([]api.Scan, error
 		return nil, fmt.Errorf("list scans: %w", err)
 	}
 
-	scans := make([]api.Scan, 0, len(rows))
-	for _, row := range rows {
-		counts, err := s.findingCount(ctx, row.ID)
-		if err != nil {
-			return nil, err
-		}
-		hosts, err := s.scanHosts(ctx, row)
-		if err != nil {
-			return nil, err
-		}
-		label, err := selectorLabel(row)
-		if err != nil {
-			return nil, err
-		}
-		scans = append(scans, row.Document(counts, hosts, label))
-	}
-	return scans, nil
+	return s.scanDocuments(ctx, rows)
 }
 
 // GetScan returns one run.
@@ -236,6 +223,19 @@ type FinalizeScanOptions struct {
 	// for a run that cannot produce any: a liveness sweep leaves the count from
 	// the last real scan alone rather than zeroing it.
 	CountFindings bool
+
+	// Resources are the subjects the run examined, whatever the verdict —
+	// including the ones every check passed on, which is what makes a clean
+	// resource distinguishable from one nobody looked at. Each carries the
+	// checks that reported a verdict against it, and those verdicts are what
+	// let this run resolve an earlier run's findings.
+	Resources []api.Resource
+
+	// Muted are the findings a rule removed and MutedBy is mute.Result.ByRule.
+	// The rows are not written, so this is the only way a muted check stops
+	// looking like silence.
+	Muted   []api.Finding
+	MutedBy map[string][]int
 }
 
 func (s *Store) FinalizeScan(ctx context.Context, options FinalizeScanOptions) error {
@@ -250,14 +250,61 @@ func (s *Store) FinalizeScan(ctx context.Context, options FinalizeScanOptions) e
 		return fmt.Errorf("finalize scan %s: duration cannot be negative", options.Scan.ID)
 	}
 
+	seen := *options.Scan.FinishedAt
+
+	// Absent stats are not a claim that nothing passed. A run that recorded no
+	// statistics at all — a cancellation persisted before the engine started,
+	// or an engine that reports none — must resolve nothing from silence, which
+	// is what a false PassRecorded gives.
+	passRecorded := options.Scan.Stats.V != nil && options.Scan.Stats.V.PassRecorded
+
+	// The order inside the transaction is forced twice, and both orderings are
+	// load-bearing: resources before findings, because a finding's resource_id
+	// is a foreign key and the ids only exist once the upsert has returned
+	// them; and findings before reconciliation, because the ledger attaches the
+	// evidence row it just wrote.
 	return s.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := saveFindings(tx, options.Scan.ID, options.Findings); err != nil {
+		// Finalizes of one engine run one at a time.
+		//
+		// resolveAbsentSQL closes whatever a run did not restate, and it decides
+		// that by `last_scan_id <> this run`. Two runs of the same engine over an
+		// overlapping account and check set — two profiles usually do overlap —
+		// each read the other's freshly opened rows as carrying an older run and
+		// resolve them. Neither transaction conflicts, so both commit and the
+		// findings are simply gone.
+		//
+		// Per engine rather than per account: one lock cannot deadlock, and a
+		// finalize is short next to the scan that produced it. The queue already
+		// serialises within a process (internal/scan/supervise.go), so this is
+		// what covers a second recon against the same database.
+		if err := tx.Exec(
+			"SELECT pg_advisory_xact_lock(hashtext(?)::bigint)", options.Scan.Engine).Error; err != nil {
+			return fmt.Errorf("lock engine %s for finalize: %w", options.Scan.Engine, err)
+		}
+		ids, err := upsertResources(tx, options.Scan.ID, options.Scan.Engine, seen, options.Resources)
+		if err != nil {
+			return err
+		}
+		if err := saveFindings(tx, options.Scan.ID, options.Findings, ids); err != nil {
 			return err
 		}
 		if err := updateScan(tx, options.Scan); err != nil {
 			return err
 		}
 		if err := stampScanned(tx, options); err != nil {
+			return err
+		}
+		if err := reconcileFindingStates(tx, reconcileOptions{
+			ScanID:       options.Scan.ID,
+			Engine:       options.Scan.Engine,
+			At:           seen,
+			Resources:    options.Resources,
+			IDs:          ids,
+			Terminal:     phase == api.PhaseDone,
+			PassRecorded: passRecorded,
+			Muted:        options.Muted,
+			MutedBy:      options.MutedBy,
+		}); err != nil {
 			return err
 		}
 
@@ -333,12 +380,22 @@ func stampScanned(db *gorm.DB, options FinalizeScanOptions) error {
 	return nil
 }
 
-func saveFindings(db *gorm.DB, scanID string, findings []api.Finding) error {
+func saveFindings(db *gorm.DB, scanID string, findings []api.Finding, ids map[api.ResourceKey]string) error {
 	if len(findings) == 0 {
 		return nil
 	}
 
+	// A finding is linked to the first resource it names and no others. A
+	// record may mention several, and they all become rows, but the verdict is
+	// about one subject: counting it against everything the check merely
+	// mentioned would let one PASS resolve findings on resources the check
+	// never judged.
 	rows := make([]models.Finding, 0, len(findings))
+	// linked[i] are the resources rows[i] names, by their position in the
+	// engine's own record, so a subject recon could not resolve leaves a gap
+	// rather than renumbering the ones around it.
+	linked := make([][]models.FindingResource, 0, len(findings))
+	var unattached []string
 	for _, finding := range findings {
 		// Loudly, because the alternative is silent: unnumbered findings would
 		// all claim line 0 and collide on findings_scan_line_key, and whichever
@@ -358,64 +415,95 @@ func saveFindings(db *gorm.DB, scanID string, findings []api.Finding) error {
 		// the artifact and the database still address the same evidence, with
 		// gaps where a rule dropped something. Renumbering here would silently
 		// break that correspondence for exactly the runs that need it.
-		rows = append(rows, models.FindingFrom(scanID, finding.LineNo, finding))
+		// A finding whose subject this run did not also emit as a resource is
+		// recorded without one rather than discarded, and it does not take the
+		// run down with it.
+		//
+		// resource_id is nullable and openFromFindingsSQL skips a NULL, so such a
+		// finding is evidence with no lifecycle — which is a real, if lesser,
+		// thing to be. Erroring here cost the whole FinalizeScan transaction: the
+		// run's terminal phase, its process output, its resources and every other
+		// finding it wrote. That is reachable from one malformed record, and
+		// routinely for nuclei, whose resources come from the input file
+		// (endpoints.go) while a finding's come from event.URL falling back to
+		// event.Host — so a dns or ssl template against an `https://…/` input
+		// line yields a uid the run never emitted.
+		//
+		// Loud rather than silent: the count is `resource_id IS NULL` for the
+		// scan, which is queryable and cannot drift the way a counter column
+		// would.
+		resourceID := ""
+		switch {
+		case len(finding.Resources) == 0:
+			unattached = append(unattached, finding.TemplateID)
+		default:
+			resolved, err := resolveResource(ids, finding.Resources[0])
+			if err != nil {
+				unattached = append(unattached, finding.TemplateID)
+			}
+			resourceID = resolved
+		}
+		rows = append(rows, models.FindingFrom(scanID, finding.LineNo, finding, resourceID))
+		// Every subject, not only the canonical one. The rest have nowhere else
+		// to live: they are recoverable from the engine's own record and from
+		// nothing recon stores, and that record is going away.
+		linked = append(linked, resolvedResources(ids, finding.Resources))
+	}
+	if len(unattached) > 0 {
+		slices.Sort(unattached)
+		logger.Warnf("scan %s: %d of %d findings name a resource the run did not emit, "+
+			"so they carry no lifecycle: %s", scanID, len(unattached), len(findings),
+			strings.Join(slices.Compact(unattached), ", "))
 	}
 	// Batched: a broad scan can produce tens of thousands of findings, and one
 	// statement per row would dominate the run's wall clock.
 	if err := db.CreateInBatches(rows, 500).Error; err != nil {
 		return fmt.Errorf("save findings for %s: %w", scanID, err)
 	}
-	return nil
+
+	var links []models.FindingResource
+	for index, row := range rows {
+		if row.ID == "" {
+			return fmt.Errorf(
+				"save findings for %s: the insert returned no id for %q, so the resources it "+
+					"names cannot be linked", scanID, row.TemplateID)
+		}
+		for _, link := range linked[index] {
+			link.FindingID = row.ID
+			links = append(links, link)
+		}
+	}
+	return saveFindingResources(db, links)
 }
 
-// FindingOpts selects findings across runs.
-type FindingOpts struct {
-	Scan     []string `flag:"scan" help:"Only findings from these runs (id or name)"`
-	Target   []string `flag:"target" help:"Only findings associated with these stable target IDs"`
-	Severity []string `flag:"severity" help:"Only these severities"`
-	Host     []string `flag:"host" help:"Only these hosts"`
-	Template []string `flag:"template" help:"Only these template ids"`
-	Tag      []string `flag:"tag" help:"Only findings carrying any of these tags; prefix ! to exclude"`
-	Limit    int      `flag:"limit" help:"Most N findings" default:"500"`
-}
-
-// ListFindings returns the findings a selector matches.
-func (s *Store) ListFindings(ctx context.Context, opts FindingOpts) ([]api.Finding, error) {
-	query := s.DB(ctx).Model(&models.Finding{})
-
-	if len(opts.Scan) > 0 {
-		// Accept either form, matching GetScan.
-		query = query.Where(
-			"scan_id::text = ANY(?) OR scan_id IN (SELECT id FROM scans WHERE name = ANY(?))",
-			stringArray(opts.Scan), stringArray(opts.Scan))
+// resolvedResources names the rows a finding's references resolve to, in the
+// order the engine's own record named them.
+//
+// A reference that resolves to nothing is skipped rather than failing the
+// finding: the same record can name a subject the run emitted and one it did
+// not, and the second is no reason to lose the first. Ordinals are the position
+// in the original record, so a skipped subject leaves a gap instead of
+// renumbering the ones after it.
+//
+// A resource named twice is kept once, at its first position. The relation is
+// keyed by the pair, and a record that repeats a subject is still describing one
+// subject.
+func resolvedResources(ids map[api.ResourceKey]string, refs []api.ResourceRef) []models.FindingResource {
+	if len(refs) == 0 {
+		return nil
 	}
-	if len(opts.Target) > 0 {
-		query = query.Where("target_id = ANY(?)", stringArray(opts.Target))
+	seen := make(map[string]struct{}, len(refs))
+	found := make([]models.FindingResource, 0, len(refs))
+	for ordinal, ref := range refs {
+		resolved, err := resolveResource(ids, ref)
+		if err != nil {
+			continue
+		}
+		if _, repeated := seen[resolved]; repeated {
+			continue
+		}
+		seen[resolved] = struct{}{}
+		found = append(found, models.FindingResource{ResourceID: resolved, Ordinal: ordinal})
 	}
-	if len(opts.Severity) > 0 {
-		query = query.Where("severity = ANY(?)", stringArray(opts.Severity))
-	}
-	if len(opts.Host) > 0 {
-		query = query.Where("host = ANY(?)", stringArray(opts.Host))
-	}
-	if len(opts.Template) > 0 {
-		query = query.Where("template_id = ANY(?)", stringArray(opts.Template))
-	}
-	if len(opts.Tag) > 0 {
-		query = tagPredicate(query, "tags", opts.Tag)
-	}
-	if opts.Limit > 0 {
-		query = query.Limit(opts.Limit)
-	}
-
-	var rows []models.Finding
-	if err := query.Order("scan_id, line_no").Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("list findings: %w", err)
-	}
-
-	findings := make([]api.Finding, 0, len(rows))
-	for _, row := range rows {
-		findings = append(findings, row.Document())
-	}
-	return findings, nil
+	return found
 }

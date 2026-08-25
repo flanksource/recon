@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 type CredentialMode string
@@ -169,17 +170,18 @@ func (c Catalogue) validateSelections(provider string, arguments []Argument, val
 		}
 	}
 	for _, mutex := range mutexes {
-		active := 0
+		active := []string{}
 		for _, key := range mutex.Keys {
 			if valueIsActive(values[key]) {
-				active++
+				active = append(active, key)
 			}
 		}
-		if active > 1 {
-			return fmt.Errorf("%s accepts only one argument", mutex.Name)
+		if len(active) > 1 {
+			return fmt.Errorf("%s accepts only one of %s: got %s",
+				mutex.Label(), strings.Join(mutex.Keys, ", "), strings.Join(active, ", "))
 		}
-		if mutex.Required && active != 1 {
-			return fmt.Errorf("%s requires exactly one argument", mutex.Name)
+		if mutex.Required && len(active) != 1 {
+			return fmt.Errorf("%s requires exactly one of %s", mutex.Label(), strings.Join(mutex.Keys, ", "))
 		}
 	}
 	return nil

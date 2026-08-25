@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/configdb"
 )
 
 var _ = Describe("Prowler OCSF output", func() {
@@ -49,6 +50,14 @@ var _ = Describe("Prowler OCSF output", func() {
 			Timestamp:   "2026-08-20T10:00:00Z",
 			Remediation: "Replace primitive roles with predefined roles.",
 			Reference:   []string{"https://example.com/gcp/iam"},
+			Resources: []api.ResourceRef{{
+				Provider: "gcp",
+				Scope:    "example-project",
+				UID:      "projects/example-project/roles/editor",
+				Name:     "user@example.com",
+				Type:     "IAMPolicy",
+				Service:  "iam",
+			}},
 		}))
 		Expect(raw).To(HaveKeyWithValue("risk_details", "Primitive roles grant broad permissions."))
 		Expect(raw).To(HaveKey("finding_info"))
@@ -58,6 +67,10 @@ var _ = Describe("Prowler OCSF output", func() {
 		Expect(kubernetes.TargetID).To(Equal("target-gcp"))
 		Expect(kubernetes.TemplateID).To(Equal("gcp/k8s_manual_admission_policy"))
 		Expect(kubernetes.MatcherName).To(Equal("MANUAL"))
+		// The lifecycle keys on this rather than on MatcherName, which is the
+		// column nuclei means as the matcher that fired: prowler only happens to
+		// write its status code there.
+		Expect(kubernetes.Verdict).To(Equal(api.VerdictManual))
 	})
 
 	// A passing check leaves no finding behind, so without a count of them a
@@ -91,6 +104,86 @@ var _ = Describe("Prowler OCSF output", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(report.Stats.Passed).To(BeZero())
 		Expect(report.Stats.PassRecorded).To(BeTrue())
+	})
+
+	// A check that fails against several resources names all of them. Only the
+	// first used to survive, so the rest left no trace anywhere in recon.
+	It("keeps every resource a record names, not only the first", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "many.ocsf.json")
+		body := []byte(`[{"status":"New","status_code":"FAIL","metadata":{"event_code":"bucket_public"},` +
+			`"finding_info":{"title":"Bucket is public"},"unmapped":{"provider":"gcp","provider_uid":"example"},` +
+			`"resources":[` +
+			`{"uid":"bucket-a","name":"logs","type":"storage.googleapis.com/Bucket","region":"eu","group":{"name":"storage"}},` +
+			`{"uid":"bucket-b","name":"backups","type":"storage.googleapis.com/Bucket","region":"us"}]}]`)
+		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
+
+		report, err := readOCSF(path, "target", "gcp")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(report.Findings).To(HaveLen(1))
+		Expect(report.Findings[0].Resources).To(Equal([]api.ResourceRef{
+			{Provider: "gcp", Scope: "example", UID: "bucket-a", Name: "logs", Type: "storage.googleapis.com/Bucket", Region: "eu", Service: "storage"},
+			{Provider: "gcp", Scope: "example", UID: "bucket-b", Name: "backups", Type: "storage.googleapis.com/Bucket", Region: "us"},
+		}))
+		// MatchedAt still names the first, because it is a display string and
+		// widening it would change what every stored mute rule matches.
+		Expect(report.Findings[0].MatchedAt).To(Equal("bucket-a"))
+	})
+
+	// The reason passes are read at all. Only the failures used to leave a
+	// trace, so a resource nothing was wrong with was invisible and "is this
+	// bucket clean" had no answer.
+	It("records a resource for a check that passed", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "passing.ocsf.json")
+		body := []byte(`[{"status":"New","status_code":"PASS","metadata":{"event_code":"bucket_public"},` +
+			`"finding_info":{"title":"Bucket is not public"},"unmapped":{"provider":"gcp"},` +
+			`"cloud":{"provider":"gcp","account":{"uid":"example-project","name":"Example"}},` +
+			`"resources":[{"uid":"logs","name":"logs","type":"storage.googleapis.com/Bucket",` +
+			`"region":"eu","group":{"name":"storage"}}]}]`)
+		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
+
+		report, err := readOCSF(path, "target", "gcp")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(report.Findings).To(BeEmpty())
+
+		resources := report.Resources()
+		Expect(resources).To(HaveLen(1))
+		Expect(resources[0].UID).To(Equal("logs"))
+		Expect(resources[0].Scope).To(Equal("example-project"))
+		Expect(resources[0].Kind).To(Equal(api.KindCloudResource))
+		Expect(resources[0].Region).To(Equal("eu"))
+		// The pass is what a later run resolves a finding from.
+		Expect(resources[0].Passed).To(ConsistOf("gcp/bucket_public"))
+		// And the identity Mission Control's catalog would hold it under.
+		Expect(resources[0].ConfigType).To(Equal("GCP::Bucket"))
+		Expect(resources[0].ExternalIDs).To(ConsistOf("logs"))
+	})
+
+	// Prowler names the project itself when a check has nothing more specific to
+	// point at, typing it with whichever service the check belongs to. Four such
+	// checks would otherwise mint four rows for one project.
+	It("collapses the account's own pseudo-resources onto one row", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "account.ocsf.json")
+		account := `"cloud":{"provider":"gcp","account":{"uid":"example-project","name":"Example","type":"GCP Account"}}`
+		body := []byte(`[` +
+			`{"status":"New","status_code":"PASS","metadata":{"event_code":"apikeys_key_exists"},` +
+			`"finding_info":{"title":"A"},` + account + `,` +
+			`"resources":[{"uid":"example-project","name":"example-project","type":"apikeys.googleapis.com/Key"}]},` +
+			`{"status":"New","status_code":"FAIL","metadata":{"event_code":"project_labels"},` +
+			`"finding_info":{"title":"B"},` + account + `,` +
+			`"resources":[{"uid":"example-project","name":"example-project","type":"compute.googleapis.com/Project"}]}` +
+			`]`)
+		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
+
+		report, err := readOCSF(path, "target", "gcp")
+		Expect(err).ToNot(HaveOccurred())
+
+		resources := report.Resources()
+		Expect(resources).To(HaveLen(1))
+		Expect(resources[0].Kind).To(Equal(api.KindAccount))
+		Expect(resources[0].Type).To(Equal("GCP Account"))
+		Expect(resources[0].ConfigType).ToNot(Equal(configdb.ConfigType("gcp", "apikeys.googleapis.com/Key")))
+		Expect(resources[0].Name).To(Equal("Example"))
+		Expect(resources[0].Passed).To(ConsistOf("gcp/apikeys_key_exists"))
 	})
 
 	It("rejects an unknown status instead of silently dropping it", func() {

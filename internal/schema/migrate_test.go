@@ -54,9 +54,10 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(rows.Err()).ToNot(HaveOccurred())
 
 		Expect(tables).To(ConsistOf(
-			"discoveries", "discovery_hosts",
-			"engine_profiles", "findings", "mute_rules", "probe_results", "probes",
-			"scan_outputs", "scans", "targets", "zones",
+			"checks", "connections", "discoveries", "discovery_hosts",
+			"engine_profiles", "finding_resources", "finding_states", "findings",
+			"mute_rules", "probe_results", "probes", "resources", "scan_outputs",
+			"scans", "targets", "zones",
 		))
 	})
 
@@ -155,6 +156,149 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(db.SQL().QueryRow(`SELECT duration_ms FROM scans WHERE id = $1`, scanID).Scan(&durationMS)).To(Succeed())
 		Expect(durationMS).To(Equal(int64(3250)))
 		_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	// A Resources tab that starts empty on a database holding months of scans
+	// reads as broken, and the information is not missing: every prowler finding
+	// carries the whole OCSF record in `raw`.
+	It("recovers resources and their findings from evidence already stored", func() {
+		var scanID string
+		Expect(db.SQL().QueryRow(`
+			INSERT INTO scans (
+				name, engine, profile, endpoint_count, phase,
+				started_at, finished_at, severities
+			) VALUES (
+				'legacy-prowler-scan', 'prowler', 'gcp-cis-5-0', 1, 'done',
+				'2026-08-10T12:00:00Z', '2026-08-10T12:01:00Z', '{}'::jsonb
+			) RETURNING id::text`).Scan(&scanID)).To(Succeed())
+
+		// The firewall case exactly: an opaque numeric uid whose readable name
+		// lives in resources[0].name, which nothing used to read.
+		var findingID string
+		Expect(db.SQL().QueryRow(`
+			INSERT INTO findings (
+				scan_id, line_no, template_id, name, severity, host, matched_at,
+				type, tags, raw
+			) VALUES (
+				$1::uuid, 1, 'gcp/firewall_rdp_open', 'RDP open to the internet',
+				'high', 'flanksource-prod', '1429543158501771126', 'prowler',
+				'{}'::text[], $2::jsonb
+			) RETURNING id::text`, scanID, `{
+				"cloud": {"provider": "gcp", "account": {"uid": "flanksource-prod"}},
+				"resources": [{
+					"uid": "1429543158501771126", "name": "tailscale-router",
+					"type": "compute.googleapis.com/Firewall", "region": "global",
+					"group": {"name": "compute"}
+				}]
+			}`).Scan(&findingID)).To(Succeed())
+
+		_, err := db.SQL().Exec(`
+			DELETE FROM schema_migration_scripts
+			WHERE scope = $1 AND path = '016_backfill_resources.sql'`, schema.Name)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+
+		var name, resourceType, service, state string
+		Expect(db.SQL().QueryRow(`
+			SELECT name, type, service, state FROM resources
+			WHERE uid = '1429543158501771126'`).
+			Scan(&name, &resourceType, &service, &state)).To(Succeed())
+		Expect(name).To(Equal("tailscale-router"))
+		Expect(resourceType).To(Equal("compute.googleapis.com/Firewall"))
+		Expect(service).To(Equal("compute"))
+		// A backfill has observed nothing, so it may not judge absence.
+		Expect(state).To(Equal("present"))
+
+		var linked int
+		Expect(db.SQL().QueryRow(`
+			SELECT count(*) FROM findings f JOIN resources r ON r.id = f.resource_id
+			WHERE f.id = $1::uuid`, findingID).Scan(&linked)).To(Succeed())
+		Expect(linked).To(Equal(1), "the evidence is linked to what it was about")
+
+		// The ledger is deliberately not backfilled: a historic PASS was counted
+		// and discarded, so a backfilled open row would have no evidence it is
+		// still failing and nothing that could ever resolve it.
+		var states int
+		Expect(db.SQL().QueryRow(`SELECT count(*) FROM finding_states`).Scan(&states)).To(Succeed())
+		Expect(states).To(BeZero())
+
+		_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = db.SQL().Exec(`DELETE FROM resources`)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	// A check that fails against several resources names all of them, and only
+	// the first was ever linked. The rest survived in the raw record alone,
+	// which is engine-specific, unqueryable and on its way out — so they have to
+	// be recovered into the relation while that record is still there.
+	It("recovers every subject a stored finding named, not only the first", func() {
+		var scanID string
+		Expect(db.SQL().QueryRow(`
+			INSERT INTO scans (
+				name, engine, profile, endpoint_count, phase,
+				started_at, finished_at, severities
+			) VALUES (
+				'legacy-multi-resource', 'prowler', 'gcp-cis-5-0', 1, 'done',
+				'2026-08-11T12:00:00Z', '2026-08-11T12:01:00Z', '{}'::jsonb
+			) RETURNING id::text`).Scan(&scanID)).To(Succeed())
+
+		for _, uid := range []string{"bucket-a", "bucket-b"} {
+			_, err := db.SQL().Exec(`
+				INSERT INTO resources (provider, scope, uid, kind, type, name)
+				VALUES ('gcp', 'flanksource-prod', $1, 'cloud-resource',
+					'storage.googleapis.com/Bucket', $1)`, uid)
+			Expect(err).ToNot(HaveOccurred())
+		}
+
+		var findingID string
+		Expect(db.SQL().QueryRow(`
+			INSERT INTO findings (
+				scan_id, line_no, template_id, name, severity, host, matched_at,
+				type, tags, raw
+			) VALUES (
+				$1::uuid, 1, 'gcp/bucket_public', 'Bucket is public',
+				'high', 'flanksource-prod', 'bucket-a', 'prowler',
+				'{}'::text[], $2::jsonb
+			) RETURNING id::text`, scanID, `{
+				"cloud": {"provider": "gcp", "account": {"uid": "flanksource-prod"}},
+				"resources": [
+					{"uid": "bucket-a", "name": "logs"},
+					{"uid": "bucket-b", "name": "backups"}
+				]
+			}`).Scan(&findingID)).To(Succeed())
+
+		_, err := db.SQL().Exec(`
+			DELETE FROM schema_migration_scripts
+			WHERE scope = $1 AND path = '022_finding_resources.sql'`, schema.Name)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+
+		rows, err := db.SQL().Query(`
+			SELECT r.uid FROM finding_resources fr
+			JOIN resources r ON r.id = fr.resource_id
+			WHERE fr.finding_id = $1::uuid
+			ORDER BY fr.ordinal`, findingID)
+		Expect(err).ToNot(HaveOccurred())
+		DeferCleanup(rows.Close)
+
+		var linked []string
+		for rows.Next() {
+			var uid string
+			Expect(rows.Scan(&uid)).To(Succeed())
+			linked = append(linked, uid)
+		}
+		Expect(rows.Err()).ToNot(HaveOccurred())
+		// In the order the record named them: the first is the subject the
+		// verdict is about.
+		Expect(linked).To(Equal([]string{"bucket-a", "bucket-b"}))
+
+		_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = db.SQL().Exec(`DELETE FROM resources`)
 		Expect(err).ToNot(HaveOccurred())
 	})
 

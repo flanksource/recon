@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -89,6 +88,11 @@ func TargetFrom(body map[string]any) (NewTarget, error) {
 			return NewTarget{}, err
 		}
 		credentials = decoded
+		if credentials != nil {
+			if err := credentials.ValidateCreate(); err != nil {
+				return NewTarget{}, err
+			}
+		}
 	}
 
 	switch kind {
@@ -210,17 +214,6 @@ func credentialsFrom(value any) (*ProviderCredentials, error) {
 	object, err := objectFrom(value, "credentials")
 	if err != nil {
 		return nil, err
-	}
-	if values, ok := object["envVars"].([]any); ok {
-		for _, value := range values {
-			item, ok := value.(map[string]any)
-			if !ok {
-				continue
-			}
-			if _, present := item["configured"]; present {
-				return nil, fmt.Errorf("credential configured is read-only")
-			}
-		}
 	}
 	var credentials ProviderCredentials
 	if err := decode(object, &credentials); err != nil {
@@ -396,17 +389,4 @@ func decode(body map[string]any, into any) error {
 		return fmt.Errorf("invalid body: %w", err)
 	}
 	return nil
-}
-
-// SplitFindingID parses the scan#line address a finding is known by.
-func SplitFindingID(id string) (scan string, line int, err error) {
-	scan, number, found := strings.Cut(id, "#")
-	if !found {
-		return "", 0, fmt.Errorf("finding %q is not addressed as scan#line", id)
-	}
-	line, err = strconv.Atoi(number)
-	if err != nil {
-		return "", 0, fmt.Errorf("finding %q has a non-numeric line", id)
-	}
-	return scan, line, nil
 }

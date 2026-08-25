@@ -48,6 +48,63 @@ export const nucleiEngine: Engine = {
   },
 };
 
+// Prowler declares one argparse choice over five options, so a run that moves
+// from a compliance framework to a service list has to take the framework away.
+export const prowlerEngine: Engine = {
+  _id: "scan:prowler",
+  name: "prowler",
+  kind: "scan",
+  title: "Prowler",
+  binary: "prowler",
+  installed: true,
+  managed: true,
+  options: {
+    discriminator: "provider",
+    variants: [
+      {
+        id: "github",
+        title: "GitHub",
+        schema: {
+          type: "object",
+          "x-sections": [{ id: "selection", title: "Specify checks/services to run" }],
+          "x-order": ["provider", "compliance", "services"],
+          "x-mutual-exclusions": [
+            {
+              id: "common-mutex-1",
+              title: "Specify checks/services to run",
+              keys: ["compliance", "services"],
+            },
+          ],
+          properties: {
+            provider: { type: "string", const: "github", "x-section": "selection" },
+            compliance: {
+              type: "array",
+              title: "Compliance",
+              "x-section": "selection",
+              items: { type: "string", enum: ["cis_1.0_github"] },
+            },
+            services: {
+              type: "array",
+              title: "Services",
+              "x-section": "selection",
+              items: { type: "string", enum: ["organization", "repository"] },
+            },
+          },
+        },
+      },
+    ],
+  },
+};
+
+export const complianceProfile: Profile = {
+  _id: "scan:prowler:github-cis-1-0-github",
+  kind: "scan",
+  engine: "prowler",
+  name: "github-cis-1-0-github",
+  config: { provider: "github", compliance: ["cis_1.0_github"] },
+  intrusive: false,
+};
+
 export const naabuEngine: Engine = {
   _id: "discovery:naabu",
   name: "naabu",

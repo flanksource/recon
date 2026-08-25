@@ -231,7 +231,7 @@ export type SeverityCounts = Record<Severity, number>;
 // Findings keep an index signature: nuclei emits template-specific keys the
 // details pane renders without knowing them in advance.
 export type Finding = {
-  _id?: string;
+  id?: string;
   scanId: string;
   // The line of the engine's own findings.jsonl this came from. Runs whose mute
   // rules removed something have gaps here rather than renumbered survivors, so
@@ -256,10 +256,80 @@ export type Finding = {
   curl?: string;
   request?: string;
   response?: string;
+  /**
+   * The subjects the evidence names, in the engine's own order. Resources[0] is
+   * the one the check has a verdict about; the rest are context. The server
+   * always sends at least one, synthesising it from the finding's own identity
+   * for engines that name none, so nothing here has to read `raw`.
+   */
+  resources?: ResourceRef[];
   /** The engine's original record, kept verbatim. */
   raw?: Record<string, unknown>;
   [key: string]: unknown;
 };
+
+/**
+ * One thing a finding is about.
+ *
+ * `uid` is the provider's own identifier and is frequently not human-readable —
+ * a GCP firewall's uid is an opaque number while its name is `tailscale-router`
+ * — so render `name` and fall back to `uid`, never the other way round.
+ */
+export type ResourceRef = {
+  id?: string;
+  provider: string;
+  scope?: string;
+  uid: string;
+  name?: string;
+  type?: string;
+  service?: string;
+  region?: string;
+};
+
+export type FindingGroup = {
+  engine: string;
+  checkId: string;
+  name: string;
+  severity: Severity;
+  affected: number;
+  statuses: Record<string, number>;
+  lastSeen: string;
+  [key: string]: unknown;
+};
+
+export type FindingState = {
+  id: string;
+  resourceId: string;
+  engine: string;
+  checkId: string;
+  status: string;
+  severity: Severity;
+  reason?: string;
+  firstSeen: string;
+  lastSeen: string;
+  lastOpenAt?: string;
+  resolvedAt?: string;
+  findingId?: string;
+  occurrences: number;
+  resource?: ResourceRef & { findings: number; [key: string]: unknown };
+  finding?: Finding;
+  [key: string]: unknown;
+};
+
+export type FindingGroupPage = {
+  data: FindingGroup[];
+  page: { limit: number; offset: number; total: number };
+};
+
+export type FindingStatePage = {
+  data: FindingState[];
+  page: { limit: number; offset: number; total: number };
+};
+
+/** What to show for a resource: its name where it has one, its uid otherwise. */
+export function resourceLabel(resource: ResourceRef): string {
+  return resource.name || resource.uid;
+}
 
 // Template is one check a scan engine could run. The catalogue is read from the
 // installed templates rather than the database, so these are the engine's own
@@ -372,8 +442,8 @@ export type ScanStatus = Scan & {
   output: ScanOutputEvent[];
 };
 
-// One catalog config item an upload attached insights to.
-export type UploadConfig = {
+// One catalog config item a sync attached insights to.
+export type InsightConfig = {
   id: string;
   name?: string;
   type?: string;
@@ -383,9 +453,9 @@ export type UploadConfig = {
   rolledUp?: boolean;
 };
 
-// A finding nothing in the Mission Control catalog claims, and every identity
+// A current state nothing in the Mission Control catalog claims, and every identity
 // that was tried for it.
-export type UploadUnresolved = {
+export type InsightUnresolved = {
   finding: string;
   host?: string;
   severity?: Severity;
@@ -393,24 +463,24 @@ export type UploadUnresolved = {
   reason: string;
 };
 
-// The result of pushing a run's findings to Mission Control as insights.
-// `resolved` landed on the resource the finding is about and `rolledUp` on the
-// scope containing it — a run where everything rolled up means the catalog does
-// not hold what recon scanned.
-export type Upload = {
-  scanId: string;
-  engine: string;
+// The result of previewing or syncing current resource/check states.
+export type InsightSync = {
   context?: string;
   server?: string;
   agent: string;
   dryRun?: boolean;
-  findings: number;
-  total: number;
-  pushed: number;
+  matchedResources: number;
+  matchedStates: number;
+  eligible: number;
+  skipped: number;
+  open: number;
   resolved: number;
+  silenced: number;
+  direct: number;
   rolledUp: number;
-  configs: UploadConfig[];
-  unresolved: UploadUnresolved[];
+  pushed: number;
+  configs: InsightConfig[];
+  unresolved: InsightUnresolved[];
   notes?: string[];
 };
 

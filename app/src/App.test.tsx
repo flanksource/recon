@@ -4,6 +4,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
+vi.mock("./FindingEntityPage", () => ({
+  FindingEntityPage: ({ id }: { id: string }) => <h1>Finding {id}</h1>,
+}));
+
 const activeRun = {
   id: "scan-1",
   name: "nuclei-safe-1",
@@ -67,6 +71,73 @@ describe("App routes", () => {
       name: "Tasks (1 active)",
     });
     expect(tasksButton.querySelector("svg")).not.toBeNull();
+  });
+
+  it("renders a deep-linked resource with Resources navigation active", async () => {
+    window.history.replaceState(null, "", "/resources/01JRESOURCE");
+    vi.stubGlobal("EventSource", undefined);
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/api/v1/tasks") {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (path === "/api/v1/resource/01JRESOURCE") {
+        return new Response(
+          JSON.stringify({
+            id: "01JRESOURCE",
+            provider: "gcp",
+            scope: "flanksource-prod",
+            uid: "1429543158501771126",
+            kind: "cloud-resource",
+            type: "compute.googleapis.com/Firewall",
+            name: "tailscale-router",
+            service: "compute",
+            findings: 0,
+          }),
+          { status: 200 },
+        );
+      }
+      if (path.startsWith("/api/v1/finding")) {
+        return new Response(JSON.stringify({ data: [], page: { limit: 500, offset: 0, total: 0 } }), { status: 200 });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+
+    render(<App />);
+
+    // The name, not the opaque uid: this is the row the old matchedAt column
+    // rendered as a broken <a href="1429543158501771126">.
+    expect(
+      await screen.findByRole("heading", { name: "tailscale-router" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Resources" })).toHaveAttribute(
+      "href",
+      "/resources",
+    );
+  });
+
+  it("routes a persisted finding UUID from the Findings tab", async () => {
+    window.history.replaceState(null, "", "/findings/01JFINDING");
+    vi.stubGlobal("EventSource", undefined);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/api/v1/tasks") {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      throw new Error(`unexpected request: ${String(input)}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Finding 01JFINDING" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Findings" })).toHaveClass("text-foreground");
   });
 
   it("expands a deep-linked background task on the tasks page", async () => {
@@ -145,7 +216,7 @@ describe("App routes", () => {
         return new Response(JSON.stringify({ filters: {} }), { status: 200 });
       }
       if (path === "/api/v1/finding?scan=scan-1&limit=500") {
-        return new Response(JSON.stringify([]), { status: 200 });
+        return new Response(JSON.stringify({ data: [], page: { limit: 500, offset: 0, total: 0 } }), { status: 200 });
       }
       if (path === "/api/v1/scan/scan-1") {
         return new Response(
@@ -241,7 +312,7 @@ describe("App routes", () => {
       }
       if (path === "/api/v1/finding?scan=scan-1&limit=500") {
         return new Response(
-          JSON.stringify([
+          JSON.stringify({ data: [
             {
               _id: "scan-1#1",
               scanId: "scan-1",
@@ -254,6 +325,9 @@ describe("App routes", () => {
               matcherName: "FAIL",
               type: "prowler",
               tags: [],
+              resources: [
+                { uid: "prod.example.test", name: "https://prod.example.test/one" },
+              ],
             },
             {
               _id: "scan-1#2",
@@ -267,8 +341,11 @@ describe("App routes", () => {
               matcherName: "FAIL",
               type: "prowler",
               tags: [],
+              resources: [
+                { uid: "prod.example.test", name: "https://prod.example.test/two" },
+              ],
             },
-          ]),
+          ], page: { limit: 500, offset: 0, total: 2 } }),
           { status: 200 },
         );
       }

@@ -9,6 +9,7 @@ import {
   type LookupFetcher,
 } from "@flanksource/clicky-ui/components";
 import { fetchLookupOptions } from "./api";
+import { sectionMutexGroups, useMutualExclusions, type MutexGroup } from "./MutualExclusions";
 import { useProfileFilterPairs } from "./ProfileFilterPairs";
 import type { CredentialMode, Engine, EngineOptionVariant } from "./types";
 
@@ -42,6 +43,7 @@ type EngineConfigSection = {
   sourceUrl?: string;
   schema: JsonSchemaObject;
   keys: string[];
+  mutexes: MutexGroup[];
 };
 
 export type ResolvedEngineConfigSchema = {
@@ -51,7 +53,7 @@ export type ResolvedEngineConfigSchema = {
   credentialSelectorKeys: string[];
 };
 
-type SectionMetadata = Omit<EngineConfigSection, "schema" | "keys">;
+type SectionMetadata = Omit<EngineConfigSection, "schema" | "keys" | "mutexes">;
 
 function objectSchema(
   engine: Engine,
@@ -187,7 +189,13 @@ function projectSections(
         ? { $defs: stripSchemaDefaults(root.$defs) as JsonSchemaObject["$defs"] }
         : {}),
     };
-    return [{ ...section, keys, schema: projected }];
+    const mutexes = sectionMutexGroups({
+      root,
+      sectionTitle: section.title,
+      sectionKeys: keys,
+      describe: (message) => `${engine.title} configuration schema ${message}`,
+    });
+    return [{ ...section, keys, schema: projected, mutexes }];
   });
 }
 
@@ -262,6 +270,10 @@ export function EngineConfigForm({
   const firstSectionId = resolved.sections[0].id;
   const activeSection =
     resolved.sections.find((section) => section.id === sectionId) ?? resolved.sections[0];
+  const mutexes = useMutualExclusions(
+    activeSection.mutexes,
+    `${identity}:${resolved.variant.id}:${schemaKind}`,
+  );
   const tweaked = baseline ? !sameConfig(value, baseline) : false;
 
   useEffect(
@@ -376,8 +388,8 @@ export function EngineConfigForm({
           onChange={commit}
           errors={activeErrors}
           lookupFetcher={scopedLookupFetcher}
-          pre={pre}
-          post={post}
+          pre={[...pre, ...mutexes.pre]}
+          post={[...post, ...mutexes.post]}
           hiddenKeys={[
             ...hiddenKeys,
             ...(credentialMode === "ambient" ? resolved.credentialSelectorKeys : []),

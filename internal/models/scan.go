@@ -104,9 +104,9 @@ func localTimestamp(t time.Time) string {
 
 // Finding is one row of the findings table.
 type Finding struct {
-	ID       string `gorm:"column:id;primaryKey;default:generate_ulid()"`
-	ScanID   string `gorm:"column:scan_id"`
-	TargetID string `gorm:"column:target_id"`
+	ID       string  `gorm:"column:id;primaryKey;default:generate_ulid()"`
+	ScanID   string  `gorm:"column:scan_id"`
+	TargetID *string `gorm:"column:target_id"`
 	// LineNo preserves the order the engine emitted findings in, which is the
 	// order the results file has and the UI renders.
 	LineNo int `gorm:"column:line_no"`
@@ -117,6 +117,7 @@ type Finding struct {
 	Host        string  `gorm:"column:host"`
 	MatchedAt   string  `gorm:"column:matched_at"`
 	MatcherName *string `gorm:"column:matcher_name"`
+	Verdict     string  `gorm:"column:verdict"`
 	Type        *string `gorm:"column:type"`
 
 	Tags      pq.StringArray `gorm:"column:tags;type:text[]"`
@@ -130,23 +131,59 @@ type Finding struct {
 	Response    *string        `gorm:"column:response"`
 
 	Raw JSON[map[string]any] `gorm:"column:raw;type:jsonb"`
+
+	// ResourceID is the primary subject the evidence is about, NULL for an
+	// engine that names no resource recon has recorded.
+	ResourceID *string `gorm:"column:resource_id"`
 }
 
 // TableName is explicit; see Scan.TableName.
 func (Finding) TableName() string { return "findings" }
 
+// FindingResource links a finding to every subject its record named.
+//
+// A row per (finding, resource) rather than a column on findings, because a
+// check that fails against forty buckets names forty and the verdict is about
+// one of them. findings.resource_id stays the canonical subject the lifecycle
+// keys on; this is the full list.
+type FindingResource struct {
+	FindingID  string `gorm:"column:finding_id;primaryKey"`
+	ResourceID string `gorm:"column:resource_id;primaryKey"`
+	Ordinal    int    `gorm:"column:ordinal"`
+}
+
+func (FindingResource) TableName() string { return "finding_resources" }
+
 // Document projects the row onto the wire type.
-func (f Finding) Document() api.Finding {
+// Document renders the stored row, given the subjects it names.
+//
+// Resources are passed in rather than recovered here, because they cannot be
+// recovered here. A resource is keyed by (provider, scope, uid) and OCSF
+// carries only the uid on each entry of its resources array — at 1.5.0 the
+// account sits once at the event level, in cloud.account.uid. Re-reading the
+// stored record therefore yields references that fail ResourceKey.Validate, and
+// every consumer that needs a key silently stops matching. The caller joins
+// finding_resources, which resolves to rows that hold the whole key.
+//
+// A finding whose engine named nothing recon recorded gets the synthesised
+// reference instead, which is what nuclei and the filesystem scanners produce.
+func (f Finding) Document(resources []api.ResourceRef) api.Finding {
 	finding := api.Finding{
+		ID:          f.ID,
 		ScanID:      f.ScanID,
 		LineNo:      f.LineNo,
-		TargetID:    f.TargetID,
+		TargetID:    deref(f.TargetID),
 		TemplateID:  f.TemplateID,
 		Name:        f.Name,
 		Severity:    api.Severity(f.Severity),
 		Host:        f.Host,
 		MatchedAt:   f.MatchedAt,
 		MatcherName: deref(f.MatcherName),
+		// Only when it is not the default. Every finding is a failure unless it
+		// says otherwise, so echoing "fail" onto every one of them would put a
+		// field on the wire that carries no information and break the round-trip
+		// an ordinary finding is asserted to survive.
+		Verdict: manualOnly(f.Verdict),
 		Type:        deref(f.Type),
 		Tags:        stringSlice(f.Tags),
 		Extracted:   stringSlice(f.Extracted),
@@ -163,6 +200,19 @@ func (f Finding) Document() api.Finding {
 	if finding.Tags == nil {
 		finding.Tags = []string{}
 	}
+	finding.Resources = resources
+	if len(finding.Resources) == 0 {
+		if fallback := finding.ResourceFallback(); !fallback.Empty() {
+			finding.Resources = []api.ResourceRef{fallback}
+		}
+	}
+	// resource_id is the subject the verdict is about, and the relation is
+	// ordered by the position the record named each in — so the canonical one is
+	// first and already carries its id. Stamping it here covers the synthesised
+	// reference, which resolves to no row of its own.
+	if f.ResourceID != nil && len(finding.Resources) > 0 && finding.Resources[0].ID == "" {
+		finding.Resources[0].ID = *f.ResourceID
+	}
 	return finding
 }
 
@@ -174,17 +224,22 @@ func (f Finding) Document() api.Finding {
 // routinely. Postgres accepts them in neither text nor jsonb, so one such
 // response used to abort the insert for the entire scan and lose every finding
 // in it along with the run's terminal status.
-func FindingFrom(scanID string, lineNo int, finding api.Finding) Finding {
+// resourceID is the resource the finding is about, empty for an engine that
+// names none — a NULL foreign key is skipped entirely, so the nuclei hot path
+// pays nothing for the column existing.
+func FindingFrom(scanID string, lineNo int, finding api.Finding, resourceID string) Finding {
 	row := Finding{
 		ScanID:      scanID,
 		LineNo:      lineNo,
-		TargetID:    scrub(finding.TargetID),
+		ResourceID:  nonEmpty(resourceID),
+		TargetID:    nonEmpty(scrub(finding.TargetID)),
 		TemplateID:  scrub(finding.TemplateID),
 		Name:        scrub(finding.Name),
 		Severity:    string(finding.Severity),
 		Host:        scrub(finding.Host),
 		MatchedAt:   scrub(finding.MatchedAt),
 		MatcherName: nonEmpty(scrub(finding.MatcherName)),
+		Verdict:     verdictOf(finding),
 		Type:        nonEmpty(scrub(finding.Type)),
 		// Never nil: the column is NOT NULL with a '{}' default, and GORM sends an
 		// explicit NULL for a nil slice rather than letting the default apply. A
@@ -204,6 +259,23 @@ func FindingFrom(scanID string, lineNo int, finding api.Finding) Finding {
 		}
 	}
 	return row
+}
+
+// verdictOf reads what kind of verdict a finding is, defaulting to a plain
+// failure. An engine that does not distinguish says nothing and gets `fail`,
+// which is what every finding was before the distinction existed.
+func verdictOf(finding api.Finding) string {
+	if finding.Verdict == api.VerdictManual {
+		return api.VerdictManual
+	}
+	return api.VerdictFail
+}
+
+func manualOnly(verdict string) string {
+	if verdict == api.VerdictManual {
+		return api.VerdictManual
+	}
+	return ""
 }
 
 // nulReplacement marks where a byte Postgres cannot store used to be. The

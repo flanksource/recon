@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { LookupFetcher } from "@flanksource/clicky-ui/components";
 import { CredentialConfigForm, envVarFromSecretRef, secretRefFromEnvVar } from "./CredentialConfigForm";
 import type { EngineOptionSchema, TargetCredentials } from "./types";
 
@@ -37,6 +38,19 @@ const credentialSchema: EngineOptionSchema = {
       },
     },
   },
+  "x-credential-methods": [
+    {
+      id: "api-token",
+      title: "API token",
+      envVars: [{ name: "CLOUDFLARE_API_TOKEN", title: "API token" }],
+    },
+    {
+      id: "global-api-key",
+      title: "Global API key",
+      envVars: [{ name: "CLOUDFLARE_API_KEY", title: "API key" }],
+      requiredSettings: ["api-email"],
+    },
+  ],
 };
 
 describe("credential EnvVar projection", () => {
@@ -119,6 +133,9 @@ describe("CredentialConfigForm", () => {
 
     expect(screen.getByText(/configured value is hidden/i)).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox", { name: "Authentication method" })).toHaveValue(
+      "api-token",
+    );
     expect(screen.getByRole("textbox", { name: "Static value" })).toHaveValue("");
 
     const source = screen.getByRole("combobox", {
@@ -146,5 +163,44 @@ describe("CredentialConfigForm", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear credential" }));
     expect(onChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("renders native connections as type-scoped lookups", async () => {
+    const lookupFetcher = vi.fn<LookupFetcher>(async () => [
+      { value: "connection://prod-gcp", label: "connection://prod-gcp" },
+    ]);
+    const onChange = vi.fn();
+    render(
+      <CredentialConfigForm
+        schema={{
+          type: "object",
+          title: "Google Cloud credentials",
+          "x-credential-methods": [
+            {
+              id: "gcp",
+              title: "Google Cloud connection",
+              connection: { key: "gcp", type: "google_cloud" },
+            },
+          ],
+        }}
+        lookupFetcher={lookupFetcher}
+        onChange={onChange}
+      />,
+    );
+
+    await waitFor(() => expect(lookupFetcher).toHaveBeenCalled());
+    expect(lookupFetcher.mock.calls[0]?.[0].descriptor).toEqual(
+      expect.objectContaining({
+        url: "/api/v1/connection",
+        filter: "connection",
+        types: ["google_cloud"],
+      }),
+    );
+    screen.getByRole("combobox", { name: /Connection/ });
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle options" }));
+    fireEvent.mouseDown(await screen.findByRole("option", { name: "connection://prod-gcp" }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      connections: { gcp: { connection: "connection://prod-gcp" } },
+    });
   });
 });

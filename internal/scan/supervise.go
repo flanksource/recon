@@ -130,6 +130,13 @@ func (r *Runtime) supervise(
 		// "this target was scanned and nothing was found" is the answer the
 		// inventory's Last scan column exists to give.
 		TargetIDs: run.targetIDs, CountFindings: true,
+		// Every subject the run examined, passes included — the half of the
+		// estate that used to be invisible because only failures left a trace.
+		Resources: run.session.Resources(),
+		// The findings a rule removed. They are not written, so without them a
+		// check somebody accepted would keep whatever state it had and read as
+		// a problem nobody is looking at.
+		Muted: muted.Dropped, MutedBy: muted.ByRule,
 	}); err != nil {
 		run.Scan.Phase = api.PhaseFailed
 		run.Scan.Error = fmt.Sprintf("persist scan evidence: %v", err)
@@ -157,6 +164,13 @@ func (r *Run) retainArtifacts(captured models.ScanOutput, mutes MuteRecord) erro
 	// file still holds every line it produced, and this is what says which of
 	// those lines the database does not have and which rule removed them.
 	if err := r.artifacts.WriteJSON(MutesFile, mutes); err != nil {
+		return fmt.Errorf("retain scan artifacts: %w", err)
+	}
+
+	// The estate the run saw, passes included. The engine's own output records
+	// only what failed, so this is the only file in the directory that says
+	// what was clean.
+	if err := r.artifacts.WriteJSONL(ResourcesFile, r.session.Resources()); err != nil {
 		return fmt.Errorf("retain scan artifacts: %w", err)
 	}
 

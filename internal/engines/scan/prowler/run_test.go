@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flanksource/commons-db/connection"
 	dbcontext "github.com/flanksource/commons-db/context"
 	"github.com/flanksource/commons-db/types"
 	. "github.com/onsi/ginkgo/v2"
@@ -20,13 +21,18 @@ import (
 )
 
 type recordingSink struct {
-	findings []api.Finding
-	stats    api.ScanStats
-	logs     []string
+	findings  []api.Finding
+	resources []api.Resource
+	stats     api.ScanStats
+	logs      []string
 }
 
 func (s *recordingSink) Finding(finding api.Finding) error {
 	s.findings = append(s.findings, finding)
+	return nil
+}
+func (s *recordingSink) Resource(resource api.Resource) error {
+	s.resources = append(s.resources, resource)
 	return nil
 }
 func (s *recordingSink) Stats(stats api.ScanStats) { s.stats = stats }
@@ -222,7 +228,7 @@ var _ = Describe("a Prowler run", func() {
 
 		err := engine.Run(context.Background(), run, sink)
 
-		Expect(err).To(MatchError(ContainSubstring("requires an explicit credential selector")))
+		Expect(err).To(MatchError(ContainSubstring("credential schema")))
 		Expect(argsLog).ToNot(BeAnExistingFile())
 	})
 
@@ -260,43 +266,46 @@ var _ = Describe("a Prowler run", func() {
 		Entry("killed", 137, false),
 	)
 
-	It("redacts configured credential paths from commands and chunked logs", func() {
+	It("injects the selected authentication flag without serializing a connection reference", func() {
 		catalogue := testArgumentCatalogue()
-		credentialPath := "/credentials/provider.json"
-		raw, safe, err := buildArgv(&catalogue, "gcp", map[string]any{}, providerContext{
-			ID: "gcp-prod", Provider: "gcp", CredentialMode: api.CredentialConfigured,
-			Arguments: map[string]any{"project-ids": []any{"example-prod"}, "credentials-file": credentialPath},
+		reference := "connection://prod-azure"
+		raw, safe, err := buildArgv(&catalogue, "azure", map[string]any{}, providerContext{
+			ID: "azure-prod", Provider: "azure", CredentialMode: api.CredentialConfigured,
+			Credentials: &credentialstore.ProviderCredentials{Connections: &connection.ExecConnections{
+				Azure: &connection.AzureConnection{ConnectionName: reference},
+			}},
 		})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(raw).To(ContainElement(credentialPath))
-		Expect(safe).To(ContainElement(arguments.RedactedValue))
-		Expect(safe).ToNot(ContainElement(credentialPath))
+		Expect(raw).To(ContainElement("--sp-env-auth"))
+		Expect(raw).ToNot(ContainElement(reference))
+		Expect(safe).To(Equal(raw))
 
 		logs := &recordingSink{}
-		writer := newRedactingLogWriter(logs, redactedValues(raw, safe))
-		_, err = writer.Write([]byte("using /credentials/"))
+		writer := newRedactingLogWriter(logs, nil)
+		writer.AddSensitive([]string{"runtime-secret"})
+		_, err = writer.Write([]byte("using runtime-"))
 		Expect(err).ToNot(HaveOccurred())
-		_, err = writer.Write([]byte("provider.json\n"))
+		_, err = writer.Write([]byte("secret\n"))
 		Expect(err).ToNot(HaveOccurred())
 		writer.Close()
 		Expect(logs.logs).To(Equal([]string{"using " + arguments.RedactedValue}))
 	})
 
-	It("records only the first context invocation with credential selectors redacted", func() {
-		credentialPath := "/credentials/provider.json"
+	It("records native connection commands without serializing the connection reference", func() {
+		reference := "connection://prod-gcp"
 		run.ProviderContexts = []engines.ProviderContext{{
 			ID: "gcp-prod", Provider: "gcp", CredentialMode: api.CredentialConfigured,
-			Arguments: map[string]any{
-				"project-ids": []any{"example-prod"}, "credentials-file": credentialPath,
-			},
-			Class: api.ClassProd,
+			Arguments: map[string]any{"project-ids": []any{"example-prod"}},
+			Class:     api.ClassProd,
+			Credentials: &credentialstore.ProviderCredentials{Connections: &connection.ExecConnections{
+				GCP: &connection.GCPConnection{ConnectionName: reference},
+			}},
 		}}
 
 		command := engine.Command(run)
 
 		Expect(command[0]).To(Equal(run.Bin))
-		Expect(command).To(ContainElement(arguments.RedactedValue))
-		Expect(command).ToNot(ContainElement(credentialPath))
+		Expect(command).ToNot(ContainElement(reference))
 		Expect(strings.Join(command, " ")).To(ContainSubstring("gcp --project-ids example-prod"))
 	})
 })
@@ -323,6 +332,9 @@ func testArgumentCatalogue() arguments.Catalogue {
 	return arguments.Catalogue{
 		Common: common,
 		Providers: []arguments.Provider{
+			{Name: "azure", Arguments: []arguments.Argument{
+				argument("sp-env-auth", "--sp-env-auth", 0, arguments.OwnerContext, arguments.ActionStoreTrue, arguments.NArgsNone, arguments.TypeBoolean),
+			}},
 			{Name: "gcp", Arguments: []arguments.Argument{
 				argument("project-ids", "--project-ids", 0, arguments.OwnerContext, arguments.ActionStore, arguments.NArgsOneOrMore, arguments.TypeString),
 				argument("skip-api-check", "--skip-api-check", 1, arguments.OwnerProfile, arguments.ActionStoreTrue, arguments.NArgsNone, arguments.TypeBoolean),

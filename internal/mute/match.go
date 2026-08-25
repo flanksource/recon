@@ -59,6 +59,8 @@ func (r Rule) structurallyMatches(finding api.Finding) bool {
 		return false
 	case !matchesAny(r.Resources, resourcesOf(finding)):
 		return false
+	case !matchesResourceKey(r.ResourceKeys, finding.Resources):
+		return false
 	case !collections.MatchItems(finding.TemplateID, r.Templates...):
 		return false
 	case !matchesTags(r.Tags, finding.Tags):
@@ -70,14 +72,46 @@ func (r Rule) structurallyMatches(finding api.Finding) bool {
 	}
 }
 
+func matchesResourceKey(keys []string, resources []api.ResourceRef) bool {
+	if len(keys) == 0 {
+		return true
+	}
+	for _, resource := range resources {
+		key := api.ResourceKey{Provider: resource.Provider, Scope: resource.Scope, UID: resource.UID}
+		if key.Validate() == nil && contains(keys, key.String()) {
+			return true
+		}
+	}
+	return false
+}
+
 // resourcesOf is where a finding says which thing it is about.
 //
-// Both, because the engines do not agree and neither one alone is the resource.
-// Prowler puts the cloud account in Host and the resource uid in MatchedAt;
-// nuclei puts the hostname in Host and the matched URL in MatchedAt. A rule
-// naming a bucket has to reach the first, and a rule naming a host the second.
+// The resources the engine named come first, then the two flat strings that
+// were the only answer before findings carried resources. Prowler puts the
+// cloud account in Host and the resource uid in MatchedAt; nuclei puts the
+// hostname in Host and the matched URL in MatchedAt. A rule naming a bucket has
+// to reach the first, and a rule naming a host the second.
+//
+// Both legacy rungs stay, and that is not caution — it is required. A rule
+// written before this change must keep matching exactly what it matched, and a
+// finding naming no resource resolves to precisely the two values this returned
+// before.
+//
+// Only UID and Name are added: the two names for the thing. Type is
+// deliberately not folded in, because `resources` is an untyped glob dimension
+// and matchesAny is an OR — every value added can only widen what a rule mutes,
+// and muting *drops* findings. api.MuteRule names the failure mode itself: the
+// failure mode of an accidentally universal mute is a clean scan that is not
+// clean. A rule reading `resources: ["*prod*"]` now also matches a resource's
+// human name, which is the intended fix — the case that silently failed before
+// — and is as far as widening should go without a separate ANDed dimension.
 func resourcesOf(finding api.Finding) []string {
-	return []string{finding.MatchedAt, finding.Host}
+	names := make([]string, 0, len(finding.Resources)*2+2)
+	for _, resource := range finding.Resources {
+		names = append(names, resource.UID, resource.Name)
+	}
+	return append(names, finding.MatchedAt, finding.Host)
 }
 
 // matchesAny applies patterns to a set of values, where matching any one of

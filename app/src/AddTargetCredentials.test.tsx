@@ -37,6 +37,13 @@ const engine: Engine = {
         credentialSchema: {
           type: "object",
           title: "Cloudflare credentials",
+          "x-credential-methods": [
+            {
+              id: "api-token",
+              title: "API token",
+              envVars: [{ name: "CLOUDFLARE_API_TOKEN", title: "API token" }],
+            },
+          ],
           properties: {
             envVars: {
               type: "array",

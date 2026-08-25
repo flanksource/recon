@@ -339,7 +339,9 @@ func (r *Runner) resolveProfiles(
 		if err := registered.Spec().ValidateOverrides(profile.Config, overrides[engine]); err != nil {
 			return nil, fmt.Errorf("%s configuration: %w", engine, err)
 		}
-		config := withOverrides(profile.Config, overrides[engine])
+		// Run-only by design: a one-off sweep that probed a wider port range
+		// should not silently become the port range every later sweep uses.
+		config := engines.LayerOverrides(profile.Config, overrides[engine])
 		// Only the overridden configuration is checked: it is the input this
 		// request supplied, and a stored profile is validated where it is
 		// written. An override the engine would reject must fail before the

@@ -161,13 +161,18 @@ var _ = Describe("resolving the contexts of a run", func() {
 // sink collects what an engine reports, so a run can be asserted on without a
 // database or an HTTP stream behind it.
 type sink struct {
-	findings []api.Finding
-	stats    api.ScanStats
-	log      []string
+	findings  []api.Finding
+	resources []api.Resource
+	stats     api.ScanStats
+	log       []string
 }
 
 func (s *sink) Finding(finding api.Finding) error {
 	s.findings = append(s.findings, finding)
+	return nil
+}
+func (s *sink) Resource(resource api.Resource) error {
+	s.resources = append(s.resources, resource)
 	return nil
 }
 func (s *sink) Stats(stats api.ScanStats) { s.stats = stats }

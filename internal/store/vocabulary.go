@@ -31,6 +31,15 @@ const (
 	FindingTemplates Vocabulary = "finding.template"
 	FindingTags      Vocabulary = "finding.tag"
 
+	ResourceAccounts Vocabulary = "resource.account"
+	ResourceTypes    Vocabulary = "resource.type"
+	ResourceServices Vocabulary = "resource.service"
+	ResourceRegions  Vocabulary = "resource.region"
+	ResourceNames    Vocabulary = "resource.name"
+	ResourceEngines  Vocabulary = "resource.engine"
+	ResourceTags     Vocabulary = "resource.tag"
+	ResourceLabels   Vocabulary = "resource.label"
+
 	ProbeHosts Vocabulary = "probe.host"
 
 	ProfileNames Vocabulary = "profile.name"
@@ -86,6 +95,25 @@ var vocabularies = map[Vocabulary]string{
 	FindingTargets:   `SELECT DISTINCT target_id COLLATE "C" AS value FROM findings WHERE target_id IS NOT NULL ORDER BY value`,
 	FindingTemplates: `SELECT DISTINCT template_id AS value FROM findings ORDER BY template_id`,
 	FindingTags:      `SELECT DISTINCT unnest(tags) AS value FROM findings ORDER BY value`,
+
+	ResourceAccounts: `SELECT DISTINCT scope AS value FROM resources WHERE scope <> '' ORDER BY scope`,
+	ResourceTypes:    `SELECT DISTINCT type AS value FROM resources WHERE type <> '' ORDER BY type`,
+	ResourceServices: `SELECT DISTINCT service AS value FROM resources WHERE service <> '' ORDER BY service`,
+	ResourceNames:    `SELECT DISTINCT name COLLATE "C" AS value FROM resources WHERE name <> '' ORDER BY value`,
+	ResourceEngines:  `SELECT DISTINCT engine AS value FROM resources, unnest(engines) AS engine WHERE engine <> '' ORDER BY engine`,
+	ResourceTags:     `SELECT DISTINCT unnest(tags) AS value FROM resources ORDER BY value`,
+	ResourceLabels:   `SELECT DISTINCT key || ':' || value AS value FROM resources, jsonb_each_text(labels) ORDER BY value`,
+
+	// `global` first, and for the same reason TargetPorts sorts numerically:
+	// the option set is served head-first, so the ordering decides what a user
+	// can pick without typing. It is 131 of one report's 190 rows and sorts
+	// after `eu` and `europe-west1` alphabetically — straight out of the head,
+	// which is where the single most common value must not be.
+	ResourceRegions: `
+		SELECT value FROM (
+			SELECT DISTINCT region AS value FROM resources WHERE region <> ''
+		) regions
+		ORDER BY (value <> 'global'), value`,
 
 	// Every host any sweep has probed, not just the ones in the inventory now: a
 	// probe's history outlives the target it was taken of, and filtering it by a

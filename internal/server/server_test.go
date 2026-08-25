@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/flanksource/commons-db/dbtest"
+	commonsmodels "github.com/flanksource/commons-db/models"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -120,7 +122,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 
 		It("gives every entity a list and a get", func() {
 			paths, _ := spec["paths"].(map[string]any)
-			for _, entity := range []string{"target", "scan", "finding", "discover", "probe", "profile", "engine"} {
+			for _, entity := range []string{"target", "scan", "finding", "resource", "discover", "probe", "profile", "engine"} {
 				Expect(paths).To(HaveKey("/api/v1/"+entity), entity)
 				Expect(paths).To(HaveKey("/api/v1/"+entity+"/{id}"), entity)
 			}
@@ -207,21 +209,35 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 			Expect(operationID(methods["put"])).To(Equal("target_update"))
 		})
 
-		It("exposes every selector field as a query parameter", func() {
-			// The filter bar is generated from these, so a field the selector
-			// understands but the spec omits is a filter the UI cannot offer.
-			declared := map[string]bool{}
-			for _, parameter := range parameters(spec, "/api/v1/target", "get") {
-				declared[parameter] = true
-			}
+		// Every entity's selector, not just the target's. The spec used to
+		// reflect over store.TargetOpts alone while claiming to describe "the
+		// filter bar", so the coverage it advertised did not exist for any
+		// other entity — and a selector field the spec omits is a filter the UI
+		// silently cannot offer.
+		DescribeTable("exposes every selector field as a query parameter",
+			func(path string, opts any) {
+				declared := map[string]bool{}
+				for _, parameter := range parameters(spec, path, "get") {
+					declared[parameter] = true
+				}
 
-			opts := reflect.TypeOf(store.TargetOpts{})
-			for i := range opts.NumField() {
-				flag := opts.Field(i).Tag.Get("flag")
-				Expect(declared).To(HaveKey(flag),
-					"selector field %s is not offered as a query parameter", opts.Field(i).Name)
-			}
-		})
+				selector := reflect.TypeOf(opts)
+				for i := range selector.NumField() {
+					flag := selector.Field(i).Tag.Get("flag")
+					if flag == "" {
+						continue
+					}
+					Expect(declared).To(HaveKey(flag),
+						"selector field %s is not offered as a query parameter", selector.Field(i).Name)
+				}
+			},
+			Entry("target", "/api/v1/target", store.TargetOpts{}),
+			Entry("scan", "/api/v1/scan", store.ScanOpts{}),
+			Entry("finding", "/api/v1/finding", store.FindingOpts{}),
+			Entry("resource", "/api/v1/resource", store.ResourceOpts{}),
+			Entry("probe", "/api/v1/probe", store.ProbeOpts{}),
+			Entry("profile", "/api/v1/profile", store.ProfileOpts{}),
+		)
 	})
 
 	Describe("the entity index", func() {
@@ -372,10 +388,56 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 			Expect(filters["hosts"].Total).To(Equal(1))
 		})
 
+		// Resources are the only listing that pages, and the envelope is the
+		// hardest thing here to change later: it is simultaneously the CLI
+		// output shape, the OpenAPI response schema and the UI client. A page
+		// that reported its own length as the total would make "what have I
+		// got" a wrong answer rather than a partial one.
+		It("answers the resource listing with a page and a total", func() {
+			var page struct {
+				Data []map[string]any `json:"data"`
+				Page struct {
+					Limit  int   `json:"limit"`
+					Offset int   `json:"offset"`
+					Total  int64 `json:"total"`
+				} `json:"page"`
+			}
+			Expect(json.Unmarshal(get(suite.URL+"/api/v1/resource"), &page)).To(Succeed())
+
+			// Non-nil even when empty: a client that has to distinguish `null`
+			// from `[]` will eventually get it wrong.
+			Expect(page.Data).ToNot(BeNil())
+			Expect(page.Page.Total).To(BeNumerically(">=", 0))
+		})
+
 		It("gives every listing something to narrow by", func() {
-			for _, entity := range []string{"target", "scan", "finding", "discover", "probe", "profile", "engine"} {
+			for _, entity := range []string{"target", "scan", "finding", "resource", "discover", "probe", "profile", "engine"} {
 				Expect(lookup(suite.URL+"/api/v1/"+entity, "")).ToNot(BeEmpty(), entity)
 			}
+		})
+	})
+
+	Describe("connections", func() {
+		BeforeAll(func() {
+			for _, connection := range []commonsmodels.Connection{
+				{ID: uuid.New(), Name: "prod-aws", Type: "aws", Password: "aws-secret"},
+				{ID: uuid.New(), Name: "prod-gcp", Type: "google_cloud", Certificate: "gcp-secret"},
+			} {
+				Expect(st.DB(GinkgoT().Context()).Create(&connection).Error).To(Succeed())
+			}
+		})
+
+		It("scopes picker options by connection type without exposing secrets", func() {
+			filters := lookup(
+				suite.URL+"/api/v1/connection",
+				"&types=google_cloud&__lookup_filter=connection",
+			)
+			Expect(filters["connection"].values()).To(Equal([]string{"connection://prod-gcp"}))
+
+			body := get(suite.URL + "/api/v1/connection?types=google_cloud")
+			Expect(string(body)).To(ContainSubstring("connection://prod-gcp"))
+			Expect(string(body)).ToNot(ContainSubstring("gcp-secret"))
+			Expect(string(body)).ToNot(ContainSubstring("aws-secret"))
 		})
 	})
 

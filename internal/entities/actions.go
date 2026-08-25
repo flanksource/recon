@@ -40,8 +40,8 @@ type scanFlags struct {
 	// The pre-scan sweep is part of the run, so what it does is choosable here
 	// too — otherwise a custom scan can only customise half of what it does.
 	DiscoveryEngines  []string `flag:"discovery-engine" help:"Discovery engine to sweep with before scanning; repeatable. Empty runs the ones the sweep needs"`
-	DiscoveryOverride string   `flag:"discovery-override" help:"Run-only discovery configuration as JSON keyed by engine, e.g. {\"naabu\":{\"top-ports\":\"full\"}}; not saved to the profile"`
-	Override          string   `flag:"override" help:"Run-only scan configuration as JSON, e.g. {\"rate-limit\":50}; not saved to the profile"`
+	DiscoveryOverride string   `flag:"discovery-override" help:"Run-only discovery configuration as JSON keyed by engine, e.g. {\"naabu\":{\"top-ports\":\"full\"}}; null removes a key; not saved to the profile"`
+	Override          string   `flag:"override" help:"Run-only scan configuration as JSON, e.g. {\"rate-limit\":50}; null removes a key the profile sets, e.g. {\"services\":[\"iam\"],\"compliance\":null}; not saved to the profile"`
 	Confirm           bool     `flag:"confirm" help:"Acknowledge an intrusive scan of production, public or unclassified hosts"`
 	// A muted finding is not recorded, so without this the only way to see what
 	// the rules are currently hiding is to delete them.

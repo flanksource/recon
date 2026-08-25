@@ -1,7 +1,5 @@
 package api
 
-import "strconv"
-
 // The entity framework addresses every resource by an id and labels it with a
 // name. These are the two together for each wire type: the id is what a URL
 // path and a CLI argument carry, so it has to be the thing a person would
@@ -47,18 +45,32 @@ func (p Profile) GetID() string { return p.ID() }
 // called everywhere except its address.
 func (p Profile) GetName() string { return p.Name }
 
-// FindingID addresses a finding within its run. A finding has no identity apart
-// from where it appeared, so the run and the line it came from is the id.
-func FindingID(scan string, line int) string {
-	return scan + "#" + strconv.Itoa(line)
-}
-
-// GetID returns the finding's address within its run.
-func (f Finding) GetID() string { return f.ScanID + "#" + strconv.Itoa(f.LineNo) }
+// GetID returns the finding row's stable database identity.
+func (f Finding) GetID() string { return f.ID }
 
 // GetName returns the finding's template name, which is what the results list
 // shows.
 func (f Finding) GetName() string { return f.Name }
+
+// GetID returns the resource's ulid, falling back to its natural key for one an
+// engine has built but the store has not yet recorded — the same shape as
+// TargetDocument falling back to its host.
+func (r Resource) GetID() string {
+	if r.ID != "" {
+		return r.ID
+	}
+	return r.Key().String()
+}
+
+// GetName returns what a person recognises the resource as. The uid is a last
+// resort rather than the default: a GCP firewall's uid is 1429543158501771126
+// and its name is tailscale-router, and only one of those is worth a column.
+func (r Resource) GetName() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.UID
+}
 
 // GetID returns the rule's name, which is what mutes.json cites and what a
 // person types.

@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -54,6 +55,16 @@ const (
 	// anything was muted, so the two files together say exactly what was
 	// dropped and by which rule, without a database.
 	MutesFile = "mutes.json"
+
+	// ResourcesFile is every subject the run examined, one JSON document per
+	// line, whatever the verdict.
+	//
+	// JSONL rather than a single document because an estate scan enumerates
+	// tens of thousands and the file should stream. It is written for the same
+	// reason MutesFile is: the directory has to stand on its own, and the
+	// engine's own output records only what failed — so without this the
+	// resources every check passed on exist nowhere outside Postgres.
+	ResourcesFile = "resources.jsonl"
 )
 
 // NewArtifacts creates the directory for one run.
@@ -83,6 +94,25 @@ func (a Artifacts) WriteJSON(name string, value any) error {
 		return fmt.Errorf("encode %s: %w", name, err)
 	}
 	return a.WriteFile(name, append(encoded, '\n'))
+}
+
+// WriteJSONL stores one document per line, unindented.
+//
+// Nothing is written for an empty list: a zero-byte file and an absent one say
+// the same thing, and an engine that reports no resources should not leave
+// evidence suggesting it looked and found none.
+func (a Artifacts) WriteJSONL(name string, values []api.Resource) error {
+	if len(values) == 0 {
+		return nil
+	}
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body)
+	for _, value := range values {
+		if err := encoder.Encode(value); err != nil {
+			return fmt.Errorf("encode %s: %w", name, err)
+		}
+	}
+	return a.WriteFile(name, body.Bytes())
 }
 
 // WriteFile stores one artifact.

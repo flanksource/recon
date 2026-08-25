@@ -158,6 +158,20 @@ var _ = Describe("provider contexts in the inventory", Ordered, Label("db"), fun
 		Expect(contexts).To(HaveLen(1))
 		Expect(contexts[0].Credentials.EnvVars[0].ValueStatic).To(Equal("stored-token"))
 
+		preservedMarker, err := st.UpdateTarget(ctx, "gcp-production", api.TargetUpdate{
+			Curated: curated,
+			Credentials: &api.ProviderCredentials{EnvVars: []api.CredentialEnvVar{{
+				Name: "PROVIDER_TOKEN", Configured: true,
+			}}}, CredentialsSet: true,
+		})
+		Expect(err).ToNot(HaveOccurred())
+		body, err = json.Marshal(preservedMarker)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring(`"configured":true`))
+		contexts, err = st.ProviderContexts(ctx, store.TargetOpts{IDs: []string{"gcp-production"}}, "gcp")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(contexts[0].Credentials.EnvVars[0].ValueStatic).To(Equal("stored-token"))
+
 		preserved, err := st.UpdateTarget(ctx, "gcp-production", api.TargetUpdate{Curated: curated})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(preserved.Credentials.EnvVars[0].Value).To(Equal("stored-token"))

@@ -56,8 +56,11 @@ function scan(overrides: Partial<ReportScan> = {}): ReportScan {
   };
 }
 
+// The server always sends at least one resource, synthesising it from the
+// finding's own identity for engines that name none of their own — so a fixture
+// without one would be a payload the API cannot produce.
 function finding(overrides: Partial<ReportFinding> = {}): ReportFinding {
-  return {
+  const built: ReportFinding = {
     scanId: "scan-1",
     lineNo: 1,
     templateId: "aws/iam_root_mfa",
@@ -68,6 +71,12 @@ function finding(overrides: Partial<ReportFinding> = {}): ReportFinding {
     tags: ["iam"],
     ...overrides,
   };
+  if (!built.resources) {
+    built.resources = [
+      { uid: built.host, name: built.matchedAt || built.host, type: built.type },
+    ];
+  }
+  return built;
 }
 
 function metadataRow(model: ScanReportModel, label: string): MetadataRow | undefined {
@@ -252,9 +261,9 @@ describe("groupFindings", () => {
         type: "prowler",
         tags: ["identity", "compliance:CIS-1.2"],
         remediation: "Rotate the **affected key**.",
+        resources: [serviceAccount],
         raw: {
           info: { description: "The **service account** has an exposed key." },
-          resources: [serviceAccount],
         },
       }),
       finding({
@@ -265,7 +274,7 @@ describe("groupFindings", () => {
         matcherName: "FAIL",
         type: "prowler",
         tags: ["identity", "leaked-secret", "compliance:PCI-DSS"],
-        raw: { resources: [serviceAccount] },
+        resources: [serviceAccount],
       }),
       finding({ lineNo: 4, templateId: "http/header-check", severity: "low" }),
     ]);
@@ -286,7 +295,10 @@ describe("groupFindings", () => {
     });
   });
 
-  it("uses matched evidence as an instance when an engine did not emit resources", () => {
+  // The synthesised reference an engine with no resources of its own gets. It is
+  // built server-side now, so what this asserts is that the projection carries it
+  // through unchanged rather than re-deriving anything from matchedAt and host.
+  it("projects the reference the server synthesised for an engine that names none", () => {
     expect(groupFindings([finding({ type: "ssl" })])[0].instances).toEqual([
       {
         name: "arn:aws:iam::1:root",

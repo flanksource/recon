@@ -108,6 +108,18 @@ type Sink interface {
 	// Finding records one finding. An error aborts the run.
 	Finding(api.Finding) error
 
+	// Resource records one subject the run examined, whatever the verdict.
+	//
+	// Called for the checks that passed as well as the ones that failed, which
+	// is the only way the estate becomes visible: a compliance scan of two GCP
+	// projects reports 190 verdicts naming 94 resources, and recording only the
+	// 49 failures left half of them with no trace anywhere in recon.
+	//
+	// Idempotent by natural key. An engine that meets the same resource in fifty
+	// checks reports it fifty times and the runtime keeps one, unioning the
+	// verdicts each call carried. An error aborts the run, matching Finding.
+	Resource(api.Resource) error
+
 	// Stats reports progress. Called often; the last call wins.
 	Stats(api.ScanStats)
 

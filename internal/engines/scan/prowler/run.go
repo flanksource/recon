@@ -16,6 +16,7 @@ import (
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/engines/scan"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/arguments"
+	"github.com/flanksource/recon/internal/engines/scan/prowler/auth"
 )
 
 const outputDirectory = "output"
@@ -201,14 +202,30 @@ func buildArgv(
 	profile map[string]any,
 	subject providerContext,
 ) ([]string, []string, error) {
-	if err := catalogue.RejectSensitive(provider, subject.Arguments); err != nil {
+	var method *auth.Method
+	if subject.CredentialMode == api.CredentialConfigured {
+		credentials, err := credentialMap(subject.Credentials)
+		if err != nil {
+			return nil, nil, err
+		}
+		matched, err := auth.Match(provider, subject.Arguments, credentials)
+		if err != nil {
+			return nil, nil, err
+		}
+		method = &matched
+	}
+	contextArguments, err := auth.ProjectArguments(provider, subject.Arguments, method)
+	if err != nil {
 		return nil, nil, err
 	}
-	if _, err := mergeContextInputs(profile, subject.Arguments); err != nil {
+	if err := catalogue.RejectSensitive(provider, contextArguments); err != nil {
+		return nil, nil, err
+	}
+	if _, err := mergeContextInputs(profile, contextArguments); err != nil {
 		return nil, nil, err
 	}
 	partitioned, err := catalogue.PartitionProviderContext(
-		provider, subject.Arguments, arguments.ProviderContextOptions{
+		provider, contextArguments, arguments.ProviderContextOptions{
 			Mode:               arguments.CredentialMode(subject.CredentialMode),
 			RuntimeCredentials: subject.Credentials != nil && !subject.Credentials.Empty(),
 		})
@@ -231,6 +248,14 @@ func emitReport(report ocsfReport, encoder *json.Encoder, sink scan.Sink) error 
 			return fmt.Errorf("write Prowler finding: %w", err)
 		}
 		if err := sink.Finding(finding); err != nil {
+			return err
+		}
+	}
+	// Every subject the report named, including the ones every check passed on.
+	// They are not written to the findings file: that file is the engine's own
+	// results and a resource is not a result.
+	for _, resource := range report.Resources() {
+		if err := sink.Resource(resource); err != nil {
 			return err
 		}
 	}
@@ -329,6 +354,17 @@ type redactingLogWriter struct {
 
 func newRedactingLogWriter(sink scan.Sink, values []string) *redactingLogWriter {
 	return &redactingLogWriter{sink: sink, values: values}
+}
+
+func (w *redactingLogWriter) AddSensitive(values []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, value := range values {
+		if value != "" {
+			w.values = append(w.values, value)
+		}
+	}
+	sort.Slice(w.values, func(i, j int) bool { return len(w.values[i]) > len(w.values[j]) })
 }
 
 func (w *redactingLogWriter) Write(p []byte) (int, error) {

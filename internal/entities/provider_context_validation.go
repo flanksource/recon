@@ -13,6 +13,7 @@ import (
 
 type providerContextProfileReader interface {
 	GetProfile(context.Context, string) (api.Profile, error)
+	ConnectionType(context.Context, string) (string, error)
 }
 
 func validateProviderContext(ctx context.Context, profiles providerContextProfileReader, target api.TargetDocument) error {
@@ -30,6 +31,19 @@ func validateProviderContext(ctx context.Context, profiles providerContextProfil
 	}
 	if err := validateProviderContextSpec(engine.Spec(), target); err != nil {
 		return err
+	}
+	connections, err := providerCredentialConnections(engine.Spec(), target)
+	if err != nil {
+		return err
+	}
+	for _, required := range connections {
+		actual, err := profiles.ConnectionType(ctx, required.Reference)
+		if err != nil {
+			return fmt.Errorf("provider connection %s: %w", required.Reference, err)
+		}
+		if actual != required.Type {
+			return fmt.Errorf("provider connection %s has type %s, expected %s", required.Reference, actual, required.Type)
+		}
 	}
 	for _, profileID := range target.Profiles {
 		if err := validateProviderContextProfile(ctx, profiles, profileID, target); err != nil {
@@ -72,10 +86,37 @@ func validateProviderContextSpec(spec engines.Spec, target api.TargetDocument) e
 	if err := validateCredentialMode(target.CredentialMode, target.Credentials, selectors); err != nil {
 		return err
 	}
-	if err := spec.Options.ValidateCredentials(config, credentials); err != nil {
-		return fmt.Errorf("%s provider %s credential schema: %w", spec.Name, target.Provider, err)
+	if target.CredentialMode == api.CredentialConfigured {
+		if err := spec.Options.ValidateCredentials(config, credentials); err != nil {
+			return fmt.Errorf("%s provider %s credential schema: %w", spec.Name, target.Provider, err)
+		}
+	}
+	if spec.ValidateProviderCredentials != nil && target.CredentialMode == api.CredentialConfigured {
+		if _, err := spec.ValidateProviderCredentials(config, target.Arguments, credentials); err != nil {
+			return fmt.Errorf("%s provider %s credential policy: %w", spec.Name, target.Provider, err)
+		}
 	}
 	return nil
+}
+
+func providerCredentialConnections(spec engines.Spec, target api.TargetDocument) ([]engines.CredentialConnection, error) {
+	if spec.ValidateProviderCredentials == nil || target.CredentialMode != api.CredentialConfigured {
+		return nil, nil
+	}
+	credentials := map[string]any{}
+	var err error
+	if target.Credentials != nil {
+		credentials, err = target.Credentials.RawMap()
+		if err != nil {
+			return nil, err
+		}
+	}
+	connections, err := spec.ValidateProviderCredentials(
+		map[string]any{"provider": target.Provider}, target.Arguments, credentials)
+	if err != nil {
+		return nil, fmt.Errorf("%s provider %s credential policy: %w", spec.Name, target.Provider, err)
+	}
+	return connections, nil
 }
 
 func validateProviderContextProfile(

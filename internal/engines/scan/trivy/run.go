@@ -98,6 +98,11 @@ func (e Engine) scanContext(
 	// would throw away findings that were genuinely observed.
 	found, readErr := readReport(report, subject.ID)
 	if found != nil {
+		// The artifact itself, before its findings: emitted even when nothing
+		// was wrong with it, so a clean image is a row rather than an absence.
+		if err := sink.Resource(found.Resource(subject.ID)); err != nil {
+			return err
+		}
 		for _, finding := range found.Findings {
 			if err := encoder.Encode(finding); err != nil {
 				return fmt.Errorf("write trivy finding: %w", err)

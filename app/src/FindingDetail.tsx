@@ -3,7 +3,7 @@ import { DropdownMenu, Tabs, type TabItem } from "@flanksource/clicky-ui/compone
 import { Badge, CodeBlock, Markdown, Properties } from "@flanksource/clicky-ui/data";
 import { muteScopeOptions } from "./mute-prefill";
 import { severityBadge } from "./scanColumns";
-import type { Finding } from "./types";
+import { resourceLabel, type Finding } from "./types";
 
 // The engine's own record. Nuclei nests most of what an operator needs to
 // triage — description, impact, CVE classification, template path — under
@@ -27,6 +27,42 @@ function list(value: unknown): string[] {
   }
   const single = text(value);
   return single ? [single] : [];
+}
+
+/**
+ * The things a finding is about.
+ *
+ * A resource has two names and only one of them is worth reading: a GCP firewall
+ * is `tailscale-router` with uid `1429543158501771126`. The uid is still shown,
+ * because it is what a mute rule and a catalog lookup match on, but it is
+ * subordinate to the name rather than standing in for it.
+ */
+function ResourceList({ finding }: { finding: Finding }) {
+  const resources = finding.resources ?? [];
+  if (resources.length === 0) {
+    return <Mono>{finding.matchedAt || "—"}</Mono>;
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {resources.map((resource) => (
+        <div key={`${resource.type ?? ""}/${resource.uid}`} className="flex flex-col">
+          <span className="flex flex-wrap items-baseline gap-1.5">
+            <span className="break-all text-xs font-medium text-foreground">
+              {resourceLabel(resource)}
+            </span>
+            {resource.type ? <Badge size="sm">{resource.type}</Badge> : null}
+            {resource.region ? <Badge size="sm">{resource.region}</Badge> : null}
+          </span>
+          {resource.name && resource.uid !== resource.name ? (
+            <span className="break-all font-mono text-[11px] text-muted-foreground">
+              {resource.uid}
+            </span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Prose({ title, body }: { title: string; body: string }) {
@@ -143,18 +179,17 @@ function overviewProperties(
       hidden: !ip && !port,
     },
     {
+      key: finding.resources && finding.resources.length > 1 ? "Resources" : "Resource",
+      value: <ResourceList finding={finding} />,
+      hidden: !(finding.resources?.length ?? 0) && !matchedAt,
+    },
+    {
       key: "Matched at",
-      value: matchedAt ? (
-        <a
-          href={matchedAt}
-          target="_blank"
-          rel="noreferrer"
-          className="break-all text-xs text-primary hover:underline"
-        >
-          {matchedAt}
-        </a>
-      ) : null,
-      hidden: !matchedAt,
+      value: <Mono>{matchedAt}</Mono>,
+      // Only where it says something the resource does not. For nuclei it is the
+      // URL that answered and worth its own row; for a cloud posture scan it is
+      // the resource uid, already above.
+      hidden: !matchedAt || finding.resources?.some((r) => r.uid === matchedAt) === true,
     },
     { key: "URL", value: <Mono>{url}</Mono>, hidden: !url || url === matchedAt },
     { key: "Tags", value: <Mono>{finding.tags.join(", ")}</Mono>, hidden: !finding.tags.length },

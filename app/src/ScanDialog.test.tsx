@@ -11,10 +11,12 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScanDialog } from "./ScanDialog";
 import {
+  complianceProfile,
   createdScan,
   intrusiveProfile,
   mockFetch,
   nucleiEngine,
+  prowlerEngine,
   rows,
   safeProfile,
 } from "./ScanDialog.test-support";
@@ -108,6 +110,41 @@ describe("ScanDialog", () => {
     await waitFor(() => expect(sent.override).toEqual({ dast: true }));
     expect(sent.profile).toBe("safe");
     expect(saved).toHaveLength(0);
+  });
+
+  // The override is layered over the stored profile, so omitting a key means
+  // "keep what the profile says". Moving this run from a compliance framework
+  // to a service list therefore has to say the framework is gone — otherwise it
+  // comes back during the merge and the engine rejects the pair.
+  it("sends an option the run removed as null so the profile's copy is dropped", async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch({
+      "/api/v1/engine": [prowlerEngine],
+      "/api/v1/profile": [complianceProfile],
+      "/api/v1/scan": (_path: string, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body));
+        return createdScan;
+      },
+    });
+
+    render(
+      <ScanDialog
+        open
+        onClose={vi.fn()}
+        rows={rows}
+        savedTargetIds={rows.map((row) => row.id as string)}
+        selectedTargetIds={["api.example.com"]}
+        status={null}
+        onStatus={vi.fn()}
+      />,
+    );
+
+    const compliance = await screen.findByRole("radio", { name: "Compliance" });
+    expect(compliance).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Services" }));
+    fireEvent.click(screen.getByRole("button", { name: "Scan 1 host" }));
+
+    await waitFor(() => expect(sent.override).toEqual({ compliance: null }));
   });
 
   it("keeps a tweak as a new profile rather than redefining the one it came from", async () => {

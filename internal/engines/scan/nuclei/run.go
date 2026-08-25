@@ -83,6 +83,20 @@ func (Engine) Run(ctx context.Context, run engines.Run, sink scan.Sink) error {
 	// exist.
 	engine.LoadTargetsFromReader(targets, false)
 
+	// Every endpoint the run was pointed at, recorded whether or not a template
+	// fires against it. Read from the same file nuclei was handed rather than
+	// synthesised from the findings, because findings only exist where
+	// something was wrong: an endpoint nothing matched would otherwise be
+	// indistinguishable from one that was never scanned.
+	//
+	// No verdicts. A template that matched nothing did not pass — that is
+	// already this codebase's position in api.ScanStats.PassRecorded — so
+	// nothing here ever resolves an earlier finding, and an open finding on a
+	// nuclei endpoint stays open with an ageing last_seen, which is the truth.
+	if err := emitEndpoints(run.In, sink); err != nil {
+		return err
+	}
+
 	collected := newCollector(sink, results)
 	err = engine.ExecuteCallbackWithCtx(ctx, collected.Event)
 
@@ -103,7 +117,7 @@ func (Engine) Run(ctx context.Context, run engines.Run, sink scan.Sink) error {
 // nuclei's own JSON shape — the result file is read by things that are not
 // recon — minus the base64 copy of the whole template nuclei attaches to every
 // finding, which is large and which nothing reads.
-func convert(event *output.ResultEvent) (map[string]any, api.Finding) {
+func convert(event *output.ResultEvent) (map[string]any, api.Finding, error) {
 	raw := map[string]any{}
 	if encoded, err := json.Marshal(event); err == nil {
 		_ = json.Unmarshal(encoded, &raw)
@@ -121,6 +135,10 @@ func convert(event *output.ResultEvent) (map[string]any, api.Finding) {
 	}
 
 	host := hostOf(event)
+	resource, err := resultResource(event)
+	if err != nil {
+		return nil, api.Finding{}, err
+	}
 
 	return raw, api.Finding{
 		TemplateID:  event.TemplateID,
@@ -138,8 +156,20 @@ func convert(event *output.ResultEvent) (map[string]any, api.Finding) {
 		Curl:        event.CURLCommand,
 		Request:     event.Request,
 		Response:    event.Response,
+		Resources:   []api.ResourceRef{resource.Ref()},
 		Raw:         raw,
+	}, nil
+}
+
+func resultResource(event *output.ResultEvent) (api.Resource, error) {
+	identity := event.URL
+	if identity == "" && event.Type != "http" && event.Type != "https" {
+		identity = event.Host
 	}
+	if identity == "" {
+		return api.Resource{}, fmt.Errorf("nuclei result %s has no canonical input URL", event.TemplateID)
+	}
+	return endpointResource(identity), nil
 }
 
 // sinkLogger routes nuclei's own logging into the run's output stream, which is

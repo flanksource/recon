@@ -203,6 +203,27 @@ func (r *Registry) findingFilters() []clicky.Filter[store.FindingOpts] {
 		filter[store.FindingOpts]{key: "host", label: "Host", values: r.vocabulary(store.FindingHosts)},
 		filter[store.FindingOpts]{key: "template", label: "Template", values: r.vocabulary(store.FindingTemplates)},
 		filter[store.FindingOpts]{key: "tag", label: "Tag", values: r.vocabulary(store.FindingTags)},
+		filter[store.FindingOpts]{key: "resource", label: "Resource", values: r.vocabulary(store.ResourceNames)},
+	}
+}
+
+func (r *Registry) findingStateFilters() []clicky.Filter[store.FindingStateOpts] {
+	return []clicky.Filter[store.FindingStateOpts]{
+		filter[store.FindingStateOpts]{key: "provider", label: "Provider", values: r.vocabulary(store.TargetProviders)},
+		filter[store.FindingStateOpts]{key: "account", label: "Account", values: r.vocabulary(store.ResourceAccounts)},
+		filter[store.FindingStateOpts]{key: "kind", label: "Kind", values: fixed(
+			api.KindAccount, api.KindCloudResource, api.KindArtifact, api.KindEndpoint)},
+		filter[store.FindingStateOpts]{key: "type", label: "Type", values: r.vocabulary(store.ResourceTypes)},
+		filter[store.FindingStateOpts]{key: "service", label: "Service", values: r.vocabulary(store.ResourceServices)},
+		filter[store.FindingStateOpts]{key: "region", label: "Region", values: r.vocabulary(store.ResourceRegions)},
+		filter[store.FindingStateOpts]{key: "target", label: "Target", values: r.vocabulary(store.FindingTargets)},
+		filter[store.FindingStateOpts]{key: "engine", label: "Engine", values: r.vocabulary(store.ResourceEngines)},
+		filter[store.FindingStateOpts]{key: "check", label: "Check", values: r.vocabulary(store.FindingTemplates)},
+		filter[store.FindingStateOpts]{key: "severity", label: "Severity", values: fixed(severityNames()...)},
+		filter[store.FindingStateOpts]{key: "status", label: "Status", values: fixed(
+			api.StatusOpen, api.StatusManual, api.StatusResolved, api.StatusMuted)},
+		filter[store.FindingStateOpts]{key: "tag", label: "Tag", values: r.vocabulary(store.ResourceTags)},
+		filter[store.FindingStateOpts]{key: "label", label: "Label", values: r.vocabulary(store.ResourceLabels)},
 	}
 }
 

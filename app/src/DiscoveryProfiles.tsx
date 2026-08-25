@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, SegmentedControl, Select } from "@flanksource/clicky-ui/components";
 import { fetchEngines, fetchProfiles, saveProfile } from "./api";
+import { overridePatch } from "./api-helpers";
 import { EngineConfigForm, sameConfig } from "./EngineConfigForm";
 import { profileId } from "./types";
 import type { Engine, Profile } from "./types";
@@ -157,7 +158,7 @@ export function useDiscoveryProfiles(open: boolean): DiscoveryProfileState {
   const overrides = useMemo(() => {
     const changed: Record<string, Config> = {};
     for (const profile of editedProfiles) {
-      changed[profile.engine] = draft(profile);
+      changed[profile.engine] = overridePatch(profile.config, draft(profile));
     }
     return changed;
   }, [draft, editedProfiles]);

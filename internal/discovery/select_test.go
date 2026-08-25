@@ -4,6 +4,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/flanksource/recon/internal/engines"
 	enginediscovery "github.com/flanksource/recon/internal/engines/discovery"
 )
 
@@ -54,7 +55,7 @@ var _ = Describe("choosing which discovery engines run", func() {
 var _ = Describe("layering run-only configuration over a stored profile", func() {
 	It("overrides the named keys and leaves the rest of the profile alone", func() {
 		stored := map[string]any{"top-ports": "100", "rate": 1000}
-		Expect(withOverrides(stored, map[string]any{"top-ports": "full"})).To(Equal(
+		Expect(engines.LayerOverrides(stored, map[string]any{"top-ports": "full"})).To(Equal(
 			map[string]any{"top-ports": "full", "rate": 1000},
 		))
 		// The stored profile is what a later sweep reads back, so a run-only
@@ -64,6 +65,6 @@ var _ = Describe("layering run-only configuration over a stored profile", func()
 
 	It("returns the profile untouched when nothing is overridden", func() {
 		stored := map[string]any{"rate": 1000}
-		Expect(withOverrides(stored, nil)).To(Equal(stored))
+		Expect(engines.LayerOverrides(stored, nil)).To(Equal(stored))
 	})
 })

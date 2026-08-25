@@ -124,13 +124,24 @@ var _ = Describe("provider credentials wire contract", func() {
 		}))
 	})
 
-	It("rejects the read-only configured sentinel on write", func() {
-		_, err := api.TargetFrom(configuredTarget(map[string]any{
+	It("accepts configured markers only on updates", func() {
+		update, err := api.TargetUpdateFrom(map[string]any{
+			"credentials": map[string]any{"envVars": []any{map[string]any{
+				"name": "CLOUDFLARE_API_TOKEN", "configured": true,
+			}}},
+			"class": "prod", "profiles": []any{"scan:prowler:cloudflare-cis"}, "tags": []any{},
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(update.Credentials.EnvVars).To(Equal([]api.CredentialEnvVar{{
+			Name: "CLOUDFLARE_API_TOKEN", Configured: true,
+		}}))
+
+		_, err = api.TargetFrom(configuredTarget(map[string]any{
 			"envVars": []any{map[string]any{
 				"name": "CLOUDFLARE_API_TOKEN", "configured": true,
 			}},
 		}))
 
-		Expect(err).To(MatchError(ContainSubstring("configured is read-only")))
+		Expect(err).To(MatchError(ContainSubstring("configured marker is not allowed when creating")))
 	})
 })

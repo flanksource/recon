@@ -1,6 +1,6 @@
 import type { DataTableColumn, BadgeStatus } from "@flanksource/clicky-ui/data";
 import { findingSearchTokens } from "./finding-markdown";
-import type { Finding, Severity } from "./types";
+import { resourceLabel, type Finding, type Severity } from "./types";
 
 export const SEVERITY_RANK: Record<Severity, number> = {
   critical: 0,
@@ -80,20 +80,81 @@ export const findingColumns: DataTableColumn<Finding>[] = [
     filterable: true,
     tags: { maxVisible: 3 },
   },
+  // What the finding is about, not where the engine happened to match.
+  //
+  // This column used to render matchedAt as a link. That is a URL for nuclei and
+  // nothing of the kind for anything else — a prowler finding rendered
+  // <a href="1429543158501771126">, which is a broken link on every row of a
+  // cloud posture scan. A resource is only a link when the engine named one that
+  // is addressable.
   {
-    key: "matchedAt",
-    label: "Matched at",
+    key: "resources",
+    label: "Resource",
     grow: true,
-    render: (value) =>
-      value ? (
+    filterValue: (_value, row) => resourceSearchText(row),
+    render: (_value, row) => <ResourceCell finding={row} />,
+  },
+];
+
+/** The text a resource column is searched and filtered by: every name and uid. */
+function resourceSearchText(finding: Finding): string {
+  const resources = finding.resources ?? [];
+  if (resources.length === 0) return finding.matchedAt ?? "";
+  return resources.flatMap((r) => [r.name ?? "", r.uid, r.type ?? ""]).filter(Boolean).join(" ");
+}
+
+function ResourceCell({ finding }: { finding: Finding }) {
+  const resources = finding.resources ?? [];
+  if (resources.length === 0) {
+    return <span className="text-xs text-muted-foreground">{finding.matchedAt}</span>;
+  }
+
+  const [primary, ...rest] = resources;
+  const label = resourceLabel(primary);
+  const href = addressable(label) ?? addressable(primary.uid);
+  return (
+    <span className="flex items-baseline gap-1.5">
+      {href ? (
         <a
-          href={String(value)}
+          href={href}
           target="_blank"
           rel="noreferrer"
           className="text-xs text-primary hover:underline"
         >
-          {String(value)}
+          {label}
         </a>
-      ) : null,
-  },
-];
+      ) : (
+        <span className="text-xs text-foreground">{label}</span>
+      )}
+      {primary.type ? (
+        <code className="text-[10px] text-muted-foreground">{shortType(primary.type)}</code>
+      ) : null}
+      {rest.length > 0 ? (
+        <span className="text-[10px] text-muted-foreground">+{rest.length}</span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * A value a browser can open, or null.
+ *
+ * Only a URL qualifies — a GCP resource id, an ARN and a package coordinate are
+ * all identifiers, and linking them is what produced the broken anchors this
+ * column replaced. Both the label and the uid are offered because which of them
+ * holds the URL depends on the engine: nuclei's endpoint arrives as the label
+ * and a cloud resource's identity as the uid.
+ */
+function addressable(value: string): string | null {
+  return value.startsWith("http://") || value.startsWith("https://") ? value : null;
+}
+
+/**
+ * The readable tail of a provider type. Every GCP asset type is prefixed
+ * `<service>.googleapis.com/`, which is the same on every row and so carries no
+ * information in a column; the full value stays searchable and is on the title.
+ */
+function shortType(type: string): string {
+  const slash = type.lastIndexOf("/");
+  return slash === -1 ? type : type.slice(slash + 1);
+}

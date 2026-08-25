@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/recon/internal/engines"
+	"github.com/flanksource/recon/internal/engines/scan/prowler/auth"
 )
 
 const (
@@ -23,6 +24,8 @@ type JSONSchema struct {
 	Required             []string              `json:"required,omitempty"`
 	Items                *JSONSchema           `json:"items,omitempty"`
 	OneOf                []JSONSchema          `json:"oneOf,omitempty"`
+	AllOf                []JSONSchema          `json:"allOf,omitempty"`
+	Contains             *JSONSchema           `json:"contains,omitempty"`
 	Enum                 []any                 `json:"enum,omitempty"`
 	Default              any                   `json:"default,omitempty"`
 	Const                any                   `json:"const,omitempty"`
@@ -32,6 +35,9 @@ type JSONSchema struct {
 	AdditionalProperties *bool                 `json:"additionalProperties,omitempty"`
 	MinItems             *int                  `json:"minItems,omitempty"`
 	MaxItems             *int                  `json:"maxItems,omitempty"`
+	MinContains          *int                  `json:"minContains,omitempty"`
+	MaxContains          *int                  `json:"maxContains,omitempty"`
+	UniqueItems          bool                  `json:"uniqueItems,omitempty"`
 	MinProperties        *int                  `json:"minProperties,omitempty"`
 	MaxProperties        *int                  `json:"maxProperties,omitempty"`
 	Pattern              string                `json:"pattern,omitempty"`
@@ -48,7 +54,10 @@ type JSONSchema struct {
 	CredentialSelector   bool                  `json:"x-credential-selector,omitempty"`
 	Section              string                `json:"x-section,omitempty"`
 	Sections             []Section             `json:"x-sections,omitempty"`
-	MutualExclusions     []MutualExclusion     `json:"x-prowler-mutual-exclusions,omitempty"`
+	MutualExclusions     []MutualExclusion     `json:"x-mutual-exclusions,omitempty"`
+	CredentialMethods    []auth.Method         `json:"x-credential-methods,omitempty"`
+	ProwlerEnvironment   string                `json:"x-prowler-env,omitempty"`
+	ClickyLookup         map[string]any        `json:"x-clicky-lookup,omitempty"`
 }
 
 type Section struct {
@@ -57,8 +66,12 @@ type Section struct {
 	SourceURL string `json:"sourceUrl,omitempty"`
 }
 
+// MutualExclusion is one group of options of which at most one may be set.
+// Named like Section because the form treats it the same way: a heading a
+// reader recognises, over keys it already knows.
 type MutualExclusion struct {
-	Name     string   `json:"name"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title,omitempty"`
 	Keys     []string `json:"keys"`
 	Required bool     `json:"required,omitempty"`
 }
@@ -242,6 +255,16 @@ func (s JSONSchema) EngineSchema() engines.JSONSchema {
 		}
 		result["oneOf"] = oneOf
 	}
+	if len(s.AllOf) > 0 {
+		allOf := make([]engines.JSONSchema, len(s.AllOf))
+		for index, option := range s.AllOf {
+			allOf[index] = option.EngineSchema()
+		}
+		result["allOf"] = allOf
+	}
+	if s.Contains != nil {
+		result["contains"] = s.Contains.EngineSchema()
+	}
 	put("enum", append([]any(nil), s.Enum...), len(s.Enum) > 0)
 	put("default", s.Default, s.Default != nil)
 	put("const", s.Const, s.Const != nil)
@@ -257,6 +280,13 @@ func (s JSONSchema) EngineSchema() engines.JSONSchema {
 	if s.MaxItems != nil {
 		result["maxItems"] = *s.MaxItems
 	}
+	if s.MinContains != nil {
+		result["minContains"] = *s.MinContains
+	}
+	if s.MaxContains != nil {
+		result["maxContains"] = *s.MaxContains
+	}
+	put("uniqueItems", true, s.UniqueItems)
 	if s.MinProperties != nil {
 		result["minProperties"] = *s.MinProperties
 	}
@@ -279,7 +309,10 @@ func (s JSONSchema) EngineSchema() engines.JSONSchema {
 	put("x-credential-selector", true, s.CredentialSelector)
 	put("x-section", s.Section, s.Section != "")
 	put("x-sections", append([]Section(nil), s.Sections...), len(s.Sections) > 0)
-	put("x-prowler-mutual-exclusions", append([]MutualExclusion(nil), s.MutualExclusions...), len(s.MutualExclusions) > 0)
+	put("x-mutual-exclusions", append([]MutualExclusion(nil), s.MutualExclusions...), len(s.MutualExclusions) > 0)
+	put("x-credential-methods", append([]auth.Method(nil), s.CredentialMethods...), len(s.CredentialMethods) > 0)
+	put("x-prowler-env", s.ProwlerEnvironment, s.ProwlerEnvironment != "")
+	put("x-clicky-lookup", s.ClickyLookup, len(s.ClickyLookup) > 0)
 	return result
 }
 

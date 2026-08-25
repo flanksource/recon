@@ -19,14 +19,7 @@ func (r *Runtime) resolveConfig(ctx context.Context, spec engines.Spec, request 
 		return nil, fmt.Errorf("scan configuration: %w", err)
 	}
 
-	config := map[string]any{}
-	for key, value := range profile.Config {
-		config[key] = value
-	}
-	for key, value := range request.Overrides {
-		config[key] = value
-	}
-
+	config := engines.LayerOverrides(profile.Config, request.Overrides)
 	if err := spec.ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("scan configuration: %w", err)
 	}

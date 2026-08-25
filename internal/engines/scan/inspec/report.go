@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/configdb"
 )
 
 // ExecJSON is InSpec's `json` reporter output — the exec-json schema, stable
@@ -160,6 +161,64 @@ func (r ExecJSON) Findings(account string) []api.Finding {
 	return findings
 }
 
+// Resources is the account the report describes, carrying every control's
+// verdict.
+//
+// One resource rather than one per `describe` block: InSpec's Result.Resource
+// names a Ruby matcher (`google_compute_firewall`), not an addressable thing,
+// so there is nothing stable to key a lifecycle on below the account. The
+// account is real, is stable across runs, and is what a control's verdict is
+// actually about.
+//
+// The verdicts are the point. InSpec reports passed/failed/skipped/error per
+// control, so — unlike nuclei and trivy — a later run genuinely can resolve an
+// earlier one's findings: a control that failed and now passes is fixed, and
+// this is what says so. Skipped and errored are deliberately neither: a control
+// that could not run has proved nothing, and counting it as a pass would
+// resolve a finding on the strength of a broken check.
+func (r ExecJSON) Resources(account string) []api.Resource {
+	resource := accountResource(account)
+	seen := map[string]struct{}{}
+	for _, profile := range r.Profiles {
+		for _, control := range profile.Controls {
+			for _, result := range control.Results {
+				if result.Status != StatusPassed {
+					continue
+				}
+				if _, already := seen[control.ID]; already {
+					continue
+				}
+				seen[control.ID] = struct{}{}
+				resource.Passed = append(resource.Passed, control.ID)
+			}
+		}
+	}
+	// A control with twenty describe blocks passes only if every one of them
+	// did: one failure anywhere makes the control a finding, and a control that
+	// is both must not also claim to have passed.
+	for _, profile := range r.Profiles {
+		for _, control := range profile.Controls {
+			for _, result := range control.Results {
+				if result.Status == StatusFailed || result.Status == StatusError {
+					resource.Passed = remove(resource.Passed, control.ID)
+					break
+				}
+			}
+		}
+	}
+	return []api.Resource{resource}
+}
+
+func remove(values []string, unwanted string) []string {
+	kept := values[:0]
+	for _, value := range values {
+		if value != unwanted {
+			kept = append(kept, value)
+		}
+	}
+	return kept
+}
+
 func finding(account string, profile Profile, control Control, result Result) api.Finding {
 	return api.Finding{
 		TemplateID:  control.ID,
@@ -173,11 +232,21 @@ func finding(account string, profile Profile, control Control, result Result) ap
 		Timestamp:   result.StartTime,
 		Remediation: remediation(control),
 		Reference:   references(control),
+		Resources:   []api.ResourceRef{accountResource(account).Ref()},
 		Raw: map[string]any{
 			"profile": profile.Name,
 			"control": control,
 			"result":  result,
 		},
+	}
+}
+
+func accountResource(account string) api.Resource {
+	return api.Resource{
+		Provider: EngineName, Scope: account, UID: account,
+		Kind: api.KindAccount, Name: account,
+		TargetID: account,
+		ExternalIDs: configdb.ExternalIDs(account, account),
 	}
 }
 

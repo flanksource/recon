@@ -90,8 +90,24 @@ export type ReportFinding = {
   remediation?: string;
   reference?: string[];
   curl?: string;
+  /**
+   * The subjects the evidence names, in the engine's own order. The server
+   * always sends at least one, so the template never reaches into `raw` for a
+   * resource identity of its own.
+   */
+  resources?: ReportResourceRef[];
   /** The engine's original record, including provider-native resource identities. */
   raw?: Record<string, unknown>;
+};
+
+/** One thing a finding is about. Render `name`, fall back to `uid`. */
+export type ReportResourceRef = {
+  id?: string;
+  uid: string;
+  name?: string;
+  type?: string;
+  service?: string;
+  region?: string;
 };
 
 /** Which parts of the report to print. Every section defaults to on. */

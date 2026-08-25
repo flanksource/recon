@@ -17,6 +17,9 @@ var bucket = api.Finding{
 	Host:       "example-project",
 	MatchedAt:  "logs-example",
 	Tags:       []string{"storage", "public"},
+	Resources: []api.ResourceRef{{
+		Provider: "gcp", Scope: "example-project", UID: "logs-example", Name: "logs",
+	}},
 }
 
 // endpoint is a nuclei-shaped finding: the host is a hostname and matched_at is
@@ -67,6 +70,17 @@ var _ = Describe("matching a finding", func() {
 	})
 
 	Describe("the resource dimension", func() {
+		It("matches an exact canonical resource without colliding across scopes", func() {
+			matched := api.MuteRule{ResourceKeys: api.StringList{"gcp/example-project/logs-example"}}
+			Expect(rule(matched).Matches(bucket)).To(BeTrue())
+
+			otherScope := bucket
+			otherScope.Resources = []api.ResourceRef{{
+				Provider: "gcp", Scope: "other-project", UID: "logs-example", Name: "logs",
+			}}
+			Expect(rule(matched).Matches(otherScope)).To(BeFalse())
+		})
+
 		// The account is in Host and the resource uid in MatchedAt, so a rule
 		// about one bucket in a project must reach MatchedAt and must not need
 		// to name the project.
@@ -78,6 +92,38 @@ var _ = Describe("matching a finding", func() {
 		It("still matches a host, which is what a network finding names", func() {
 			Expect(rule(api.MuteRule{Resources: api.StringList{"api.example.test"}}).Matches(endpoint)).
 				To(BeTrue())
+		})
+
+		// The case that silently failed. Half of Prowler's uids are opaque
+		// numbers — a GCP firewall's is 1429543158501771126 — so the only name
+		// an operator could write a rule against was one nothing compared.
+		It("matches a resource by the human name, not only its opaque uid", func() {
+			firewall := bucket
+			firewall.MatchedAt = "1429543158501771126"
+			firewall.Resources = []api.ResourceRef{{
+				UID: "1429543158501771126", Name: "tailscale-router",
+				Type: "compute.googleapis.com/Firewall",
+			}}
+
+			Expect(rule(api.MuteRule{Resources: api.StringList{"tailscale-*"}}).Matches(firewall)).
+				To(BeTrue())
+			Expect(rule(api.MuteRule{Resources: api.StringList{"1429543158501771126"}}).Matches(firewall)).
+				To(BeTrue(), "the uid a rule written before this change would have named")
+		})
+
+		// The no-regression guarantee, and the reason it is worth a spec of its
+		// own: adding values to an OR can only widen, and muting drops
+		// findings, so a rule that used to match nothing must still match
+		// nothing. A finding naming no resource resolves to exactly the two
+		// values this dimension compared before.
+		It("behaves exactly as before for a finding that names no resource", func() {
+			bare := bucket
+			bare.Resources = nil
+
+			Expect(rule(api.MuteRule{Resources: api.StringList{"logs-*"}}).Matches(bare)).To(BeTrue())
+			Expect(rule(api.MuteRule{Resources: api.StringList{"other-*"}}).Matches(bare)).To(BeFalse())
+			Expect(rule(api.MuteRule{Resources: api.StringList{"example-project"}}).Matches(bare)).
+				To(BeTrue(), "the host rung, unchanged")
 		})
 	})
 

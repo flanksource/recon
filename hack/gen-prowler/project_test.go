@@ -5,6 +5,7 @@ import (
 
 	"github.com/flanksource/recon/internal/engines/scan/prowler/arguments"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/catalog"
+	"github.com/flanksource/recon/internal/engines/scan/prowler/schema"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
@@ -45,6 +46,48 @@ var _ = Describe("projecting argparse metadata", func() {
 		Expect(document.CLI.Properties["output-formats"].Items.Enum).To(Equal([]any{"csv", "json-ocsf", "html"}))
 	})
 
+	// A group is projected into whichever documents hold its keys. Offering the
+	// profile only the common groups dropped aws-mutex-2 (resource-tags /
+	// resource-arns), whose members are both profile-owned: the rule still fired
+	// when the command was built, but no schema reader could show it first.
+	It("offers every group to both documents and keeps the keys each one holds", func() {
+		common := []arguments.Argument{
+			profileArgument("checks", "check", arguments.NArgsOneOrMore),
+			profileArgument("compliance", "compliance", arguments.NArgsOneOrMore),
+		}
+		provider := arguments.Provider{
+			Name: "gcp",
+			Arguments: []arguments.Argument{
+				profileArgument("resource-tags", "resource_tag", arguments.NArgsOneOrMore),
+				profileArgument("resource-arns", "resource_arn", arguments.NArgsOneOrMore),
+				contextArgument("credentials-file", "credentials_file", arguments.NArgsOne),
+				contextArgument("impersonate-service-account", "impersonate", arguments.NArgsOne),
+			},
+			MutualExclusions: []arguments.MutualExclusion{
+				{Name: "gcp-mutex-1", Title: "AWS Based Scans", Keys: []string{"resource-tags", "resource-arns"}},
+				{Name: "gcp-mutex-2", Title: "Authentication Modes", Keys: []string{"credentials-file", "impersonate-service-account"}},
+			},
+		}
+
+		document, err := projectProvider(providerProjectionOptions{
+			Provider: provider, Common: common, Checks: testCatalog(),
+			CommonMutexes: []arguments.MutualExclusion{{
+				Name: "common-mutex-1", Title: "Specify checks/services to run",
+				Keys: []string{"checks", "checks-file", "compliance"},
+			}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(document.Profile.MutualExclusions).To(Equal([]schema.MutualExclusion{
+			{ID: "gcp-mutex-1", Title: "AWS Based Scans", Keys: []string{"resource-tags", "resource-arns"}},
+			{ID: "common-mutex-1", Title: "Specify checks/services to run", Keys: []string{"checks", "compliance"}},
+		}))
+		Expect(document.Context.MutualExclusions).To(Equal([]schema.MutualExclusion{{
+			ID: "gcp-mutex-2", Title: "Authentication Modes",
+			Keys: []string{"credentials-file", "impersonate-service-account"},
+		}}))
+	})
+
 	It("retains argparse aliases, shapes, defaults, and declaration order", func() {
 		arg := profileArgument("excluded-checks", "excluded_check", arguments.NArgsOneOrMore)
 		arg.Flags = []string{"--excluded-check", "--excluded-checks", "-e"}
@@ -75,13 +118,18 @@ var _ = Describe("projecting argparse metadata", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cloudflare.Credential.Properties).To(HaveKey("envVars"))
 		Expect(cloudflare.Credential.Properties).NotTo(HaveKey("connections"))
+		Expect(cloudflare.Credential.CredentialMethods).To(HaveLen(2))
+		Expect(cloudflare.Credential.OneOf).To(HaveLen(2))
 
 		envVars := cloudflare.Credential.Properties["envVars"]
 		Expect(envVars.MinItems).To(gstruct.PointTo(Equal(1)))
 		Expect(envVars.MaxItems).To(gstruct.PointTo(Equal(1)))
-		Expect(envVars.Items.Properties["name"].Const).To(Equal("CLOUDFLARE_API_TOKEN"))
+		Expect(envVars.Items.Properties["name"].Enum).To(Equal([]any{
+			"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY",
+		}))
 		Expect(envVars.Items.Properties["value"].WriteOnly).To(BeTrue())
 		Expect(envVars.Items.Properties["configured"].ReadOnly).To(BeTrue())
+		Expect(cloudflare.Context.Properties["api-email"].ProwlerEnvironment).To(Equal("CLOUDFLARE_API_EMAIL"))
 
 		valueFrom := envVars.Items.Properties["valueFrom"]
 		Expect(valueFrom.Properties).To(SatisfyAll(
@@ -94,7 +142,17 @@ var _ = Describe("projecting argparse metadata", func() {
 			Provider: arguments.Provider{Name: "gcp"}, Checks: testCatalog(),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(gcp.Credential.Properties).To(BeEmpty())
+		Expect(gcp.Credential.Properties).To(HaveKey("connections"))
+		Expect(gcp.Credential.CredentialMethods).To(HaveLen(1))
+		connection := gcp.Credential.Properties["connections"].Properties["gcp"].Properties["connection"]
+		Expect(connection.Pattern).To(Equal(`^connection://[^/]+(?:/[^/]+)?$`))
+		Expect(connection.ClickyLookup).To(Equal(map[string]any{
+			"url": "/api/v1/connection", "filter": "connection", "types": []string{"google_cloud"},
+		}))
+
+		alibaba, err := projectCredentialSchema("alibabacloud", "Alibaba Cloud")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(alibaba.Properties).To(BeEmpty())
 	})
 
 	It("detects missing, stale, and extra checked-in artifacts", func() {

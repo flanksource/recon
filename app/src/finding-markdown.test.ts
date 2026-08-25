@@ -48,6 +48,9 @@ const HIGH_FINDING: Finding = {
   curl: "curl -vk https://app.acme.test",
   request: "GET / HTTP/1.1\nHost: app.acme.test",
   response: "HTTP/1.1 200 OK\nServer: example",
+  // What the server synthesises for an engine that names no resource of its
+  // own: the host is the identity and the matched URL is the label.
+  resources: [{ provider: "network", uid: "app.acme.test", name: "https://app.acme.test", type: "ssl" }],
   raw: { secretEngineField: "must-not-be-copied" },
 };
 
@@ -61,6 +64,7 @@ const LOW_FINDING: Finding = {
   matchedAt: "https://app.acme.test/health",
   type: "http",
   tags: [],
+  resources: [{ provider: "network", uid: "app.acme.test", name: "https://app.acme.test/health", type: "http" }],
 };
 
 describe("finding Markdown export", () => {
@@ -104,7 +108,7 @@ describe("finding Markdown export", () => {
         ...HIGH_FINDING,
         lineNo,
         templateId: "gcp/iam_service_account_keys",
-        raw: { resources: [serviceAccount] },
+        resources: [{ provider: "gcp", ...serviceAccount }],
       }),
     );
 

@@ -24,7 +24,7 @@ function finding(lineNo: number): ReportFinding {
     matcherName: "FAIL",
     type: "prowler",
     tags: ["identity", "leaked-secret", "compliance:CIS-1.2"],
-    raw: { resources: [SERVICE_ACCOUNT] },
+    resources: [SERVICE_ACCOUNT],
   };
 }
 

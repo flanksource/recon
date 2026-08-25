@@ -103,6 +103,13 @@ func (e Engine) audit(
 	// would throw away findings that were genuinely observed.
 	parsed, readErr := readExecJSON(report)
 	if parsed != nil {
+		// Before the findings, carrying what passed — which is what lets a
+		// later run resolve what this one reports.
+		for _, resource := range parsed.Resources(account) {
+			if err := sink.Resource(resource); err != nil {
+				return err
+			}
+		}
 		emitted := parsed.Findings(account)
 		for _, found := range emitted {
 			if err := encoder.Encode(found); err != nil {

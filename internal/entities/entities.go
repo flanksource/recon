@@ -92,6 +92,9 @@ func (r *Registry) Register() {
 	r.registerTarget()
 	r.registerScan()
 	r.registerFinding()
+	r.registerFindingGroup()
+	r.registerFindingState()
+	r.registerResource()
 	r.registerDiscover()
 	r.registerProbe()
 	r.registerProfile()
@@ -99,6 +102,7 @@ func (r *Registry) Register() {
 	r.registerTemplate()
 	r.registerEngine()
 	r.registerZone()
+	r.registerConnection()
 }
 
 // registerZone exposes the zones discovery enumerates. They are configured, not
@@ -203,12 +207,6 @@ func (r *Registry) registerScan() {
 		builder.WithPrimaryAction(entity.PrimaryActionWithContext(scanRunOpts{}, r.scanSelection).
 			WithShort("Discover targets, then scan their endpoints"))
 	}
-	// Uploading is an action on a run rather than a resource of its own, and it
-	// is offered over HTTP as well as on the CLI so the Scans tab can push a run
-	// from the browser. It reaches Mission Control with faro's own credential,
-	// so a server that has none simply fails the call.
-	builder.WithAction(entity.TypedActionWithContext("upload", uploadFlags{}, r.uploadScan).
-		WithShort("Upload the run's findings to Mission Control as insights"))
 	builder.Register()
 }
 
@@ -221,29 +219,74 @@ func (r *Registry) registerFinding() {
 	clicky.NewEntity[api.Finding, store.FindingOpts, api.Finding]("finding").
 		Aliases("findings").
 		ToolGroup("scanning").
-		ListWithContext(bind(r, (*store.Store).ListFindings)).
-		GetWithContext(bind(r, getFinding)).
+		ListPagedWithContext(pagedFindings(bind(r, (*store.Store).ListFindingsPaged))).
+		GetWithContext(bind(r, (*store.Store).GetFinding)).
 		Filters(r.findingFilters()...).
+		WithAction(entity.TypedActionWithContext("sync", findingSyncFlags{}, r.syncFindings).
+			WithOptionalID().WithShort("Sync the selected current finding states to Mission Control")).
+		WithAction(entity.TypedActionWithContext("mute", findingMuteFlags{}, r.muteFinding).
+			WithShort("Create a mute rule from this finding")).
 		Register()
 }
 
-// getFinding resolves a finding by its scan#line address.
-func getFinding(st *store.Store, ctx context.Context, id string) (api.Finding, error) {
-	scan, line, err := api.SplitFindingID(id)
-	if err != nil {
-		return api.Finding{}, err
-	}
+func (r *Registry) registerFindingGroup() {
+	clicky.NewEntity[api.FindingGroup, store.FindingStateOpts, api.FindingGroup]("finding-group").
+		Aliases("finding-groups").
+		ToolGroup("scanning").
+		ListPagedWithContext(pagedFindingGroups(bind(r, (*store.Store).ListFindingGroupsPaged))).
+		Filters(r.findingStateFilters()...).
+		Register()
+}
 
-	found, err := st.ListFindings(ctx, store.FindingOpts{Scan: []string{scan}})
-	if err != nil {
-		return api.Finding{}, err
-	}
-	for _, finding := range found {
-		if finding.LineNo == line {
-			return finding, nil
+func (r *Registry) registerFindingState() {
+	clicky.NewEntity[api.FindingState, store.FindingStateOpts, api.FindingState]("finding-state").
+		Aliases("finding-states").
+		ToolGroup("scanning").
+		ListPagedWithContext(pagedFindingStates(bind(r, (*store.Store).ListFindingStatesPaged))).
+		Filters(r.findingStateFilters()...).
+		Register()
+}
+
+func pagedFindingGroups(
+	list func(context.Context, store.FindingStateOpts) (api.FindingGroupPage, error),
+) func(context.Context, store.FindingStateOpts) (entity.PagedResult[api.FindingGroup], error) {
+	return func(ctx context.Context, opts store.FindingStateOpts) (entity.PagedResult[api.FindingGroup], error) {
+		if len(opts.Status) == 0 {
+			opts.Status = []string{api.StatusOpen}
 		}
+		page, err := list(ctx, opts)
+		if err != nil {
+			return entity.PagedResult[api.FindingGroup]{}, err
+		}
+		return entity.NewPagedResult(page.Data, page.Page.Limit, page.Page.Offset, page.Page.Total), nil
 	}
-	return api.Finding{}, store.NotFound("finding", id)
+}
+
+func pagedFindingStates(
+	list func(context.Context, store.FindingStateOpts) (api.FindingStatePage, error),
+) func(context.Context, store.FindingStateOpts) (entity.PagedResult[api.FindingState], error) {
+	return func(ctx context.Context, opts store.FindingStateOpts) (entity.PagedResult[api.FindingState], error) {
+		if len(opts.Status) == 0 {
+			opts.Status = []string{api.StatusOpen}
+		}
+		page, err := list(ctx, opts)
+		if err != nil {
+			return entity.PagedResult[api.FindingState]{}, err
+		}
+		return entity.NewPagedResult(page.Data, page.Page.Limit, page.Page.Offset, page.Page.Total), nil
+	}
+}
+
+func pagedFindings(
+	list func(context.Context, store.FindingOpts) (api.FindingPage, error),
+) func(context.Context, store.FindingOpts) (entity.PagedResult[api.Finding], error) {
+	return func(ctx context.Context, opts store.FindingOpts) (entity.PagedResult[api.Finding], error) {
+		page, err := list(ctx, opts)
+		if err != nil {
+			return entity.PagedResult[api.Finding]{}, err
+		}
+		return entity.NewPagedResult(page.Data, page.Page.Limit, page.Page.Offset, page.Page.Total), nil
+	}
 }
 
 func (r *Registry) registerDiscover() {

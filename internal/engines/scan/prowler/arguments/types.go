@@ -73,9 +73,21 @@ type Argument struct {
 }
 
 type MutualExclusion struct {
-	Name     string   `json:"name"`
+	Name string `json:"name"`
+	// Title is the argparse section the group was declared in, and the only
+	// label for it a reader can recognise: Name is a generated ordinal.
+	Title    string   `json:"title,omitempty"`
 	Keys     []string `json:"keys"`
 	Required bool     `json:"required,omitempty"`
+}
+
+// Label is what the group is called in an error a person has to act on. Name
+// ("common-mutex-1") is an ordinal over argparse's group list and leads nowhere.
+func (m MutualExclusion) Label() string {
+	if m.Title != "" {
+		return m.Title
+	}
+	return m.Name
 }
 
 type Provider struct {

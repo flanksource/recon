@@ -34,6 +34,16 @@ type Result struct {
 	// not counted: they produced nothing to count.
 	Muted int
 
+	// Dropped are those same findings, kept whole rather than counted.
+	//
+	// The rows are not written, so without this a muted check is
+	// indistinguishable from silence — and a check that was open before
+	// somebody muted it would stay open forever, reading as a problem nobody is
+	// looking at rather than one somebody accepted. Each carries the line it
+	// occupied in the engine's output, so it addresses the artifact the same
+	// way ByRule does.
+	Dropped []api.Finding
+
 	// ByRule maps a rule name to the lines of the engine's findings file it
 	// removed. This is the only surviving record of what a run dropped, so it
 	// addresses the artifact rather than the database — the muted rows are not
@@ -69,6 +79,7 @@ func Apply(rules []Rule, findings []api.Finding) Result {
 		if rule, matched := firstMatch(rules, finding, result.Errors); matched {
 			result.Muted++
 			result.ByRule[rule] = append(result.ByRule[rule], line)
+			result.Dropped = append(result.Dropped, finding)
 			continue
 		}
 		result.Kept = append(result.Kept, finding)

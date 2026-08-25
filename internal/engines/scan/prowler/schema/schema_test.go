@@ -51,10 +51,10 @@ var _ = Describe("generated Prowler provider schemas", func() {
 		itemProperties := item["properties"].(engines.JSONSchema)
 		name := itemProperties["name"].(engines.JSONSchema)
 		Expect(name).NotTo(HaveKey("const"))
-		Expect(name["enum"]).To(Equal([]any{"CLOUDFLARE_API_TOKEN"}))
+		Expect(name["enum"]).To(Equal([]any{"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"}))
 	})
 
-	It("exposes only the approved Cloudflare credential policy", func() {
+	It("exposes the generated provider credential policies", func() {
 		registry, err := schema.Embedded()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -62,14 +62,14 @@ var _ = Describe("generated Prowler provider schemas", func() {
 		Expect(ok).To(BeTrue())
 		Expect(cloudflare.Credential.Properties).To(SatisfyAll(HaveLen(1), HaveKey("envVars")))
 		envVars := cloudflare.Credential.Properties["envVars"]
-		Expect(envVars.Items.Properties["name"].Const).To(Equal("CLOUDFLARE_API_TOKEN"))
+		Expect(envVars.Items.Properties["name"].Enum).To(Equal([]any{"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"}))
 		Expect(envVars.Items.Properties["value"].WriteOnly).To(BeTrue())
 		Expect(envVars.Items.Properties["configured"].ReadOnly).To(BeTrue())
 		Expect(envVars.Items.Properties["valueFrom"].Properties).NotTo(HaveKey("serviceAccount"))
 
 		gcp, ok := registry.Provider("gcp")
 		Expect(ok).To(BeTrue())
-		Expect(gcp.Credential.Properties).To(BeEmpty())
+		Expect(gcp.Credential.Properties).To(SatisfyAll(HaveLen(1), HaveKey("connections")))
 
 		options := registry.OptionCatalog()
 		variant := options.Variants[providerIndex(registry.ProviderIDs(), "cloudflare")]
@@ -78,6 +78,12 @@ var _ = Describe("generated Prowler provider schemas", func() {
 		Expect(options.ValidateCredentials(
 			map[string]any{"provider": "cloudflare"},
 			cloudflareCredential(map[string]any{"valueFrom": map[string]any{"onePassword": "op://vault/item/field"}}),
+		)).To(Succeed())
+		Expect(options.ValidateCredentials(
+			map[string]any{"provider": "gcp"},
+			map[string]any{"connections": map[string]any{
+				"gcp": map[string]any{"connection": "connection://production-gcp"},
+			}},
 		)).To(Succeed())
 		for _, value := range []map[string]any{
 			{"value": "example"},
@@ -186,6 +192,32 @@ var _ = Describe("generated Prowler provider schemas", func() {
 		Expect(err).To(MatchError(ContainSubstring("credential property credentials-file in profile schema")))
 	})
 
+	// The form hides every member of a group but the selected one, so a group
+	// naming a key the document does not hold would hide a control that never
+	// existed, or offer a segment writing an argument the engine rejects.
+	It("rejects a mutual exclusion over a property the document does not hold", func() {
+		fixture := schemaFixture()
+		var gcp schema.ProviderSchema
+		Expect(json.Unmarshal(providerFixture("gcp", "GCP", map[string]schema.JSONSchema{
+			"checks": {Type: "array", Owner: "profile"},
+		}, nil), &gcp)).To(Succeed())
+		gcp.Profile.MutualExclusions = []schema.MutualExclusion{{
+			ID: "common-mutex-1", Title: "Specify checks/services to run",
+			Keys: []string{"checks", "services"},
+		}}
+		provider, err := json.Marshal(gcp)
+		Expect(err).NotTo(HaveOccurred())
+		fixture["providers/gcp.generated.json"] = &fstest.MapFile{Data: provider}
+		fixture["manifest.generated.json"].Data = manifestFixture(map[string][]byte{
+			"aws": fixture["providers/aws.generated.json"].Data,
+			"gcp": provider,
+		})
+
+		_, err = schema.LoadFS(fixture)
+		Expect(err).To(MatchError(ContainSubstring(
+			"profile mutual exclusion common-mutex-1 references unknown property services")))
+	})
+
 	It("rejects generated credential policy drift", func() {
 		fixture := schemaFixture()
 		var cloudflare schema.ProviderSchema
@@ -203,7 +235,7 @@ var _ = Describe("generated Prowler provider schemas", func() {
 		})
 
 		_, err = schema.LoadFS(fixture)
-		Expect(err).To(MatchError(ContainSubstring("credential schema must expose exactly one envVar")))
+		Expect(err).To(MatchError(ContainSubstring("credential schema methods do not match alternatives")))
 	})
 })
 

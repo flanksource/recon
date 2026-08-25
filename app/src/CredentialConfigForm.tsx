@@ -1,12 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Button,
   JsonSchemaForm,
   Panel,
+  Select,
   parseSecretRef,
   type JsonSchemaObject,
+  type LookupFetcher,
   type SecretKeyValue,
 } from "@flanksource/clicky-ui/components";
+import { fetchLookupOptions } from "./api";
 import type {
   CredentialEnvVar,
   CredentialMutation,
@@ -20,9 +23,18 @@ type Props = {
   schema: EngineOptionSchema;
   value?: TargetCredentials;
   onChange: (next: CredentialMutation) => void;
+  lookupFetcher?: LookupFetcher;
 };
 
-type FixedEnvVar = {
+type CredentialMethod = {
+	id: string;
+	title: string;
+	envVars?: Array<{ name: string; title: string }>;
+	connection?: { key: string; type: string };
+};
+
+type CredentialForm = {
+  method: CredentialMethod;
   name: string;
   schema: JsonSchemaObject;
 };
@@ -34,34 +46,65 @@ function object(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function fixedEnvVar(schema: EngineOptionSchema): FixedEnvVar | null {
-  const properties = object(schema.properties ?? {}, "credential schema properties");
-  if (!("envVars" in properties)) return null;
-  const envVars = object(properties.envVars, "credential schema envVars");
-  if (envVars.type !== "array") {
-    throw new Error("credential schema envVars must be an array");
+function credentialMethods(schema: EngineOptionSchema): CredentialMethod[] {
+  const raw = schema["x-credential-methods"];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error("credential schema must define x-credential-methods");
   }
-  const item = object(envVars.items, "credential schema envVars items");
-  const itemProperties = object(item.properties, "credential EnvVar properties");
-  const name = object(itemProperties.name, "credential EnvVar name").const;
-  if (typeof name !== "string" || name === "") {
-    throw new Error("credential EnvVar name must have a non-empty const");
-  }
-  return {
-    name,
-    schema: {
-      type: "object",
-      title: typeof schema.title === "string" ? schema.title : "Credentials",
-      properties: {
-        credential: {
-          type: "string",
-          title: credentialTitle(name),
-          description:
-            "Choose an inline value or a runtime reference. Secret values are never displayed after saving.",
-          "x-clicky-component": "k8s-secret-selector",
-          "x-clicky-default-source": "value",
+  return raw.map((value) => {
+    const method = object(value, "credential method");
+    if (typeof method.id !== "string" || typeof method.title !== "string") {
+      throw new Error("credential method requires id and title");
+    }
+    return method as CredentialMethod;
+  });
+}
+
+function formForMethod(method: CredentialMethod): CredentialForm {
+  if (method.connection) {
+    return {
+      method,
+      name: method.connection.key,
+      schema: {
+        type: "object",
+        title: method.title,
+        required: ["connection"],
+        properties: {
+          connection: {
+            type: "string",
+            title: "Connection",
+            "x-clicky-lookup": {
+              url: "/api/v1/connection",
+              filter: "connection",
+              types: [method.connection.type],
+            },
+          },
         },
       },
+    };
+  }
+  if (!method.envVars?.length) {
+    throw new Error(`credential method ${method.id} has no credential fields`);
+  }
+  return {
+    method,
+    name: method.id,
+    schema: {
+      type: "object",
+      title: method.title,
+      properties: Object.fromEntries(
+        method.envVars.map((variable) => [
+          variable.name,
+          {
+            type: "string",
+            title: variable.title || credentialTitle(variable.name),
+            description:
+              "Choose an inline value or a runtime reference. Secret values are never displayed after saving.",
+            "x-clicky-component": "k8s-secret-selector",
+            "x-clicky-default-source": "value",
+          },
+        ]),
+      ),
     },
   };
 }
@@ -133,38 +176,95 @@ export function envVarFromSecretRef(name: string, raw: string): CredentialEnvVar
     : { name, valueFrom: valueFromSecret(parsed) };
 }
 
-export function CredentialConfigForm({ schema, value, onChange }: Props) {
-  const field = useMemo(() => fixedEnvVar(schema), [schema]);
-  if (!field) return null;
+function methodForValue(methods: CredentialMethod[], value?: TargetCredentials): CredentialMethod {
+  const connectionKeys = Object.keys(value?.connections ?? {});
+  const envNames = (value?.envVars ?? []).map((item) => item.name).sort();
+  return (
+    methods.find((method) =>
+      method.connection
+        ? connectionKeys.length === 1 && connectionKeys[0] === method.connection.key
+        : JSON.stringify((method.envVars ?? []).map((item) => item.name).sort()) === JSON.stringify(envNames),
+    ) ?? methods[0]
+  );
+}
 
-  const current = value?.envVars?.find((envVar) => envVar.name === field.name);
-  const reference = current ? secretRefFromEnvVar(current) : undefined;
-  const formValue = reference === undefined ? {} : { credential: reference };
-  const configuredInline = current?.configured === true && !current.valueFrom;
+const defaultLookupFetcher: LookupFetcher = async ({ descriptor, query }) => {
+  const types = (descriptor as typeof descriptor & { types?: string[] }).types;
+  return fetchLookupOptions(
+    descriptor.url,
+    descriptor.filter,
+    query,
+    types?.length ? { types: types.join(",") } : {},
+  );
+};
+
+export function CredentialConfigForm({ schema, value, onChange, lookupFetcher }: Props) {
+  const methods = useMemo(() => credentialMethods(schema), [schema]);
+  const [methodID, setMethodID] = useState(() => methodForValue(methods, value).id);
+  const method = methods.find((candidate) => candidate.id === methodID) ?? methods[0];
+  const form = useMemo(() => formForMethod(method), [method]);
+  const currentEnv = new Map((value?.envVars ?? []).map((item) => [item.name, item]));
+  const formValue = method.connection
+    ? {
+        connection: object(value?.connections?.[method.connection.key] ?? {}, "connection credential")
+          .connection,
+      }
+    : Object.fromEntries(
+        (method.envVars ?? []).flatMap((variable) => {
+          const current = currentEnv.get(variable.name);
+          const reference = current ? secretRefFromEnvVar(current) : undefined;
+          return reference === undefined ? [] : [[variable.name, reference]];
+        }),
+      );
+  const configuredInline = (method.envVars ?? []).filter(
+    (variable) => currentEnv.get(variable.name)?.configured === true && !currentEnv.get(variable.name)?.valueFrom,
+  );
 
   return (
-    <Panel title={field.schema.title ?? "Credentials"}>
+    <Panel title={typeof schema.title === "string" ? schema.title : "Credentials"}>
       <div className="space-y-3">
-        {configuredInline ? (
+        {methods.length > 1 ? (
+          <label className="block space-y-1 text-sm" htmlFor="credential-method">
+            <span className="font-medium">Authentication method</span>
+            <Select
+              id="credential-method"
+              value={method.id}
+              options={methods.map((candidate) => ({ value: candidate.id, label: candidate.title }))}
+              onChange={(event) => setMethodID(event.target.value)}
+            />
+          </label>
+        ) : null}
+        {configuredInline.length > 0 ? (
           <p className="text-xs text-muted-foreground">
-            A configured value is hidden. Saving other fields preserves it until
-            you replace or explicitly clear it.
+            {configuredInline.length === 1 ? "A configured value is" : "Configured values are"} hidden.
+            Saving other fields preserves {configuredInline.length === 1 ? "it" : "them"} until replaced or cleared.
           </p>
         ) : null}
         <JsonSchemaForm
-          schema={field.schema}
+          schema={form.schema}
           value={formValue}
           onChange={(next) => {
-            if (!("credential" in next) || typeof next.credential !== "string") {
-              throw new Error("credential selector must produce a string reference");
+            if (method.connection) {
+              if (typeof next.connection !== "string" || next.connection === "") {
+                throw new Error("connection picker must produce a connection reference");
+              }
+              onChange({ connections: { [method.connection.key]: { connection: next.connection } } });
+              return;
             }
-            onChange({
-              envVars: [envVarFromSecretRef(field.name, next.credential)],
+            const envVars = (method.envVars ?? []).flatMap((variable) => {
+              const raw = next[variable.name];
+              if (typeof raw === "string" && raw !== "") {
+                return [envVarFromSecretRef(variable.name, raw)];
+              }
+              const current = currentEnv.get(variable.name);
+              return current?.configured ? [current] : [];
             });
+            onChange({ envVars });
           }}
           post={credentialFormExtensions.post}
           layout={{ mode: "inline", valueMaxWidth: "48rem" }}
           idPrefix="target-credentials"
+          lookupFetcher={lookupFetcher ?? defaultLookupFetcher}
         />
         <div className="flex justify-end">
           <Button variant="outline" size="sm" onClick={() => onChange(null)}>

@@ -3,39 +3,33 @@ package prowler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	osExec "os/exec"
 	"regexp"
+	"sort"
+	"strings"
 
+	"github.com/flanksource/commons-db/connection"
 	"github.com/flanksource/commons-db/shell"
+	"github.com/flanksource/commons-db/types"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/arguments"
+	"github.com/flanksource/recon/internal/engines/scan/prowler/auth"
 )
 
 var credentialEnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
-var cloudflareAmbientEnvironment = []string{
-	"CLOUDFLARE_API_TOKEN",
-	"CLOUDFLARE_API_KEY",
-	"CLOUDFLARE_API_EMAIL",
-}
 
 func (e Engine) validateProviderCredentials(provider string, subject providerContext) error {
 	if subject.CredentialMode == api.CredentialAmbient {
 		return nil
 	}
-	credentials := map[string]any{}
-	if subject.Credentials != nil {
-		encoded, err := json.Marshal(subject.Credentials)
-		if err != nil {
-			return fmt.Errorf("provider context %s credential schema: encode credentials: %w", subject.ID, err)
-		}
-		if err := json.Unmarshal(encoded, &credentials); err != nil {
-			return fmt.Errorf("provider context %s credential schema: decode credentials: %w", subject.ID, err)
-		}
+	credentials, err := credentialMap(subject.Credentials)
+	if err != nil {
+		return fmt.Errorf("provider context %s credential schema: %w", subject.ID, err)
 	}
 	canonical, err := arguments.NormalizeProvider(provider)
 	if err != nil {
@@ -44,7 +38,25 @@ func (e Engine) validateProviderCredentials(provider string, subject providerCon
 	if err := e.spec.Options.ValidateCredentials(map[string]any{"provider": canonical}, credentials); err != nil {
 		return fmt.Errorf("provider context %s credential schema: %w", subject.ID, err)
 	}
+	if _, err := auth.Match(canonical, subject.Arguments, credentials); err != nil {
+		return fmt.Errorf("provider context %s credential policy: %w", subject.ID, err)
+	}
 	return nil
+}
+
+func credentialMap(credentials any) (map[string]any, error) {
+	if credentials == nil {
+		return map[string]any{}, nil
+	}
+	encoded, err := json.Marshal(credentials)
+	if err != nil {
+		return nil, fmt.Errorf("encode credentials: %w", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return nil, fmt.Errorf("decode credentials: %w", err)
+	}
+	return result, nil
 }
 
 func executeProviderContext(
@@ -54,7 +66,7 @@ func executeProviderContext(
 	workDir string,
 	argv, safe []string,
 	output io.Writer,
-) (*shell.ExecDetails, error) {
+) (result *shell.ExecDetails, err error) {
 	if run.Context.Context.Context == nil {
 		return nil, fmt.Errorf("prowler execution context is required")
 	}
@@ -62,12 +74,52 @@ func executeProviderContext(
 	if err != nil {
 		return nil, err
 	}
+	prepared, err := prepareNativeCredentials(run.Context.Wrap(ctx), subject, workDir)
+	if err != nil {
+		return nil, fmt.Errorf("provider context %s credentials: %w", subject.ID, err)
+	}
+	if prepared.Cleanup != nil {
+		defer func() {
+			if cleanupErr := prepared.Cleanup(); cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("clean up provider context %s credentials: %w", subject.ID, cleanupErr))
+			}
+		}()
+	}
+	if prepared.Native {
+		execution.Connections = connection.ExecConnections{}
+		execution.EnvVars = append(execution.EnvVars, prepared.EnvVars...)
+	}
+	if writer, ok := output.(interface{ AddSensitive([]string) }); ok {
+		writer.AddSensitive(prepared.Sensitive)
+	}
 	execution.DisplayPath = run.Bin
 	execution.DisplayArgs = safe
 	command := osExec.Command(run.Bin, argv...)
 	command.Stdout = output
 	command.Stderr = output
-	return shell.RunCmd(run.Context.Wrap(ctx), execution, command)
+	result, err = shell.RunCmd(run.Context.Wrap(ctx), execution, command)
+	redactExecution(result, prepared.Sensitive)
+	if err != nil {
+		err = fmt.Errorf("%s", redactText(err.Error(), prepared.Sensitive))
+	}
+	return result, err
+}
+
+func redactExecution(result *shell.ExecDetails, values []string) {
+	if result == nil {
+		return
+	}
+	result.Stdout = redactText(result.Stdout, values)
+	result.Stderr = redactText(result.Stderr, values)
+}
+
+func redactText(value string, sensitive []string) string {
+	for _, secret := range sensitive {
+		if secret != "" {
+			value = strings.ReplaceAll(value, secret, arguments.RedactedValue)
+		}
+	}
+	return value
 }
 
 func providerShellExec(subject providerContext, baseDir, workDir string) (shell.Exec, error) {
@@ -82,8 +134,11 @@ func providerShellExec(subject providerContext, baseDir, workDir string) (shell.
 		if err != nil {
 			return shell.Exec{}, err
 		}
-		if provider == "cloudflare" {
-			execution.PassthroughEnv = append([]string(nil), cloudflareAmbientEnvironment...)
+		if policy, ok := auth.ForProvider(provider); ok {
+			execution.PassthroughEnv = append([]string(nil), policy.Ambient...)
+		}
+		if err := addSettingEnvironment(&execution, provider, subject.Arguments); err != nil {
+			return shell.Exec{}, err
 		}
 		return execution, nil
 	}
@@ -91,6 +146,9 @@ func providerShellExec(subject providerContext, baseDir, workDir string) (shell.
 		return shell.Exec{}, fmt.Errorf("provider context %s has invalid credential mode %q", subject.ID, subject.CredentialMode)
 	}
 	if subject.Credentials == nil {
+		if err := addSettingEnvironment(&execution, subject.Provider, subject.Arguments); err != nil {
+			return shell.Exec{}, err
+		}
 		return execution, nil
 	}
 	seen := make(map[string]struct{}, len(subject.Credentials.EnvVars))
@@ -116,5 +174,24 @@ func providerShellExec(subject providerContext, baseDir, workDir string) (shell.
 		}
 		execution.Connections = *subject.Credentials.Connections.DeepCopy()
 	}
+	if err := addSettingEnvironment(&execution, subject.Provider, subject.Arguments); err != nil {
+		return shell.Exec{}, err
+	}
 	return execution, nil
+}
+
+func addSettingEnvironment(execution *shell.Exec, provider string, arguments map[string]any) error {
+	settings, err := auth.EnvironmentSettings(provider, arguments)
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(settings))
+	for name := range settings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		execution.EnvVars = append(execution.EnvVars, types.EnvVar{Name: name, ValueStatic: settings[name]})
+	}
+	return nil
 }

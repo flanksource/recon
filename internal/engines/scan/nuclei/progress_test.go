@@ -16,9 +16,10 @@ type recorder struct {
 	stats []api.ScanStats
 }
 
-func (r *recorder) Finding(api.Finding) error { return nil }
-func (r *recorder) Stats(s api.ScanStats)     { r.stats = append(r.stats, s) }
-func (r *recorder) Log(string)                {}
+func (r *recorder) Finding(api.Finding) error   { return nil }
+func (r *recorder) Resource(api.Resource) error { return nil }
+func (r *recorder) Stats(s api.ScanStats)       { r.stats = append(r.stats, s) }
+func (r *recorder) Log(string)                  {}
 
 func (r *recorder) last() api.ScanStats {
 	GinkgoHelper()

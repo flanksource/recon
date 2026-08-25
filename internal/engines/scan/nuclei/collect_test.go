@@ -23,6 +23,8 @@ func (s *recordingSink) Finding(finding api.Finding) error {
 	return nil
 }
 
+func (s *recordingSink) Resource(api.Resource) error { return nil }
+
 func (s *recordingSink) Stats(api.ScanStats) {}
 
 func (s *recordingSink) Log(text string) { s.logs = append(s.logs, text) }
@@ -34,6 +36,7 @@ func unresponsive(host, templateID string) *output.ResultEvent {
 		TemplateID:    templateID,
 		Type:          "http",
 		Host:          host,
+		URL:           "https://" + host,
 		MatcherStatus: false,
 		Error:         "host was skipped as it was found unresponsive",
 	}
@@ -44,6 +47,7 @@ func matched(host, templateID string) *output.ResultEvent {
 		TemplateID:    templateID,
 		Type:          "http",
 		Host:          host,
+		URL:           "https://" + host,
 		MatcherStatus: true,
 	}
 }

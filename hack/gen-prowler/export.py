@@ -194,7 +194,8 @@ def merge_compatible_alias(existing, candidate):
         existing["help"] = candidate["help"]
 
 
-def mutual_exclusions(parser, scope, action_keys):
+def mutual_exclusions(parser, scope, action_keys, arguments):
+    groups_by_key = {argument["key"]: argument["group"] for argument in arguments}
     documents = []
     for group in parser._mutually_exclusive_groups:
         keys = []
@@ -206,9 +207,30 @@ def mutual_exclusions(parser, scope, action_keys):
         if len(keys) < 2:
             continue
         documents.append(
-            {"name": f"{scope}-mutex-{len(documents) + 1}", "keys": keys, "required": bool(group.required)}
+            {
+                "name": f"{scope}-mutex-{len(documents) + 1}",
+                "title": mutex_title(group, keys, groups_by_key),
+                "keys": keys,
+                "required": bool(group.required),
+            }
         )
     return documents
+
+
+def mutex_title(group, keys, groups_by_key):
+    """Names the group after the argparse section its members were declared in.
+
+    argparse gives a mutually exclusive group no title of its own, so the only
+    label a reader recognises is the surrounding section — the same string that
+    already heads the form. Preferring the members' unanimous group over the
+    container keeps the parser's catch-all ("options") from becoming a heading.
+    """
+    titles = {groups_by_key.get(key, "") for key in keys}
+    if len(titles) == 1:
+        title = titles.pop()
+        if title:
+            return title
+    return getattr(getattr(group, "_container", None), "title", "") or ""
 
 
 def sensitive_flags(provider_names):
@@ -263,13 +285,15 @@ def export(source):
             {
                 "name": provider,
                 "arguments": arguments,
-                "mutualExclusions": mutual_exclusions(provider_parser, provider, action_keys),
+                "mutualExclusions": mutual_exclusions(
+                    provider_parser, provider, action_keys, common + arguments
+                ),
             }
         )
     return {
         "common": common,
         "commonMutualExclusions": mutual_exclusions(
-            prowler_parser.common_providers_parser, "common", common_keys
+            prowler_parser.common_providers_parser, "common", common_keys, common
         ),
         "providers": providers,
         "sensitiveFlags": sensitive_flags(BUILT_IN_PROVIDERS),

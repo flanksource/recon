@@ -80,7 +80,28 @@ var _ = Describe("the Prowler engine", func() {
 		Expect(engine.Spec().ValidateConfig(map[string]any{
 			"provider": "gcp", "compliance": []any{"cis_5.0_gcp"},
 			"checks": []any{"apikeys_key_exists"},
-		})).To(MatchError(ContainSubstring("accepts only one argument")))
+		})).To(MatchError(ContainSubstring(
+			"Specify checks/services to run accepts only one of")))
+		Expect(engine.Spec().ValidateConfig(map[string]any{
+			"provider": "gcp", "compliance": []any{"cis_5.0_gcp"},
+			"checks": []any{"apikeys_key_exists"},
+		})).To(MatchError(ContainSubstring("got checks, compliance")))
+	})
+
+	// A built-in profile selects a compliance framework, so switching a single
+	// run to services means unsetting it. The override is layered over the
+	// profile, so leaving compliance out keeps it — the run then fails on a
+	// pair the request never asked for. The null is how the run says "drop it".
+	It("switches a run to another member of the group by nulling the profile's", func() {
+		profile := map[string]any{"provider": "gcp", "compliance": []any{"cis_5.0_gcp"}}
+
+		Expect(engine.Spec().ValidateConfig(engines.LayerOverrides(profile, map[string]any{
+			"services": []any{"compute"},
+		}))).To(MatchError(ContainSubstring("got services, compliance")))
+
+		Expect(engine.Spec().ValidateConfig(engines.LayerOverrides(profile, map[string]any{
+			"services": []any{"compute"}, "compliance": nil,
+		}))).To(Succeed())
 	})
 
 	It("selects individual checks without assuming a compliance framework", func() {

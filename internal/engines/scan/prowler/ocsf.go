@@ -15,10 +15,24 @@ import (
 const EngineName = "prowler"
 
 type ocsfReport struct {
-	Findings  []api.Finding
-	Stats     api.ScanStats
-	hosts     map[string]struct{}
+	Findings []api.Finding
+	Stats    api.ScanStats
+	hosts    map[string]struct{}
+	// resources is every subject the report named, keyed so a resource that
+	// appears in fifty checks is recorded once; order preserves the report's own,
+	// so a run's rows are deterministic.
+	resources map[api.ResourceKey]api.Resource
+	order     []api.ResourceKey
 	templates map[string]struct{}
+}
+
+// Resources returns what the report examined, in the order it first named each.
+func (r ocsfReport) Resources() []api.Resource {
+	out := make([]api.Resource, 0, len(r.order))
+	for _, key := range r.order {
+		out = append(out, r.resources[key])
+	}
+	return out
 }
 
 type ocsfRecord struct {
@@ -34,19 +48,18 @@ type ocsfRecord struct {
 	} `json:"metadata"`
 	Cloud struct {
 		Provider string `json:"provider"`
+		Region   string `json:"region"`
 		Account  struct {
 			Name string `json:"name"`
 			UID  string `json:"uid"`
+			Type string `json:"type"`
 		} `json:"account"`
-	} `json:"cloud"`
-	Resources []struct {
-		Name  string `json:"name"`
-		UID   string `json:"uid"`
-		Type  string `json:"type"`
-		Group struct {
+		Org struct {
 			Name string `json:"name"`
-		} `json:"group"`
-	} `json:"resources"`
+			UID  string `json:"uid"`
+		} `json:"org"`
+	} `json:"cloud"`
+	Resources   []ocsfResource `json:"resources"`
 	Remediation struct {
 		Description string   `json:"desc"`
 		References  []string `json:"references"`
@@ -75,7 +88,11 @@ func readOCSF(path, targetID, provider string) (report ocsfReport, err error) {
 		return ocsfReport{}, fmt.Errorf("parse prowler OCSF report: expected JSON array")
 	}
 
-	report = ocsfReport{hosts: map[string]struct{}{}, templates: map[string]struct{}{}}
+	report = ocsfReport{
+		hosts:     map[string]struct{}{},
+		templates: map[string]struct{}{},
+		resources: map[api.ResourceKey]api.Resource{},
+	}
 	for decoder.More() {
 		var raw json.RawMessage
 		if err := decoder.Decode(&raw); err != nil {
@@ -89,6 +106,10 @@ func readOCSF(path, targetID, provider string) (report ocsfReport, err error) {
 		report.Stats.Total++
 		report.hosts[recordHost(record)] = struct{}{}
 		report.templates[provider+"/"+record.Metadata.EventCode] = struct{}{}
+		// Before the actionable check, so a passing record still records its
+		// subject. That is the whole point of reading the passes: without it the
+		// estate is only ever as large as its failures.
+		report.collectResources(record, targetID)
 		if record.StatusCode == "PASS" {
 			report.Stats.Passed++
 		}
@@ -122,7 +143,7 @@ func parseOCSFRecord(raw json.RawMessage, targetID, provider string) (api.Findin
 	if err := validateOCSFRecord(record); err != nil {
 		return api.Finding{}, record, false, err
 	}
-	if record.StatusCode == "PASS" || strings.EqualFold(record.Status, "Suppressed") {
+	if record.StatusCode == "PASS" || isSuppressed(record) {
 		return api.Finding{}, record, false, nil
 	}
 
@@ -130,7 +151,7 @@ func parseOCSFRecord(raw json.RawMessage, targetID, provider string) (api.Findin
 	if err := json.Unmarshal(raw, &source); err != nil {
 		return api.Finding{}, record, false, fmt.Errorf("preserve prowler OCSF record: %w", err)
 	}
-	return api.Finding{
+	finding := api.Finding{
 		TargetID:    targetID,
 		TemplateID:  provider + "/" + record.Metadata.EventCode,
 		Name:        recordTitle(record),
@@ -138,13 +159,20 @@ func parseOCSFRecord(raw json.RawMessage, targetID, provider string) (api.Findin
 		Host:        recordHost(record),
 		MatchedAt:   matchedAt(record),
 		MatcherName: record.StatusCode,
+		Verdict:     recordVerdict(record),
 		Type:        EngineName,
 		Tags:        recordTags(record),
 		Timestamp:   record.Time,
 		Remediation: record.Remediation.Description,
 		Reference:   compact(record.Remediation.References),
 		Raw:         source,
-	}, record, true, nil
+	}
+	// Projected from the typed record, in the one place that also decides how
+	// the run's resource rows are keyed — see subjects. Reading it back out of
+	// the preserved JSON cannot produce a whole key, because OCSF does not put
+	// one there.
+	finding.Resources = resourceRefs(record)
+	return finding, record, true, nil
 }
 
 func validateOCSFRecord(record ocsfRecord) error {
@@ -160,6 +188,20 @@ func validateOCSFRecord(record ocsfRecord) error {
 		return fmt.Errorf("prowler OCSF record %s: account or provider identity is required", record.Metadata.EventCode)
 	}
 	return nil
+}
+
+// recordVerdict translates prowler's status code into the one the lifecycle
+// keys on. MANUAL means the check cannot decide and a person has to, which is
+// the only status prowler reports that is neither a pass nor a failure.
+//
+// Empty for a plain failure rather than "fail": that is the documented default
+// on api.Finding, and stating it on every record would put a field carrying no
+// information into every line of every artifact.
+func recordVerdict(record ocsfRecord) string {
+	if record.StatusCode == "MANUAL" {
+		return api.VerdictManual
+	}
+	return ""
 }
 
 func recordTitle(record ocsfRecord) string {
@@ -220,12 +262,31 @@ func recordTags(record ocsfRecord) []string {
 			appendTag(set, "compliance", framework+":"+requirement)
 		}
 	}
+	return sortedTags(set)
+}
+
+// sortedTags renders a tag set in a stable order, so two runs over the same
+// report produce the same rows.
+func sortedTags(set map[string]struct{}) []string {
 	tags := make([]string, 0, len(set))
 	for tag := range set {
 		tags = append(tags, tag)
 	}
 	sort.Strings(tags)
 	return tags
+}
+
+// isSuppressed reports a record the provider itself declined to judge. It is
+// not a pass and not a failure: the check did not run, so it can neither open a
+// finding nor resolve one.
+func isSuppressed(record ocsfRecord) bool {
+	return strings.EqualFold(record.Status, "Suppressed")
+}
+
+// cutLabel splits a `key:value` label. GCP reports account labels already in
+// that form; anything without a separator is not a label and is dropped.
+func cutLabel(entry string) (key, value string, found bool) {
+	return strings.Cut(entry, ":")
 }
 
 func appendTag(tags map[string]struct{}, key, value string) {

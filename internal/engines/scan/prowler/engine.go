@@ -8,6 +8,7 @@ import (
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/arguments"
+	"github.com/flanksource/recon/internal/engines/scan/prowler/auth"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/catalog"
 	"github.com/flanksource/recon/internal/engines/scan/prowler/schema"
 )
@@ -70,6 +71,24 @@ func newEngine() (Engine, error) {
 		Defaults:        defaults,
 		Profiles:        profiles,
 		ValidateOptions: engine.validateOptions,
+		ValidateProviderCredentials: func(config, context, credentials map[string]any) ([]engines.CredentialConnection, error) {
+			provider, ok := config["provider"].(string)
+			if !ok || provider == "" {
+				return nil, fmt.Errorf("prowler provider is required")
+			}
+			method, err := auth.Match(provider, context, credentials)
+			if err != nil {
+				return nil, err
+			}
+			reference, err := auth.ConnectionReference(credentials, method)
+			if err != nil {
+				return nil, err
+			}
+			if reference == "" {
+				return nil, nil
+			}
+			return []engines.CredentialConnection{{Reference: reference, Type: method.Connection.Type}}, nil
+		},
 	}
 	if err := engine.spec.Validate(); err != nil {
 		return Engine{}, err

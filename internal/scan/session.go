@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -35,17 +36,25 @@ type session struct {
 
 	mu       sync.Mutex
 	findings []api.Finding
-	started  time.Time
-	finished time.Time
-	status   string
-	failure  error
-	cancel   context.CancelFunc
+	// resources is keyed so an engine can report the same subject once per check
+	// without the runtime recording it once per check; order preserves the
+	// engine's own, so a run's rows are deterministic.
+	resources map[api.ResourceKey]api.Resource
+	order     []api.ResourceKey
+	started   time.Time
+	finished  time.Time
+	status    string
+	failure   error
+	cancel    context.CancelFunc
 }
 
 var _ enginescan.Sink = (*session)(nil)
 
 func newSession(output *Output, engine string, command []string) *session {
-	return &session{output: output, engine: engine, Command: command, status: "pending"}
+	return &session{
+		output: output, engine: engine, Command: command, status: "pending",
+		resources: map[api.ResourceKey]api.Resource{},
+	}
 }
 
 // Finding records one result. Findings are kept in memory for the duration of
@@ -56,6 +65,102 @@ func (s *session) Finding(finding api.Finding) error {
 	defer s.mu.Unlock()
 	s.findings = append(s.findings, finding)
 	return nil
+}
+
+// Resource records one subject the run examined.
+//
+// The verdicts are unioned rather than replaced. Each call carries only the
+// check that prompted it, so the last writer would otherwise leave a resource
+// claiming one passing check when fifty passed — and the passes are precisely
+// what a later run needs in order to resolve anything.
+func (s *session) Resource(resource api.Resource) error {
+	if err := resource.Key().Validate(); err != nil {
+		return fmt.Errorf("%s reported a resource with no identity: %w", s.engine, err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := resource.Key()
+	existing, seen := s.resources[key]
+	if !seen {
+		s.order = append(s.order, key)
+	} else {
+		// Fields an engine only fills in on some of the records naming a
+		// resource: a check reporting no metadata must not blank what another
+		// check already supplied.
+		//
+		// The list matches upsertResources' COALESCE set exactly, and has to.
+		// They answer the same question about the same fields — this one within a
+		// run, that one across runs — and the five this used to omit
+		// (account_name, org_uid, org_name, target_id, tags) were preserved in
+		// the database while being blanked in the document `coverage` and the run
+		// report read.
+		resource.Name = firstNonEmpty(resource.Name, existing.Name)
+		resource.Type = firstNonEmpty(resource.Type, existing.Type)
+		resource.Service = firstNonEmpty(resource.Service, existing.Service)
+		resource.Region = firstNonEmpty(resource.Region, existing.Region)
+		resource.ConfigType = firstNonEmpty(resource.ConfigType, existing.ConfigType)
+		resource.AccountName = firstNonEmpty(resource.AccountName, existing.AccountName)
+		resource.OrgUID = firstNonEmpty(resource.OrgUID, existing.OrgUID)
+		resource.OrgName = firstNonEmpty(resource.OrgName, existing.OrgName)
+		resource.TargetID = firstNonEmpty(resource.TargetID, existing.TargetID)
+		if len(resource.Tags) == 0 {
+			resource.Tags = existing.Tags
+		}
+		if len(resource.Metadata) == 0 {
+			resource.Metadata = existing.Metadata
+		}
+		if len(resource.Labels) == 0 {
+			resource.Labels = existing.Labels
+		}
+		if len(resource.ExternalIDs) == 0 {
+			resource.ExternalIDs = existing.ExternalIDs
+		}
+	}
+	resource.Passed = union(existing.Passed, resource.Passed)
+	resource.Suppressed = union(existing.Suppressed, resource.Suppressed)
+	s.resources[key] = resource
+	return nil
+}
+
+// Resources returns what the run examined, in the order it was first reported.
+func (s *session) Resources() []api.Resource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]api.Resource, 0, len(s.order))
+	for _, key := range s.order {
+		out = append(out, s.resources[key])
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func union(existing, added api.StringList) api.StringList {
+	if len(added) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing)+len(added))
+	out := make(api.StringList, 0, len(existing)+len(added))
+	for _, value := range append(append(api.StringList{}, existing...), added...) {
+		if value == "" {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (s *session) Stats(stats api.ScanStats) { s.output.SetStats(stats) }

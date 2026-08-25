@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/flanksource/recon/internal/api"
+	credentialstore "github.com/flanksource/recon/internal/credentials"
 	"github.com/flanksource/recon/internal/models"
 	"github.com/flanksource/recon/internal/schema"
 )
@@ -212,9 +213,13 @@ func updateTarget(
 		row.Arguments = models.JSON[map[string]any]{V: &arguments}
 	}
 	if update.CredentialsSet {
+		existing := row.Credentials.V
 		row.Credentials.V = nil
 		if update.Credentials != nil && !update.Credentials.Empty() {
-			credentials := update.Credentials.Stored()
+			credentials, err := mergeCredentialUpdate(existing, *update.Credentials)
+			if err != nil {
+				return api.TargetDocument{}, err
+			}
 			row.Credentials.V = &credentials
 		}
 	}
@@ -249,6 +254,38 @@ func updateTarget(
 		return api.TargetDocument{}, err
 	}
 	return document, nil
+}
+
+func mergeCredentialUpdate(
+	existing *credentialstore.ProviderCredentials,
+	incoming api.ProviderCredentials,
+) (credentialstore.ProviderCredentials, error) {
+	if err := incoming.ValidateWrite(); err != nil {
+		return credentialstore.ProviderCredentials{}, err
+	}
+	result := incoming.Stored()
+	for index, value := range incoming.EnvVars {
+		if !value.Configured {
+			continue
+		}
+		if existing == nil {
+			return credentialstore.ProviderCredentials{}, fmt.Errorf(
+				"credential %q configured marker has no stored value", value.Name)
+		}
+		found := false
+		for _, stored := range existing.EnvVars {
+			if stored.Name == value.Name && stored.ValueStatic != "" {
+				result.EnvVars[index] = *stored.DeepCopy()
+				found = true
+				break
+			}
+		}
+		if !found {
+			return credentialstore.ProviderCredentials{}, fmt.Errorf(
+				"credential %q configured marker has no stored inline value", value.Name)
+		}
+	}
+	return result, nil
 }
 
 // ImportResult is what one import did, per outcome.

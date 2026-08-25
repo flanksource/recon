@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/configdb"
 )
 
 // reportSchemaVersion is the only report shape this parses. Trivy stamps it on
@@ -94,10 +95,39 @@ type license struct {
 // parsed is what one report amounted to: the findings worth acting on, and the
 // counts that describe everything examined to produce them.
 type parsed struct {
-	Findings  []api.Finding
-	Examined  int
-	Artifact  string
-	templates map[string]struct{}
+	Findings []api.Finding
+	Examined int
+	Artifact string
+	// ArtifactType is trivy's own word for what it scanned — container_image,
+	// filesystem, repository — kept because it is the resource's type and the
+	// only thing distinguishing an image called `app` from a directory of the
+	// same name.
+	ArtifactType string
+	templates    map[string]struct{}
+}
+
+// Resource is the one subject a trivy report is about.
+//
+// One per report rather than one per package: trivy scans an artifact and
+// reports what is inside it, so the artifact is the thing that has a lifecycle
+// and the packages are its contents. No verdicts — trivy is a matcher, and a
+// package it did not report a CVE for was not asserted to be clean, which is
+// why PassRecorded is false for this engine and why nothing here resolves.
+func (p *parsed) Resource(targetID string) api.Resource {
+	kind := p.ArtifactType
+	if kind == "" {
+		kind = "unknown"
+	}
+	artifact := p.Artifact
+	if artifact == "" {
+		artifact = targetID
+	}
+	return api.Resource{
+		Provider: "trivy", Scope: targetID, UID: artifact,
+		Kind: api.KindArtifact, Type: kind, Name: artifact,
+		TargetID: targetID,
+		ExternalIDs: configdb.ExternalIDs(artifact, artifact),
+	}
 }
 
 // ReportFile names the retained report for one provider context. Per context
@@ -149,7 +179,10 @@ func readReport(path, targetID string) (*parsed, error) {
 // inventory and everything in it was clean" is the difference between a scan
 // that worked and one that never looked, and only the counts carry it.
 func (d document) parse(targetID string) (*parsed, error) {
-	found := &parsed{Artifact: d.ArtifactName, templates: map[string]struct{}{}}
+	found := &parsed{
+		Artifact: d.ArtifactName, ArtifactType: d.ArtifactType,
+		templates: map[string]struct{}{},
+	}
 	host := d.ArtifactName
 	if host == "" {
 		host = targetID
@@ -181,6 +214,10 @@ func (d document) parse(targetID string) (*parsed, error) {
 				found.Findings = append(found.Findings, finding)
 			}
 		}
+	}
+	resource := found.Resource(targetID).Ref()
+	for index := range found.Findings {
+		found.Findings[index].Resources = []api.ResourceRef{resource}
 	}
 	return found, nil
 }

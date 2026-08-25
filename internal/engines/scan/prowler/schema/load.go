@@ -190,6 +190,9 @@ func validateProvider(provider string, document ProviderSchema) error {
 		if err := validateLayout(provider, name, projected); err != nil {
 			return err
 		}
+		if err := validateMutualExclusions(provider, name, projected); err != nil {
+			return err
+		}
 	}
 	if err := validatePersistable(provider, "profile", document.Profile); err != nil {
 		return err
@@ -201,60 +204,88 @@ func validateProvider(provider string, document ProviderSchema) error {
 }
 
 func validateCredentialPolicy(provider string, credential JSONSchema) error {
-	if provider != "cloudflare" {
-		if len(credential.Properties) > 0 {
-			return fmt.Errorf("prowler %s credential schema must be empty", provider)
-		}
+	if len(credential.Properties) == 0 {
 		return nil
 	}
-	if len(credential.Properties) != 1 {
-		return fmt.Errorf("prowler cloudflare credential schema must expose only envVars")
+	if len(credential.CredentialMethods) == 0 || len(credential.OneOf) != len(credential.CredentialMethods) {
+		return fmt.Errorf("prowler %s credential schema methods do not match alternatives", provider)
 	}
-	return validateCloudflareCredential(credential.Properties["envVars"])
+	for key, property := range credential.Properties {
+		switch key {
+		case "envVars":
+			if err := validateCredentialEnvVars(provider, property); err != nil {
+				return err
+			}
+		case "connections":
+			if err := validateCredentialConnections(provider, property); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("prowler %s credential schema exposes unsupported property %s", provider, key)
+		}
+	}
+	return nil
 }
 
-func validateCloudflareCredential(envVars JSONSchema) error {
-	if envVars.Type != "array" || envVars.Items == nil || envVars.MinItems == nil || *envVars.MinItems != 1 || envVars.MaxItems == nil || *envVars.MaxItems != 1 {
-		return fmt.Errorf("prowler cloudflare credential schema must expose exactly one envVar")
+func validateCredentialEnvVars(provider string, envVars JSONSchema) error {
+	if envVars.Type != "array" || envVars.Items == nil || envVars.MinItems == nil || *envVars.MinItems < 1 || envVars.MaxItems == nil || *envVars.MaxItems < *envVars.MinItems {
+		return fmt.Errorf("prowler %s credential schema must expose a bounded envVar array", provider)
 	}
 	item := envVars.Items
 	if item.Type != "object" || item.AdditionalProperties == nil || *item.AdditionalProperties || len(item.Properties) != 4 {
-		return fmt.Errorf("prowler cloudflare envVar must be a closed EnvVar object")
+		return fmt.Errorf("prowler %s envVar must be a closed EnvVar object", provider)
 	}
 	if !slices.Equal(item.Required, []string{"name"}) || !credentialAlternativesMatch(item.OneOf) {
-		return fmt.Errorf("prowler cloudflare envVar must require name and exactly one credential value")
+		return fmt.Errorf("prowler %s envVar must require name and exactly one credential value", provider)
 	}
 	name, hasName := item.Properties["name"]
 	value, hasValue := item.Properties["value"]
 	valueFrom, hasValueFrom := item.Properties["valueFrom"]
 	configured, hasConfigured := item.Properties["configured"]
-	if !hasName || name.Type != "string" || name.Const != "CLOUDFLARE_API_TOKEN" || !name.ReadOnly ||
+	if !hasName || name.Type != "string" || len(name.Enum) == 0 || !name.ReadOnly ||
 		!hasValue || value.Type != "string" || value.Format != "password" || !value.WriteOnly || !value.Sensitive ||
 		!hasValueFrom || !hasConfigured || configured.Type != "boolean" || configured.Const != true || !configured.ReadOnly {
-		return fmt.Errorf("prowler cloudflare envVar credential policy drifted")
+		return fmt.Errorf("prowler %s envVar credential policy drifted", provider)
 	}
 	return validateCredentialValueFrom(valueFrom)
+}
+
+func validateCredentialConnections(provider string, connections JSONSchema) error {
+	if connections.Type != "object" || connections.AdditionalProperties == nil || *connections.AdditionalProperties ||
+		connections.MinProperties == nil || *connections.MinProperties != 1 || connections.MaxProperties == nil || *connections.MaxProperties != 1 {
+		return fmt.Errorf("prowler %s connections must select exactly one closed connection", provider)
+	}
+	for key, property := range connections.Properties {
+		if property.Type != "object" || property.AdditionalProperties == nil || *property.AdditionalProperties || !slices.Equal(property.Required, []string{"connection"}) {
+			return fmt.Errorf("prowler %s connection %s must be a closed reference", provider, key)
+		}
+		reference, ok := property.Properties["connection"]
+		if !ok || reference.Type != "string" || reference.Pattern == "" || len(reference.ClickyLookup) == 0 {
+			return fmt.Errorf("prowler %s connection %s must expose a lookup reference", provider, key)
+		}
+	}
+	return nil
 }
 
 func validateCredentialValueFrom(valueFrom JSONSchema) error {
 	if valueFrom.Type != "object" || valueFrom.AdditionalProperties == nil || *valueFrom.AdditionalProperties ||
 		valueFrom.MinProperties == nil || *valueFrom.MinProperties != 1 || valueFrom.MaxProperties == nil || *valueFrom.MaxProperties != 1 ||
 		!valueFrom.SecretReference || len(valueFrom.Properties) != 4 {
-		return fmt.Errorf("prowler cloudflare valueFrom must expose four approved reference types")
+		return fmt.Errorf("prowler credential valueFrom must expose four approved reference types")
 	}
 	for _, key := range []string{"secretKeyRef", "configMapKeyRef", "helmRef"} {
 		selector, ok := valueFrom.Properties[key]
 		if !ok || selector.Type != "object" || selector.AdditionalProperties == nil || *selector.AdditionalProperties ||
 			len(selector.Properties) != 2 || !slices.Equal(selector.Required, []string{"name", "key"}) {
-			return fmt.Errorf("prowler cloudflare valueFrom is missing %s", key)
+			return fmt.Errorf("prowler credential valueFrom is missing %s", key)
 		}
 		if selector.Properties["name"].Type != "string" || selector.Properties["key"].Type != "string" {
-			return fmt.Errorf("prowler cloudflare valueFrom %s must contain string name and key", key)
+			return fmt.Errorf("prowler credential valueFrom %s must contain string name and key", key)
 		}
 	}
 	onePassword, ok := valueFrom.Properties["onePassword"]
 	if !ok || onePassword.Type != "string" || onePassword.Pattern != `^op://[^/]+/[^/]+/.+` {
-		return fmt.Errorf("prowler cloudflare valueFrom must expose an op reference")
+		return fmt.Errorf("prowler credential valueFrom must expose an op reference")
 	}
 	return nil
 }
@@ -310,6 +341,34 @@ func validateLayout(provider, projection string, document JSONSchema) error {
 	for key, property := range document.Properties {
 		if property.Section == "" || !sections[property.Section] {
 			return fmt.Errorf("prowler %s %s property %s references unknown section %q", provider, projection, key, property.Section)
+		}
+	}
+	return nil
+}
+
+// validateMutualExclusions keeps a projected group honest: the form hides every
+// member but the selected one, so a group naming a key this document does not
+// hold would hide a control that was never there, or offer a segment that
+// writes an argument the engine rejects.
+func validateMutualExclusions(provider, projection string, document JSONSchema) error {
+	ids := map[string]bool{}
+	for _, group := range document.MutualExclusions {
+		if group.ID == "" || ids[group.ID] {
+			return fmt.Errorf("prowler %s %s schema has empty or duplicate mutual exclusion %q", provider, projection, group.ID)
+		}
+		ids[group.ID] = true
+		if len(group.Keys) < 2 {
+			return fmt.Errorf("prowler %s %s mutual exclusion %s has %d keys", provider, projection, group.ID, len(group.Keys))
+		}
+		seen := map[string]bool{}
+		for _, key := range group.Keys {
+			if _, ok := document.Properties[key]; !ok {
+				return fmt.Errorf("prowler %s %s mutual exclusion %s references unknown property %s", provider, projection, group.ID, key)
+			}
+			if seen[key] {
+				return fmt.Errorf("prowler %s %s mutual exclusion %s repeats property %s", provider, projection, group.ID, key)
+			}
+			seen[key] = true
 		}
 	}
 	return nil

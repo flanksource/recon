@@ -12,9 +12,10 @@ import (
 // before any account finished, and what the last one totals to.
 type statsSink struct{ published []api.ScanStats }
 
-func (s *statsSink) Finding(api.Finding) error { return nil }
-func (s *statsSink) Stats(stats api.ScanStats) { s.published = append(s.published, stats) }
-func (s *statsSink) Log(string)                {}
+func (s *statsSink) Finding(api.Finding) error   { return nil }
+func (s *statsSink) Resource(api.Resource) error { return nil }
+func (s *statsSink) Stats(stats api.ScanStats)   { s.published = append(s.published, stats) }
+func (s *statsSink) Log(string)                  {}
 
 func (s *statsSink) last() api.ScanStats {
 	GinkgoHelper()

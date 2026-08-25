@@ -8,6 +8,8 @@ import (
 
 	"github.com/flanksource/commons-db/connection"
 	"github.com/flanksource/commons-db/dbtest"
+	commonsmodels "github.com/flanksource/commons-db/models"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -46,6 +48,12 @@ var _ = Describe("provider context schema validation", Ordered, Label("db"), fun
 			}}},
 		} {
 			Expect(db.Gorm().Create(&profile).Error).To(Succeed())
+		}
+		for _, stored := range []commonsmodels.Connection{
+			{ID: uuid.New(), Name: "prod-gcp", Type: "google_cloud"},
+			{ID: uuid.New(), Name: "not-gcp", Type: "aws"},
+		} {
+			Expect(db.Gorm().Create(&stored).Error).To(Succeed())
 		}
 	})
 
@@ -140,8 +148,18 @@ var _ = Describe("provider context schema validation", Ordered, Label("db"), fun
 			"configured credential mode requires credentials or an explicit credential selector")))
 
 		configured.ID = "gcp-configured"
-		configured.Arguments["credentials-file"] = "credentials/gcp.json"
+		configured.Credentials = &api.ProviderCredentials{Connections: &connection.ExecConnections{
+			GCP: &connection.GCPConnection{ConnectionName: "connection://prod-gcp"},
+		}}
 		Expect(st.SaveTarget(ctx, configured)).To(Succeed())
+
+		wrongType := configured
+		wrongType.ID = "gcp-wrong-connection-type"
+		wrongType.Credentials = &api.ProviderCredentials{Connections: &connection.ExecConnections{
+			GCP: &connection.GCPConnection{ConnectionName: "connection://not-gcp"},
+		}}
+		Expect(st.SaveTarget(ctx, wrongType)).To(MatchError(ContainSubstring(
+			"has type aws, expected google_cloud")))
 	})
 
 	It("enforces the Cloudflare credential schema and redacts API reads", func() {

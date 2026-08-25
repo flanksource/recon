@@ -11,7 +11,7 @@ import (
 )
 
 var _ = Describe("Prowler provider execution", func() {
-	It("limits ambient passthrough to Cloudflare's supported credential variables", func() {
+	It("limits ambient passthrough to each provider's supported credential variables", func() {
 		cloudflare, err := providerShellExec(providerContext{
 			ID: "cloudflare-prod", Provider: "cloudflare", CredentialMode: api.CredentialAmbient,
 		}, "/scan", "/scan/context")
@@ -24,7 +24,7 @@ var _ = Describe("Prowler provider execution", func() {
 			ID: "gcp-prod", Provider: "gcp", CredentialMode: api.CredentialAmbient,
 		}, "/scan", "/scan/context")
 		Expect(err).ToNot(HaveOccurred())
-		Expect(gcp.PassthroughEnv).To(BeEmpty())
+		Expect(gcp.PassthroughEnv).To(Equal([]string{"GOOGLE_APPLICATION_CREDENTIALS"}))
 	})
 
 	It("copies configured EnvVars and ExecConnections into an isolated shell request", func() {
