@@ -243,13 +243,15 @@ var _ = Describe("running trivy", Label("binaries"), func() {
 
 		Expect(collected.findings).To(HaveLen(1))
 		found := collected.findings[0]
-		Expect(found.TemplateID).To(Equal("github-pat"))
-		Expect(found.Severity).To(Equal(api.SeverityCritical))
+		Expect(found.CheckID).To(Equal("github-pat"))
+		Expect(found.SeverityLevel()).To(Equal(api.SeverityCritical))
 		Expect(found.TargetID).To(Equal("checkout"))
-		Expect(found.MatcherName).To(Equal("secret"))
+		Expect(found.FindingInfo.Types[0]).To(Equal("secret"))
 		// Trivy masks the value in its own report, so nothing recon keeps
 		// carries the token itself.
-		Expect(found.Raw["Match"]).ToNot(ContainSubstring(token))
+		encoded, err := json.Marshal(found)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(string(encoded)).ToNot(ContainSubstring(token))
 
 		Expect(collected.stats.Matched).To(Equal(float64(1)))
 		Expect(collected.stats.Percent).To(Equal(float64(100)))
@@ -262,7 +264,7 @@ var _ = Describe("running trivy", Label("binaries"), func() {
 		Expect(err).ToNot(HaveOccurred())
 		var written api.Finding
 		Expect(json.Unmarshal([]byte(strings.TrimSpace(string(body))), &written)).To(Succeed())
-		Expect(written.TemplateID).To(Equal("github-pat"))
+		Expect(written.CheckID).To(Equal("github-pat"))
 	}, SpecTimeout(3*time.Minute))
 
 	It("fails loudly when trivy cannot read the target", func(ctx SpecContext) {

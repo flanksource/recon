@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 func TestTrivy(t *testing.T) {
@@ -32,10 +33,28 @@ func fixture() *parsed {
 	return report
 }
 
+// cause decodes the evidence entry: where in the scanned file the finding is.
+// A json_t payload rather than modelled attributes, because a start line in a
+// Dockerfile is trivy's own shape and OCSF has no name for it.
+func cause(finding api.Finding) map[string]any {
+	GinkgoHelper()
+	Expect(finding.Evidences).To(HaveLen(1))
+	var decoded map[string]any
+	Expect(json.Unmarshal(finding.Evidences[0].Data, &decoded)).To(Succeed())
+	return decoded
+}
+
+func mustEncode(finding api.Finding) string {
+	GinkgoHelper()
+	encoded, err := json.Marshal(finding)
+	Expect(err).ToNot(HaveOccurred())
+	return string(encoded)
+}
+
 func findingNamed(report *parsed, templateID string) api.Finding {
 	GinkgoHelper()
 	for _, finding := range report.Findings {
-		if finding.TemplateID == templateID {
+		if finding.CheckID == templateID {
 			return finding
 		}
 	}
@@ -49,7 +68,7 @@ var _ = Describe("reading a trivy report", func() {
 
 		matchers := map[string]int{}
 		for _, finding := range report.Findings {
-			matchers[finding.MatcherName]++
+			matchers[finding.FindingInfo.Types[0]]++
 		}
 		// Two vulnerabilities in requirements.txt, two failed Dockerfile checks,
 		// three secrets in the credentials file, one detected licence.
@@ -60,41 +79,57 @@ var _ = Describe("reading a trivy report", func() {
 
 	It("addresses every finding to the target it was resolved from", func() {
 		report := fixture()
+		resource := report.Resource(contextID)
 		for _, finding := range report.Findings {
 			Expect(finding.TargetID).To(Equal(contextID))
-			Expect(finding.Type).To(Equal(EngineName))
+			Expect(finding.Engine).To(Equal(EngineName))
 			// The artifact trivy named, not the inventory id: they are different
 			// identities and a finding needs both.
 			Expect(finding.Host).To(Equal("sample"))
+			Expect(finding.Resources).To(Equal([]api.ResourceRef{resource.Ref()}))
 		}
+		Expect(resource.ExternalIDs).To(ContainElement("sample"))
 	})
 
 	It("projects a vulnerability onto the package it is in", func() {
 		finding := findingNamed(fixture(), "CVE-2019-19844")
 
-		Expect(finding.Name).To(Equal("Django: crafted email address allows account takeover"))
-		Expect(finding.Severity).To(Equal(api.SeverityCritical))
+		Expect(finding.FindingInfo.Title).To(Equal("Django: crafted email address allows account takeover"))
+		Expect(finding.SeverityLevel()).To(Equal(api.SeverityCritical))
 		Expect(finding.MatchedAt).To(Equal("requirements.txt: Django@2.0.1"))
-		Expect(finding.Remediation).To(Equal("Upgrade Django from 2.0.1 to 1.11.27, 2.2.9, 3.0.1"))
+		Expect(finding.Remediation.Desc).To(Equal("Upgrade Django from 2.0.1 to 1.11.27, 2.2.9, 3.0.1"))
 		Expect(finding.Tags).To(ContainElements(
 			"class:lang-pkgs", "type:pip", "package:Django", "status:fixed", "cwe:CWE-640"))
 		// The primary URL leads, because it is the one page that summarises the
 		// rest.
-		Expect(finding.Reference[0]).To(Equal("https://avd.aquasec.com/nvd/cve-2019-19844"))
-		// The engine's own record survives the projection: the typed fields are
-		// what the UI filters on, not the whole of what trivy said.
-		Expect(finding.Raw).To(HaveKeyWithValue("PkgIdentifier", HaveKeyWithValue(
-			"PURL", "pkg:pypi/django@2.0.1")))
+		Expect(finding.Remediation.References[0]).To(Equal("https://avd.aquasec.com/nvd/cve-2019-19844"))
+
+		// The CVE and the package it is in have homes OCSF defines for exactly
+		// them, rather than being spelled out in tags and a title and left in
+		// the verbatim record for the browser to dig out.
+		Expect(finding.Vulnerabilities).To(HaveLen(1))
+		Expect(finding.Vulnerabilities[0].CVE.UID).To(Equal("CVE-2019-19844"))
+		Expect(finding.Vulnerabilities[0].AffectedPackages).To(Equal([]ocsf.AffectedPackage{{
+			Name: "Django", Version: "2.0.1", FixedInVersion: "1.11.27, 2.2.9, 3.0.1",
+		}}))
+		Expect(finding.Vulnerabilities[0].IsFixAvailable).To(BeTrue())
 	})
 
 	It("addresses a misconfiguration to the line that caused it", func() {
 		finding := findingNamed(fixture(), "DS-0002")
 
-		Expect(finding.Name).To(Equal("Image user should not be 'root'"))
-		Expect(finding.Severity).To(Equal(api.SeverityHigh))
+		Expect(finding.FindingInfo.Title).To(Equal("Image user should not be 'root'"))
+		Expect(finding.SeverityLevel()).To(Equal(api.SeverityHigh))
 		Expect(finding.MatchedAt).To(Equal("Dockerfile:2"))
-		Expect(finding.Extracted).To(Equal([]string{"Last USER command in Dockerfile should not be 'root'"}))
-		Expect(finding.Remediation).To(Equal("Add 'USER <non root user name>' line to the Dockerfile"))
+		// What was wrong, in the attribute OCSF defines for it. It used to be
+		// the sole entry of an `extracted` column nuclei meant as its captured
+		// values.
+		Expect(finding.FindingInfo.Desc).
+			To(Equal("Last USER command in Dockerfile should not be 'root'"))
+		// And where in the file, which triage opens the file to find and which
+		// has no modelled home of its own.
+		Expect(cause(finding)).To(HaveKeyWithValue("start_line", float64(2)))
+		Expect(finding.Remediation.Desc).To(Equal("Add 'USER <non root user name>' line to the Dockerfile"))
 		Expect(finding.Tags).To(ContainElements("class:config", "type:dockerfile", "provider:Dockerfile"))
 	})
 
@@ -107,23 +142,27 @@ var _ = Describe("reading a trivy report", func() {
 	It("records a secret without lifting the matched text out of the record", func() {
 		finding := findingNamed(fixture(), "github-pat")
 
-		Expect(finding.Name).To(Equal("GitHub Personal Access Token"))
+		Expect(finding.FindingInfo.Title).To(Equal("GitHub Personal Access Token"))
 		Expect(finding.MatchedAt).To(Equal("credentials:4"))
 		Expect(finding.Tags).To(ContainElement("category:GitHub"))
-		Expect(finding.Remediation).To(Equal("Rotate the credential and remove it from credentials"))
-		Expect(finding.Extracted).To(BeEmpty())
-		// Trivy masks the value before writing the report and recon keeps it
-		// that way; nothing here copies it into a typed field.
-		Expect(finding.Raw).To(HaveKeyWithValue("Match", ContainSubstring("****")))
+		Expect(finding.Remediation.Desc).To(Equal("Rotate the credential and remove it from credentials"))
+
+		// Trivy masks the value before writing the report, and the record no
+		// longer travels with the finding at all — so the only thing carried is
+		// where to look. Asserted over the whole marshalled record rather than
+		// one field, because the point is that there is nowhere for it to hide.
+		Expect(cause(finding)).To(Equal(map[string]any{"start_line": float64(4)}))
+		Expect(mustEncode(finding)).ToNot(ContainSubstring("****"))
+		Expect(mustEncode(finding)).ToNot(ContainSubstring("ghp_"))
 	})
 
 	It("names the file a licence was detected in", func() {
 		finding := findingNamed(fixture(), "license/MIT")
 
-		Expect(finding.Name).To(Equal("MIT licence in LICENSE"))
-		Expect(finding.Severity).To(Equal(api.SeverityLow))
+		Expect(finding.FindingInfo.Title).To(Equal("MIT licence in LICENSE"))
+		Expect(finding.SeverityLevel()).To(Equal(api.SeverityLow))
 		Expect(finding.Tags).To(ContainElements("category:notice", "license:MIT"))
-		Expect(finding.Reference).To(Equal([]string{"https://spdx.org/licenses/MIT.html"}))
+		Expect(finding.Remediation.References).To(Equal([]string{"https://spdx.org/licenses/MIT.html"}))
 	})
 
 	It("counts everything examined, not only what it reported", func() {
@@ -162,7 +201,7 @@ var _ = Describe("reading a report that is not all findings", func() {
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(report.Findings).To(HaveLen(1))
-		Expect(report.Findings[0].TemplateID).To(Equal("DS-0002"))
+		Expect(report.Findings[0].CheckID).To(Equal("DS-0002"))
 		Expect(report.Stats().Total).To(Equal(float64(2)))
 		Expect(report.Stats().Matched).To(Equal(float64(1)))
 	})
@@ -189,7 +228,7 @@ var _ = Describe("reading a report that is not all findings", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(report.Findings[0].Host).To(Equal(contextID))
 		// With no title, the rule id is the most specific name there is.
-		Expect(report.Findings[0].Name).To(Equal("generic"))
+		Expect(report.Findings[0].FindingInfo.Title).To(Equal("generic"))
 	})
 
 	It("reports a clean scan as no findings rather than as nothing scanned", func() {

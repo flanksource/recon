@@ -61,11 +61,11 @@ func (r Rule) structurallyMatches(finding api.Finding) bool {
 		return false
 	case !matchesResourceKey(r.ResourceKeys, finding.Resources):
 		return false
-	case !collections.MatchItems(finding.TemplateID, r.Templates...):
+	case !collections.MatchItems(finding.CheckID, r.Templates...):
 		return false
 	case !matchesTags(r.Tags, finding.Tags):
 		return false
-	case !matchesSeverity(r.Severity, finding.Severity):
+	case !matchesSeverity(r.Severity, finding.SeverityLevel()):
 		return false
 	default:
 		return true

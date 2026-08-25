@@ -26,7 +26,7 @@ import type { FilterSelection, FilterVocabulary } from "./types";
  * `!` for exactly these keys: TemplateOpts.Tag and .Type via
  * collections.MatchItems, FindingOpts.Tag and TargetOpts.Tags via tagPredicate.
  */
-const NEGATABLE = new Set(["tag", "tags", "type"]);
+const NEGATABLE = new Set(["label", "tag", "tags", "type"]);
 
 /**
  * Loads a listing's filter controls and holds the current selection.

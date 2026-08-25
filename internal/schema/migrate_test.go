@@ -96,6 +96,13 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(constraints).To(BeEmpty())
 	})
 
+	// 012 drops these by name with IF EXISTS, so what is under test is the name
+	// rather than the expression. findings_severity_enum constrained a `severity`
+	// column that findings no longer has — it became OCSF's severity_id — so it is
+	// planted over the column that replaced it. A database that really carries the
+	// historical constraint has already run 012 and dropped it; one that has not
+	// loses it to the diff instead, since Postgres drops a CHECK along with the
+	// column it constrains, and 012's IF EXISTS then finds nothing.
 	It("removes legacy application vocabulary constraints", func() {
 		_, err := db.SQL().Exec(`
 			ALTER TABLE targets ADD CONSTRAINT targets_class_enum
@@ -109,7 +116,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			ALTER TABLE scans ADD CONSTRAINT scans_phase_enum
 				CHECK (phase IN ('idle', 'running', 'done', 'failed', 'cancelled'));
 			ALTER TABLE findings ADD CONSTRAINT findings_severity_enum
-				CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info', 'unknown'))`)
+				CHECK (severity_id IS NOT NULL)`)
 		Expect(err).ToNot(HaveOccurred())
 		_, err = db.SQL().Exec(`
 			DELETE FROM schema_migration_scripts
@@ -159,89 +166,54 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	// A Resources tab that starts empty on a database holding months of scans
-	// reads as broken, and the information is not missing: every prowler finding
-	// carries the whole OCSF record in `raw`.
-	It("recovers resources and their findings from evidence already stored", func() {
-		var scanID string
-		Expect(db.SQL().QueryRow(`
-			INSERT INTO scans (
-				name, engine, profile, endpoint_count, phase,
-				started_at, finished_at, severities
-			) VALUES (
-				'legacy-prowler-scan', 'prowler', 'gcp-cis-5-0', 1, 'done',
-				'2026-08-10T12:00:00Z', '2026-08-10T12:01:00Z', '{}'::jsonb
-			) RETURNING id::text`).Scan(&scanID)).To(Succeed())
-
-		// The firewall case exactly: an opaque numeric uid whose readable name
-		// lives in resources[0].name, which nothing used to read.
-		var findingID string
-		Expect(db.SQL().QueryRow(`
-			INSERT INTO findings (
-				scan_id, line_no, template_id, name, severity, host, matched_at,
-				type, tags, raw
-			) VALUES (
-				$1::uuid, 1, 'gcp/firewall_rdp_open', 'RDP open to the internet',
-				'high', 'flanksource-prod', '1429543158501771126', 'prowler',
-				'{}'::text[], $2::jsonb
-			) RETURNING id::text`, scanID, `{
-				"cloud": {"provider": "gcp", "account": {"uid": "flanksource-prod"}},
-				"resources": [{
-					"uid": "1429543158501771126", "name": "tailscale-router",
-					"type": "compute.googleapis.com/Firewall", "region": "global",
-					"group": {"name": "compute"}
-				}]
-			}`).Scan(&findingID)).To(Succeed())
-
+	// The upgrade every existing database performs: a table of nuclei-shaped rows
+	// with the engine's whole record beside them in `raw`, arriving as OCSF
+	// Detection Findings.
+	//
+	// The other backfill specs re-run one script against the finished schema.
+	// This one cannot, because the columns it reads from are the ones the diff
+	// drops — so the table is first rewound to the shape it had before this
+	// change. That rewind is not a contrivance: it is exactly what a real
+	// database looks like when the pre-phase scripts run, and the only state in
+	// which 022 and 023 have anything to do.
+	//
+	// The resources rows are seeded rather than recovered. 016 recovered them
+	// from `raw`, and it no longer can: it is a post script, so by the time it
+	// runs the diff has dropped the column. Every database that has one has
+	// already run it, and one that has not repopulates on its next scan — which
+	// is why the link recovery below joins to resources rather than creating any.
+	It("upgrades legacy findings into OCSF Detection Findings", func() {
 		_, err := db.SQL().Exec(`
-			DELETE FROM schema_migration_scripts
-			WHERE scope = $1 AND path = '016_backfill_resources.sql'`, schema.Name)
+			ALTER TABLE findings
+				DROP COLUMN check_id, DROP COLUMN engine, DROP COLUMN verdict,
+				DROP COLUMN class_uid, DROP COLUMN category_uid, DROP COLUMN type_uid,
+				DROP COLUMN activity_id, DROP COLUMN severity_id, DROP COLUMN status_id,
+				DROP COLUMN status_code, DROP COLUMN status_detail, DROP COLUMN "time",
+				DROP COLUMN finding_info, DROP COLUMN metadata, DROP COLUMN remediation,
+				DROP COLUMN cloud, DROP COLUMN vulnerabilities, DROP COLUMN observables,
+				DROP COLUMN unmapped, DROP COLUMN evidences, DROP COLUMN evidences_truncated,
+				ADD COLUMN template_id text NOT NULL DEFAULT '',
+				ADD COLUMN name text NOT NULL DEFAULT '',
+				ADD COLUMN severity text NOT NULL DEFAULT 'unknown',
+				ADD COLUMN type text NOT NULL DEFAULT '',
+				ADD COLUMN matcher_name text,
+				ADD COLUMN "timestamp" timestamptz,
+				ADD COLUMN raw jsonb,
+				ADD COLUMN request text,
+				ADD COLUMN response text,
+				ADD COLUMN curl text,
+				ADD COLUMN extracted text[],
+				ADD COLUMN remediation text,
+				ADD COLUMN reference text[]`)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
-
-		var name, resourceType, service, state string
-		Expect(db.SQL().QueryRow(`
-			SELECT name, type, service, state FROM resources
-			WHERE uid = '1429543158501771126'`).
-			Scan(&name, &resourceType, &service, &state)).To(Succeed())
-		Expect(name).To(Equal("tailscale-router"))
-		Expect(resourceType).To(Equal("compute.googleapis.com/Firewall"))
-		Expect(service).To(Equal("compute"))
-		// A backfill has observed nothing, so it may not judge absence.
-		Expect(state).To(Equal("present"))
-
-		var linked int
-		Expect(db.SQL().QueryRow(`
-			SELECT count(*) FROM findings f JOIN resources r ON r.id = f.resource_id
-			WHERE f.id = $1::uuid`, findingID).Scan(&linked)).To(Succeed())
-		Expect(linked).To(Equal(1), "the evidence is linked to what it was about")
-
-		// The ledger is deliberately not backfilled: a historic PASS was counted
-		// and discarded, so a backfilled open row would have no evidence it is
-		// still failing and nothing that could ever resolve it.
-		var states int
-		Expect(db.SQL().QueryRow(`SELECT count(*) FROM finding_states`).Scan(&states)).To(Succeed())
-		Expect(states).To(BeZero())
-
-		_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)
-		Expect(err).ToNot(HaveOccurred())
-		_, err = db.SQL().Exec(`DELETE FROM resources`)
-		Expect(err).ToNot(HaveOccurred())
-	})
-
-	// A check that fails against several resources names all of them, and only
-	// the first was ever linked. The rest survived in the raw record alone,
-	// which is engine-specific, unqueryable and on its way out — so they have to
-	// be recovered into the relation while that record is still there.
-	It("recovers every subject a stored finding named, not only the first", func() {
 		var scanID string
 		Expect(db.SQL().QueryRow(`
 			INSERT INTO scans (
 				name, engine, profile, endpoint_count, phase,
 				started_at, finished_at, severities
 			) VALUES (
-				'legacy-multi-resource', 'prowler', 'gcp-cis-5-0', 1, 'done',
+				'legacy-ocsf-upgrade', 'prowler', 'gcp-cis-5-0', 1, 'done',
 				'2026-08-11T12:00:00Z', '2026-08-11T12:01:00Z', '{}'::jsonb
 			) RETURNING id::text`).Scan(&scanID)).To(Succeed())
 
@@ -253,35 +225,108 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			Expect(err).ToNot(HaveOccurred())
 		}
 
-		var findingID string
+		// A check that failed against two buckets. Only the first was ever
+		// linked; the second existed nowhere but `raw`.
+		var prowlerID string
 		Expect(db.SQL().QueryRow(`
 			INSERT INTO findings (
 				scan_id, line_no, template_id, name, severity, host, matched_at,
-				type, tags, raw
+				type, matcher_name, tags, remediation, reference, "timestamp", raw
 			) VALUES (
-				$1::uuid, 1, 'gcp/bucket_public', 'Bucket is public',
-				'high', 'flanksource-prod', 'bucket-a', 'prowler',
-				'{}'::text[], $2::jsonb
+				$1::uuid, 1, 'gcp/bucket_public', 'Bucket is public', 'high',
+				'flanksource-prod', 'bucket-a', 'prowler', 'MANUAL',
+				ARRAY['cis']::text[], 'Make the bucket private',
+				ARRAY['https://example.test/bucket']::text[],
+				'2026-08-11T12:00:30Z', $2::jsonb
 			) RETURNING id::text`, scanID, `{
 				"cloud": {"provider": "gcp", "account": {"uid": "flanksource-prod"}},
+				"risk_details": "Anyone on the internet can read the objects.",
 				"resources": [
 					{"uid": "bucket-a", "name": "logs"},
 					{"uid": "bucket-b", "name": "backups"}
 				]
-			}`).Scan(&findingID)).To(Succeed())
+			}`).Scan(&prowlerID)).To(Succeed())
 
-		_, err := db.SQL().Exec(`
+		// The four columns that only nuclei ever filled, and that OCSF models as
+		// one evidence entry.
+		var nucleiID string
+		Expect(db.SQL().QueryRow(`
+			INSERT INTO findings (
+				scan_id, line_no, template_id, name, severity, host, matched_at,
+				type, tags, request, response, curl, extracted, "timestamp"
+			) VALUES (
+				$1::uuid, 2, 'exposed-panel', 'Exposed admin panel', 'medium',
+				'app.example.test', 'https://app.example.test/admin', 'nuclei',
+				'{}'::text[], 'GET /admin HTTP/1.1', 'HTTP/1.1 200 OK',
+				'curl -s https://app.example.test/admin',
+				ARRAY['v1.2.3']::text[], '2026-08-11T12:00:40Z'
+			) RETURNING id::text`, scanID).Scan(&nucleiID)).To(Succeed())
+
+		_, err = db.SQL().Exec(`
 			DELETE FROM schema_migration_scripts
-			WHERE scope = $1 AND path = '022_finding_resources.sql'`, schema.Name)
+			WHERE scope = $1 AND path IN (
+				'016_backfill_resources.sql', '018_check_catalogue.sql',
+				'021_finding_verdict.sql', '022_finding_resources.sql',
+				'023_ocsf_findings.sql')`, schema.Name)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+
+		var (
+			checkID, engine, verdict         string
+			severityID, classUID, activityID int
+			typeUID                          int64
+			title, desc, kind                string
+			statusCode, provider             string
+			remediationDesc, remediationRef  string
+			profile                          string
+		)
+		Expect(db.SQL().QueryRow(`
+			SELECT check_id, engine, verdict,
+			       severity_id, class_uid, activity_id, type_uid,
+			       finding_info ->> 'title', finding_info ->> 'desc',
+			       finding_info -> 'types' ->> 0,
+			       status_code, cloud ->> 'provider',
+			       remediation ->> 'desc', remediation -> 'references' ->> 0,
+			       metadata -> 'profiles' ->> 0
+			FROM findings WHERE id = $1::uuid`, prowlerID).
+			Scan(&checkID, &engine, &verdict,
+				&severityID, &classUID, &activityID, &typeUID,
+				&title, &desc, &kind,
+				&statusCode, &provider,
+				&remediationDesc, &remediationRef, &profile)).To(Succeed())
+
+		// Identity moved rather than changed: these are what the lifecycle, the
+		// catalogue and every stored mute rule key on.
+		Expect(checkID).To(Equal("gcp/bucket_public"))
+		Expect(engine).To(Equal("prowler"))
+
+		Expect(classUID).To(Equal(2004), "detection_finding")
+		Expect(activityID).To(Equal(1), "create")
+		Expect(typeUID).To(Equal(int64(200401)), "class_uid * 100 + activity_id")
+		Expect(severityID).To(Equal(4), "OCSF numbers high 4; recon called it 'high'")
+
+		// What triage needed and could previously reach only by digging through
+		// the blob, differently per engine.
+		Expect(title).To(Equal("Bucket is public"))
+		Expect(desc).To(Equal("Anyone on the internet can read the objects."))
+		Expect(kind).To(Equal("cis"), "recon's tags, projected into finding_info.types")
+		Expect(remediationDesc).To(Equal("Make the bucket private"))
+		Expect(remediationRef).To(Equal("https://example.test/bucket"))
+		Expect(provider).To(Equal("gcp"))
+		Expect(profile).To(Equal("cloud"),
+			"prowler declares the profile that makes cloud a required attribute")
+
+		// matcher_name held prowler's OCSF status_code, and 021 reads the manual
+		// verdict back out of the column it moved to.
+		Expect(statusCode).To(Equal("MANUAL"))
+		Expect(verdict).To(Equal("manual"))
 
 		rows, err := db.SQL().Query(`
 			SELECT r.uid FROM finding_resources fr
 			JOIN resources r ON r.id = fr.resource_id
 			WHERE fr.finding_id = $1::uuid
-			ORDER BY fr.ordinal`, findingID)
+			ORDER BY fr.ordinal`, prowlerID)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(rows.Close)
 
@@ -293,12 +338,48 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		}
 		Expect(rows.Err()).ToNot(HaveOccurred())
 		// In the order the record named them: the first is the subject the
-		// verdict is about.
+		// verdict is about, and the second had no home at all before.
 		Expect(linked).To(Equal([]string{"bucket-a", "bucket-b"}))
+
+		var request, response, curl, extracted string
+		Expect(db.SQL().QueryRow(`
+			SELECT evidences -> 0 -> 'http_request' ->> 'args',
+			       evidences -> 0 -> 'http_response' ->> 'message',
+			       evidences -> 0 -> 'data' ->> 'curl',
+			       evidences -> 0 -> 'data' -> 'extracted' ->> 0
+			FROM findings WHERE id = $1::uuid`, nucleiID).
+			Scan(&request, &response, &curl, &extracted)).To(Succeed())
+		Expect(request).To(Equal("GET /admin HTTP/1.1"))
+		Expect(response).To(Equal("HTTP/1.1 200 OK"))
+		Expect(curl).To(Equal("curl -s https://app.example.test/admin"))
+		Expect(extracted).To(Equal("v1.2.3"))
+
+		// The catalogue describes itself from the OCSF columns now, and must
+		// describe a check the same way a fresh run would.
+		var catalogueName, catalogueSeverity, catalogueRemediation string
+		Expect(db.SQL().QueryRow(`
+			SELECT name, severity, remediation FROM checks
+			WHERE engine = 'prowler' AND check_id = 'gcp/bucket_public'`).
+			Scan(&catalogueName, &catalogueSeverity, &catalogueRemediation)).To(Succeed())
+		Expect(catalogueName).To(Equal("Bucket is public"))
+		Expect(catalogueSeverity).To(Equal("high"))
+		Expect(catalogueRemediation).To(Equal("Make the bucket private"))
+
+		// The point of the exercise: none of the old shape survives.
+		var legacy int
+		Expect(db.SQL().QueryRow(`
+			SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'findings' AND column_name IN (
+				'raw', 'matcher_name', 'template_id', 'severity', 'timestamp',
+				'request', 'response', 'curl', 'extracted', 'reference',
+				'remediation_text')`).Scan(&legacy)).To(Succeed())
+		Expect(legacy).To(BeZero())
 
 		_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)
 		Expect(err).ToNot(HaveOccurred())
 		_, err = db.SQL().Exec(`DELETE FROM resources`)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = db.SQL().Exec(`DELETE FROM checks`)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -426,8 +507,12 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 				RETURNING id::text`).Scan(&scanID)).To(Succeed())
 
 			_, err := db.SQL().Exec(`
-				INSERT INTO findings (scan_id, line_no, template_id, name, severity, host, matched_at)
-				VALUES ($1, 1, 't', 'n', 'medium', 'a.example.test', 'https://a.example.test')`, scanID)
+				INSERT INTO findings (
+					scan_id, line_no, check_id, engine, severity_id, type_uid,
+					host, matched_at, finding_info
+				)
+				VALUES ($1, 1, 't', 'nuclei', 3, 200401, 'a.example.test',
+					'https://a.example.test', '{"uid": "t", "title": "n"}'::jsonb)`, scanID)
 			Expect(err).ToNot(HaveOccurred())
 
 			_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)

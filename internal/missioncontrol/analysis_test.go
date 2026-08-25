@@ -11,6 +11,7 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/missioncontrol"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 func TestMissionControl(t *testing.T) {
@@ -18,143 +19,107 @@ func TestMissionControl(t *testing.T) {
 	RunSpecs(t, "MissionControl")
 }
 
-// configID stands in for a catalog config item the resolver matched.
 var configID = uuid.MustParse("3f2a1c4e-0000-4000-8000-000000000001")
 
 func nucleiScan() api.Scan {
 	return api.Scan{
-		ID: "01JSCAN", Engine: "nuclei", Profile: "safe",
+		ID: "01JSCAN", Engine: "nuclei", Profile: "safe", Phase: api.PhaseDone,
 		StartedAt: "2026-08-10T12:00:00", FinishedAt: "2026-08-10T12:00:20",
 	}
 }
 
 func tlsFinding() api.Finding {
 	return api.Finding{
+		DetectionFinding: ocsf.DetectionFinding{
+			ClassUID:    ocsf.ClassUID,
+			CategoryUID: ocsf.CategoryUID,
+			ActivityID:  ocsf.ActivityIDCreate,
+			TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+			SeverityID:  ocsf.SeverityIDHigh,
+			Time:        1786000811000,
+			FindingInfo: &ocsf.FindingInfo{
+				UID:   "tls-version",
+				Title: "TLS 1.0 accepted",
+				Types: []string{"tls", "baseline"},
+			},
+			Metadata: &ocsf.Metadata{
+				Version:   ocsf.Version,
+				EventCode: "tls-version",
+				Product:   &ocsf.Product{Name: "nuclei", VendorName: api.Vendor},
+			},
+			Remediation: &ocsf.Remediation{
+				Desc:       "Disable TLS 1.0 on the listener",
+				References: []string{"https://example.test/tls"},
+			},
+			Unmapped: map[string]any{"matcher-status": true},
+		},
 		ScanID: "01JSCAN", LineNo: 4, TargetID: "api.example.test",
-		TemplateID: "tls-version", Name: "TLS 1.0 accepted", Severity: api.SeverityHigh,
+		Engine: "nuclei", CheckID: "tls-version",
 		Host: "api.example.test", MatchedAt: "https://api.example.test:443",
-		Timestamp:   "2026-08-10T12:00:11Z",
-		Remediation: "Disable TLS 1.0 on the listener",
-		Reference:   []string{"https://example.test/tls"},
-		Tags:        []string{"tls", "baseline"},
-		Raw:         map[string]any{"matcher-status": true},
+		Tags: []string{"tls", "baseline"},
 	}
 }
 
-var _ = Describe("finding to insight", func() {
-	It("carries the finding's identity, evidence and remediation onto the insight", func() {
-		analysis, err := missioncontrol.Analysis(nucleiScan(), tlsFinding(), configID)
-
-		Expect(err).ToNot(HaveOccurred())
-		Expect(analysis.ConfigID).To(Equal(configID))
-		Expect(analysis.Analyzer).To(Equal("tls-version"))
-		Expect(analysis.Summary).To(Equal("TLS 1.0 accepted"))
-		Expect(analysis.Status).To(Equal("open"))
-		Expect(analysis.Severity).To(Equal(dutymodels.SeverityHigh))
-		Expect(analysis.AnalysisType).To(Equal(dutymodels.AnalysisTypeSecurity))
-		Expect(analysis.Source).To(Equal("recon/nuclei"))
-		Expect(analysis.Message).To(ContainSubstring("Disable TLS 1.0 on the listener"))
-		Expect(analysis.Message).To(ContainSubstring("https://example.test/tls"))
-		Expect(analysis.Analysis).To(HaveKeyWithValue("scan_id", "01JSCAN"))
-		Expect(analysis.Analysis).To(HaveKeyWithValue("engine", "nuclei"))
-		Expect(analysis.Analysis).To(HaveKeyWithValue("matched_at", "https://api.example.test:443"))
-		Expect(analysis.Analysis).To(HaveKeyWithValue("finding_id", "01JSCAN#4"))
-		Expect(analysis.Analysis).To(HaveKeyWithValue("raw", map[string]any{"matcher-status": true}))
-	})
-
-	// The engine's own timestamp is when the thing was seen; the run's clock is
-	// only when the run happened.
-	It("observes at the engine's timestamp, falling back to the run's clock", func() {
-		withStamp, err := missioncontrol.Analysis(nucleiScan(), tlsFinding(), configID)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(withStamp.LastObserved.UTC()).To(Equal(time.Date(2026, 8, 10, 12, 0, 11, 0, time.UTC)))
-
-		undated := tlsFinding()
-		undated.Timestamp = ""
-		withoutStamp, err := missioncontrol.Analysis(nucleiScan(), undated, configID)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(*withoutStamp.LastObserved).
-			To(Equal(time.Date(2026, 8, 10, 12, 0, 20, 0, time.Local)))
-		Expect(withoutStamp.FirstObserved).To(Equal(withoutStamp.LastObserved))
-	})
-
-	It("rejects an engine with no analysis type rather than filing it as security", func() {
-		scan := nucleiScan()
-		scan.Engine = "zap"
-
-		_, err := missioncontrol.Analysis(scan, tlsFinding(), configID)
-
-		Expect(err).To(MatchError(ContainSubstring(`engine "zap"`)))
-	})
-
-	DescribeTable("engine decides what kind of question the insight answers",
-		func(engine string, expected dutymodels.AnalysisType) {
-			scan := nucleiScan()
-			scan.Engine = engine
-
-			analysis, err := missioncontrol.Analysis(scan, tlsFinding(), configID)
-
-			Expect(err).ToNot(HaveOccurred())
-			Expect(analysis.AnalysisType).To(Equal(expected))
+func currentState(status string) api.InsightState {
+	resource := api.Resource{
+		ID: "01JRESOURCE", Provider: "nuclei", Scope: "api.example.test",
+		UID: "https://api.example.test", Name: "https://api.example.test",
+		ExternalIDs: []string{"https://api.example.test"},
+	}
+	return api.InsightState{
+		Resource: resource, Finding: tlsFinding(), Scan: nucleiScan(),
+		State: api.FindingState{
+			ID: "01JSTATE", ResourceID: resource.ID, Engine: "nuclei", CheckID: "tls-version",
+			Status: status, Severity: string(api.SeverityHigh), Occurrences: 2,
+			FirstSeen: "2026-08-10T12:00:11", LastSeen: "2026-08-11T12:00:11",
 		},
-		Entry("nuclei probes for weaknesses", "nuclei", dutymodels.AnalysisTypeSecurity),
-		Entry("trivy probes for weaknesses", "trivy", dutymodels.AnalysisTypeSecurity),
-		Entry("prowler checks a benchmark", "prowler", dutymodels.AnalysisTypeCompliance),
-		Entry("inspec checks a benchmark", "inspec", dutymodels.AnalysisTypeCompliance),
+	}
+}
+
+var _ = Describe("current state to insight", func() {
+	DescribeTable("maps the complete lifecycle",
+		func(state, expected string) {
+			analysis, err := missioncontrol.StateAnalysis(currentState(state), configID)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(analysis.Status).To(Equal(expected))
+		},
+		Entry("open", api.StatusOpen, dutymodels.AnalysisStatusOpen),
+		Entry("manual remains actionable", api.StatusManual, dutymodels.AnalysisStatusOpen),
+		Entry("resolved closes", api.StatusResolved, dutymodels.AnalysisStatusResolved),
+		Entry("muted silences", api.StatusMuted, dutymodels.AnalysisStatusSilenced),
 	)
 
-	DescribeTable("severity maps onto Mission Control's ladder",
-		func(reported api.Severity, expected dutymodels.Severity) {
-			finding := tlsFinding()
-			finding.Severity = reported
+	It("uses ledger timestamps and carries resource identity", func() {
+		analysis, err := missioncontrol.StateAnalysis(currentState(api.StatusResolved), configID)
 
-			analysis, err := missioncontrol.Analysis(nucleiScan(), finding, configID)
-
-			Expect(err).ToNot(HaveOccurred())
-			Expect(analysis.Severity).To(Equal(expected))
-			Expect(analysis.Analysis).To(HaveKeyWithValue("recon_severity", string(reported)))
-		},
-		Entry("critical", api.SeverityCritical, dutymodels.SeverityCritical),
-		Entry("high", api.SeverityHigh, dutymodels.SeverityHigh),
-		Entry("medium", api.SeverityMedium, dutymodels.SeverityMedium),
-		Entry("low", api.SeverityLow, dutymodels.SeverityLow),
-		Entry("info", api.SeverityInfo, dutymodels.SeverityInfo),
-		// Mission Control has no `unknown` rung. Landing on info keeps the
-		// finding; recon_severity keeps what the engine actually said.
-		Entry("unknown has no upstream rung", api.SeverityUnknown, dutymodels.SeverityInfo),
-	)
-})
-
-var _ = Describe("insight identity", func() {
-	// Re-uploading a run must update the insight it wrote last time rather than
-	// stack a second copy beside it: Mission Control upserts on the primary key.
-	It("is the same for the same finding on the same config", func() {
-		Expect(missioncontrol.AnalysisID(configID, tlsFinding())).
-			To(Equal(missioncontrol.AnalysisID(configID, tlsFinding())))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(*analysis.FirstObserved).To(Equal(time.Date(2026, 8, 10, 12, 0, 11, 0, time.Local)))
+		Expect(*analysis.LastObserved).To(Equal(time.Date(2026, 8, 11, 12, 0, 11, 0, time.Local)))
+		Expect(analysis.Analysis).To(HaveKeyWithValue("finding_state_id", "01JSTATE"))
+		Expect(analysis.Analysis).To(HaveKey("resource"))
 	})
 
-	It("differs when the analyzer, the location or the config differs", func() {
-		base := missioncontrol.AnalysisID(configID, tlsFinding())
+	It("keeps one identity when evidence location and wording change", func() {
+		base := currentState(api.StatusOpen)
+		reworded := base
+		// A fresh object, not a mutation: finding_info is a pointer, so editing
+		// it in the copy would edit the original too and the spec would compare
+		// a value with itself.
+		reworded.Finding.FindingInfo = &ocsf.FindingInfo{
+			UID: base.Finding.CheckID, Title: "Listener accepts obsolete TLS",
+		}
+		reworded.Finding.MatchedAt = "https://api.example.test:8443"
 
-		elsewhere := tlsFinding()
-		elsewhere.MatchedAt = "https://api.example.test:8443"
-		other := tlsFinding()
-		other.TemplateID = "weak-cipher"
-		otherConfig := uuid.MustParse("3f2a1c4e-0000-4000-8000-000000000002")
-
-		Expect(missioncontrol.AnalysisID(configID, elsewhere)).ToNot(Equal(base))
-		Expect(missioncontrol.AnalysisID(configID, other)).ToNot(Equal(base))
-		Expect(missioncontrol.AnalysisID(otherConfig, tlsFinding())).ToNot(Equal(base))
+		Expect(missioncontrol.InsightAnalysisID(configID, base.Resource, base.State.Engine, base.State.CheckID)).
+			To(Equal(missioncontrol.InsightAnalysisID(configID, reworded.Resource, reworded.State.Engine, reworded.State.CheckID)))
 	})
 
-	// The name and severity are what a re-scan is most likely to reword. If they
-	// fed the id, every such run would orphan the previous insight.
-	It("ignores fields a re-scan may reword", func() {
-		reworded := tlsFinding()
-		reworded.Name = "TLS 1.0 is accepted by the listener"
-		reworded.Severity = api.SeverityCritical
+	It("keeps separate insights for two resources rolled onto one config", func() {
+		first := currentState(api.StatusOpen)
+		second := currentState(api.StatusOpen)
+		second.Resource.UID = "https://api.example.test/admin"
 
-		Expect(missioncontrol.AnalysisID(configID, reworded)).
-			To(Equal(missioncontrol.AnalysisID(configID, tlsFinding())))
+		Expect(missioncontrol.InsightAnalysisID(configID, first.Resource, first.State.Engine, first.State.CheckID)).
+			ToNot(Equal(missioncontrol.InsightAnalysisID(configID, second.Resource, second.State.Engine, second.State.CheckID)))
 	})
 })

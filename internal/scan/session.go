@@ -12,6 +12,7 @@ import (
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 // session is one engine execution and everything it produced.
@@ -60,7 +61,20 @@ func newSession(output *Output, engine string, command []string) *session {
 // Finding records one result. Findings are kept in memory for the duration of
 // the run because the runtime summarises them — counts, severities, affected
 // hosts — the moment it ends; the durable copy is the JSONL the engine writes.
+//
+// The record is completed and checked here rather than in each adapter, because
+// this is the one place every engine's output passes through. Captions fills the
+// readable half of each enum pair from the integer the adapter set; Validate
+// then holds the result to the schema, against the profiles the record itself
+// declares. A mapping that produces a half-record fails the run loudly rather
+// than storing something no consumer can read — the same bargain Resource below
+// makes about identity.
 func (s *session) Finding(finding api.Finding) error {
+	ocsf.Captions(&finding.DetectionFinding)
+	if err := ocsf.Validate(finding.DetectionFinding); err != nil {
+		return fmt.Errorf("%s reported a finding that is not a valid OCSF record: %w", s.engine, err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.findings = append(s.findings, finding)

@@ -5,18 +5,19 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 // bucket is a Prowler-shaped finding: the host is the cloud account and the
 // resource uid is in matched_at. It exists to keep the resource dimension
 // honest — a rule naming a bucket must not have to name the account.
 var bucket = api.Finding{
-	TargetID:   "example-project",
-	TemplateID: "gcp/bucket_public",
-	Severity:   api.SeverityHigh,
-	Host:       "example-project",
-	MatchedAt:  "logs-example",
-	Tags:       []string{"storage", "public"},
+	DetectionFinding: ocsf.DetectionFinding{SeverityID: ocsf.SeverityIDHigh},
+	TargetID:         "example-project",
+	CheckID:          "gcp/bucket_public",
+	Host:             "example-project",
+	MatchedAt:        "logs-example",
+	Tags:             []string{"storage", "public"},
 	Resources: []api.ResourceRef{{
 		Provider: "gcp", Scope: "example-project", UID: "logs-example", Name: "logs",
 	}},
@@ -25,12 +26,12 @@ var bucket = api.Finding{
 // endpoint is a nuclei-shaped finding: the host is a hostname and matched_at is
 // the URL that matched.
 var endpoint = api.Finding{
-	TargetID:   "api.example.test",
-	TemplateID: "open-redirect",
-	Severity:   api.SeverityLow,
-	Host:       "api.example.test",
-	MatchedAt:  "https://api.example.test/redirect",
-	Tags:       []string{"redirect", "dos"},
+	DetectionFinding: ocsf.DetectionFinding{SeverityID: ocsf.SeverityIDLow},
+	TargetID:         "api.example.test",
+	CheckID:          "open-redirect",
+	Host:             "api.example.test",
+	MatchedAt:        "https://api.example.test/redirect",
+	Tags:             []string{"redirect", "dos"},
 }
 
 func rule(built api.MuteRule) Rule { return Rule{MuteRule: built} }
@@ -140,7 +141,10 @@ var _ = Describe("matching a finding", func() {
 		})
 
 		It("leaves an untagged finding to an exclusion-only filter", func() {
-			untagged := api.Finding{TemplateID: "x", Severity: api.SeverityInfo}
+			untagged := api.Finding{
+				DetectionFinding: ocsf.DetectionFinding{SeverityID: ocsf.SeverityIDInformational},
+				CheckID:          "x",
+			}
 			Expect(rule(api.MuteRule{Tags: api.StringList{"!dos"}}).Matches(untagged)).To(BeTrue())
 		})
 	})

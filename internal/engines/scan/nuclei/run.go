@@ -14,9 +14,16 @@ import (
 	"github.com/projectdiscovery/nuclei/v3/pkg/output"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/ocsf"
 	"github.com/flanksource/recon/internal/engines"
 	"github.com/flanksource/recon/internal/engines/scan"
 )
+
+// EngineName is what this engine is called, in the one place that decides it.
+//
+// Not to be confused with a nuclei result.s `type`, which is the protocol a
+// template spoke — http, dns, ssl. Both used to be written to the same column.
+const EngineName = "nuclei"
 
 // Run executes one scan in this process.
 //
@@ -140,25 +147,112 @@ func convert(event *output.ResultEvent) (map[string]any, api.Finding, error) {
 		return nil, api.Finding{}, err
 	}
 
-	return raw, api.Finding{
-		TemplateID:  event.TemplateID,
-		Name:        name,
-		Severity:    api.ParseSeverity(event.Info.SeverityHolder.Severity.String()),
-		Host:        host,
-		MatchedAt:   firstNonEmpty(event.Matched, event.URL, host),
-		MatcherName: event.MatcherName,
-		Type:        event.Type,
-		Tags:        orEmpty(event.Info.Tags.ToSlice()),
-		Timestamp:   event.Timestamp.Format(time.RFC3339),
-		Extracted:   event.ExtractedResults,
-		Remediation: event.Info.Remediation,
-		Reference:   reference,
-		Curl:        event.CURLCommand,
-		Request:     event.Request,
-		Response:    event.Response,
-		Resources:   []api.ResourceRef{resource.Ref()},
-		Raw:         raw,
-	}, nil
+	tags := orEmpty(event.Info.Tags.ToSlice())
+	matched := firstNonEmpty(event.Matched, event.URL, host)
+
+	finding := api.Finding{
+		DetectionFinding: ocsf.DetectionFinding{
+			ClassUID:    ocsf.ClassUID,
+			CategoryUID: ocsf.CategoryUID,
+			ActivityID:  ocsf.ActivityIDCreate,
+			TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+			SeverityID:  api.SeverityID(api.ParseSeverity(event.Info.SeverityHolder.Severity.String())),
+			StatusID:    ocsf.StatusIDNew,
+			Time:        event.Timestamp.UnixMilli(),
+			IsAlert:     true,
+
+			FindingInfo: &ocsf.FindingInfo{
+				UID:     event.TemplateID,
+				Title:   name,
+				Desc:    event.Info.Description,
+				Types:   tags,
+				SrcURL:  firstNonEmpty(reference...),
+				UIDAlt:  event.TemplatePath,
+			},
+			// No profile: nuclei probes a URL, so it has no cloud account to
+			// name and must not be held to declaring one.
+			Metadata: &ocsf.Metadata{
+				Version:   ocsf.Version,
+				EventCode: event.TemplateID,
+				Product: &ocsf.Product{
+					Name:       EngineName,
+					VendorName: api.Vendor,
+				},
+			},
+			Impact:    event.Info.Impact,
+			Evidences: eventEvidence(event, matched),
+			// The protocol the template spoke, which used to be stored in the
+			// column named for the engine — where prowler wrote "prowler" and
+			// nuclei wrote "http", so one column meant two things.
+			Unmapped: eventUnmapped(event),
+		},
+		CheckID:   event.TemplateID,
+		Engine:    EngineName,
+		Host:      host,
+		MatchedAt: matched,
+		Tags:      tags,
+		Resources: []api.ResourceRef{resource.Ref()},
+	}
+	if event.Info.Remediation != "" || len(reference) > 0 {
+		finding.Remediation = &ocsf.Remediation{
+			Desc:       event.Info.Remediation,
+			References: reference,
+		}
+	}
+	return raw, finding, nil
+}
+
+// eventEvidence is what nuclei saw, in the place OCSF defines for it.
+//
+// An evidence entry has to carry one of the attributes OCSF's at_least_one
+// constraint names, so a finding with no exchange to show produces no entry
+// rather than an empty one that would fail validation.
+func eventEvidence(event *output.ResultEvent, matched string) []ocsf.Evidences {
+	evidence := ocsf.Evidences{Name: event.MatcherName}
+	if matched != "" {
+		evidence.URL = &ocsf.URL{URLString: matched}
+	}
+	if event.Request != "" {
+		evidence.HTTPRequest = &ocsf.HTTPRequest{Args: event.Request}
+	}
+	if event.Response != "" {
+		evidence.HTTPResponse = &ocsf.HTTPResponse{Message: event.Response}
+	}
+	if event.CURLCommand != "" || len(event.ExtractedResults) > 0 {
+		data := map[string]any{}
+		if event.CURLCommand != "" {
+			data["curl"] = event.CURLCommand
+		}
+		if len(event.ExtractedResults) > 0 {
+			data["extracted"] = event.ExtractedResults
+		}
+		if encoded, err := json.Marshal(data); err == nil {
+			evidence.Data = encoded
+		}
+	}
+	if evidence.URL == nil && evidence.HTTPRequest == nil &&
+		evidence.HTTPResponse == nil && evidence.Data == nil {
+		return nil
+	}
+	return []ocsf.Evidences{evidence}
+}
+
+// eventUnmapped keeps what nuclei reports that OCSF has no field for.
+func eventUnmapped(event *output.ResultEvent) map[string]any {
+	unmapped := map[string]any{}
+	if event.Type != "" {
+		unmapped["protocol"] = event.Type
+	}
+	if event.MatcherName != "" {
+		unmapped["matcher_name"] = event.MatcherName
+	}
+	if len(event.Info.Authors.ToSlice()) > 0 {
+		unmapped["authors"] = event.Info.Authors.ToSlice()
+	}
+	if len(unmapped) == 0 {
+		return nil
+	}
+	return unmapped
 }
 
 func resultResource(event *output.ResultEvent) (api.Resource, error) {

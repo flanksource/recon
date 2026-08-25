@@ -48,9 +48,13 @@ func (p Profile) GetName() string { return p.Name }
 // GetID returns the finding row's stable database identity.
 func (f Finding) GetID() string { return f.ID }
 
-// GetName returns the finding's template name, which is what the results list
-// shows.
-func (f Finding) GetName() string { return f.Name }
+// GetName returns the check.s title, which is what the results list shows.
+func (f Finding) GetName() string {
+	if f.FindingInfo == nil {
+		return f.CheckID
+	}
+	return f.FindingInfo.Title
+}
 
 // GetID returns the resource's ulid, falling back to its natural key for one an
 // engine has built but the store has not yet recorded — the same shape as

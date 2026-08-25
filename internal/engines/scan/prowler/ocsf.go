@@ -8,8 +8,10 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 const EngineName = "prowler"
@@ -35,35 +37,30 @@ func (r ocsfReport) Resources() []api.Resource {
 	return out
 }
 
+// ocsfRecord is one record of prowler's report.
+//
+// The OCSF part is the generated schema rather than a hand-written projection of
+// it. Prowler emits OCSF, so re-describing its fields here was a second copy of
+// a published schema that could only ever drift from it — and did: the copy read
+// finding_info.title and nothing else, so the description prowler puts beside it
+// was invisible to recon and reachable only by digging in the raw blob.
+//
+// The two fields outside the embedded record are prowler's own. `time_dt` is the
+// RFC3339 spelling of a timestamp OCSF also defines as epoch milliseconds under
+// `time`, and prowler writes only the former. `unmapped` is OCSF's sanctioned
+// escape hatch, which prowler uses for the provider identity and the compliance
+// mappings that its checks are actually organised by.
 type ocsfRecord struct {
-	FindingInfo struct {
-		Title string `json:"title"`
-	} `json:"finding_info"`
-	Severity   string `json:"severity"`
-	Status     string `json:"status"`
-	StatusCode string `json:"status_code"`
-	Time       string `json:"time_dt"`
-	Metadata   struct {
-		EventCode string `json:"event_code"`
-	} `json:"metadata"`
-	Cloud struct {
-		Provider string `json:"provider"`
-		Region   string `json:"region"`
-		Account  struct {
-			Name string `json:"name"`
-			UID  string `json:"uid"`
-			Type string `json:"type"`
-		} `json:"account"`
-		Org struct {
-			Name string `json:"name"`
-			UID  string `json:"uid"`
-		} `json:"org"`
-	} `json:"cloud"`
-	Resources   []ocsfResource `json:"resources"`
-	Remediation struct {
-		Description string   `json:"desc"`
-		References  []string `json:"references"`
-	} `json:"remediation"`
+	ocsf.DetectionFinding
+
+	// Resources shadows the embedded array deliberately. OCSF types `labels` as
+	// an array of strings and prowler reports GCP's as an object, which the
+	// generated type cannot hold — and because a type mismatch fails the whole
+	// unmarshal, the strict shape would lose the entire record rather than one
+	// field. This one tolerates both forms; see resourceLabels.
+	Resources []ocsfResource `json:"resources"`
+
+	TimeDT   string `json:"time_dt"`
 	Unmapped struct {
 		Provider   string              `json:"provider"`
 		ProviderID string              `json:"provider_uid"`
@@ -105,7 +102,7 @@ func readOCSF(path, targetID, provider string) (report ocsfReport, err error) {
 		report.Stats.Requests++
 		report.Stats.Total++
 		report.hosts[recordHost(record)] = struct{}{}
-		report.templates[provider+"/"+record.Metadata.EventCode] = struct{}{}
+		report.templates[provider+"/"+eventCode(record)] = struct{}{}
 		// Before the actionable check, so a passing record still records its
 		// subject. That is the whole point of reading the passes: without it the
 		// estate is only ever as large as its failures.
@@ -147,25 +144,53 @@ func parseOCSFRecord(raw json.RawMessage, targetID, provider string) (api.Findin
 		return api.Finding{}, record, false, nil
 	}
 
-	var source map[string]any
-	if err := json.Unmarshal(raw, &source); err != nil {
-		return api.Finding{}, record, false, fmt.Errorf("preserve prowler OCSF record: %w", err)
-	}
+	tags := recordTags(record)
 	finding := api.Finding{
-		TargetID:    targetID,
-		TemplateID:  provider + "/" + record.Metadata.EventCode,
-		Name:        recordTitle(record),
-		Severity:    prowlerSeverity(record.Severity),
-		Host:        recordHost(record),
-		MatchedAt:   matchedAt(record),
-		MatcherName: record.StatusCode,
-		Verdict:     recordVerdict(record),
-		Type:        EngineName,
-		Tags:        recordTags(record),
-		Timestamp:   record.Time,
-		Remediation: record.Remediation.Description,
-		Reference:   compact(record.Remediation.References),
-		Raw:         source,
+		DetectionFinding: ocsf.DetectionFinding{
+			ClassUID:    ocsf.ClassUID,
+			CategoryUID: ocsf.CategoryUID,
+			ActivityID:  ocsf.ActivityIDCreate,
+			TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+			SeverityID:  api.SeverityID(prowlerSeverity(record.Severity)),
+
+			Status:       record.Status,
+			StatusCode:   record.StatusCode,
+			StatusDetail: record.StatusDetail,
+			StatusID:     ocsf.StatusIDNew,
+
+			Time:        recordTime(record),
+			RiskDetails: record.RiskDetails,
+
+			FindingInfo: &ocsf.FindingInfo{
+				UID:   eventCode(record),
+				Title: recordTitle(record),
+				Desc:  recordDesc(record),
+				Types: tags,
+			},
+			// The cloud profile is declared because prowler audits an account,
+			// and declaring it is what makes cloud.provider required of these
+			// records — see ocsf.Validate. An engine that scans a URL or a
+			// filesystem declares nothing and is held to nothing.
+			Metadata: &ocsf.Metadata{
+				Version:   ocsf.Version,
+				EventCode: eventCode(record),
+				Profiles:  []string{api.ProfileCloud},
+				Product: &ocsf.Product{
+					Name:       EngineName,
+					VendorName: api.Vendor,
+				},
+			},
+			Cloud:       recordCloud(record, provider),
+			Remediation: recordRemediation(record),
+			Unmapped:    recordUnmapped(record),
+		},
+		TargetID:  targetID,
+		CheckID:   provider + "/" + eventCode(record),
+		Engine:    EngineName,
+		Verdict:   recordVerdict(record),
+		Tags:      tags,
+		Host:      recordHost(record),
+		MatchedAt: matchedAt(record),
 	}
 	// Projected from the typed record, in the one place that also decides how
 	// the run's resource rows are keyed — see subjects. Reading it back out of
@@ -175,17 +200,28 @@ func parseOCSFRecord(raw json.RawMessage, targetID, provider string) (api.Findin
 	return finding, record, true, nil
 }
 
+// eventCode is the check a record is about. Metadata is a pointer in the
+// generated schema — OCSF marks it required, but a record that omitted it would
+// otherwise panic here rather than being rejected by the validation written to
+// reject it.
+func eventCode(record ocsfRecord) string {
+	if record.Metadata == nil {
+		return ""
+	}
+	return record.Metadata.EventCode
+}
+
 func validateOCSFRecord(record ocsfRecord) error {
-	if record.Metadata.EventCode == "" {
+	if eventCode(record) == "" {
 		return fmt.Errorf("prowler OCSF record: metadata.event_code is required")
 	}
 	switch record.StatusCode {
 	case "FAIL", "MANUAL", "PASS":
 	default:
-		return fmt.Errorf("prowler OCSF record %s: unknown status_code %q", record.Metadata.EventCode, record.StatusCode)
+		return fmt.Errorf("prowler OCSF record %s: unknown status_code %q", eventCode(record), record.StatusCode)
 	}
 	if recordHost(record) == "" {
-		return fmt.Errorf("prowler OCSF record %s: account or provider identity is required", record.Metadata.EventCode)
+		return fmt.Errorf("prowler OCSF record %s: account or provider identity is required", eventCode(record))
 	}
 	return nil
 }
@@ -205,14 +241,134 @@ func recordVerdict(record ocsfRecord) string {
 }
 
 func recordTitle(record ocsfRecord) string {
-	if record.FindingInfo.Title != "" {
+	if record.FindingInfo != nil && record.FindingInfo.Title != "" {
 		return record.FindingInfo.Title
 	}
-	return record.Metadata.EventCode
+	return eventCode(record)
+}
+
+// recordDesc is what the check is about, which prowler states and recon used to
+// throw away. It was reachable only inside the preserved blob, which is where
+// the browser dug for it on every engine.
+func recordDesc(record ocsfRecord) string {
+	if record.FindingInfo == nil {
+		return ""
+	}
+	return record.FindingInfo.Desc
+}
+
+// recordTime reads the timestamp prowler writes.
+//
+// Prowler emits only `time_dt`, the RFC3339 spelling. OCSF's `time` is epoch
+// milliseconds and is what the column stores, so the conversion happens here
+// rather than leaving two representations to disagree. An unparseable stamp
+// yields zero, which the store keeps as NULL — a finding with no time is honest
+// about it rather than claiming 1970.
+func recordTime(record ocsfRecord) int64 {
+	if record.Time != 0 {
+		return record.Time
+	}
+	parsed, err := time.Parse(time.RFC3339, record.TimeDT)
+	if err != nil {
+		return 0
+	}
+	return parsed.UnixMilli()
+}
+
+func recordCloud(record ocsfRecord, provider string) *ocsf.Cloud {
+	cloud := ocsf.Cloud{Provider: firstNonEmpty(recordProvider(record), provider)}
+	if record.Cloud != nil {
+		cloud.Region = cloudRegion(record)
+		cloud.Org = record.Cloud.Org
+	}
+	if uid := firstNonEmpty(accountUID(record), record.Unmapped.ProviderID); uid != "" {
+		cloud.Account = &ocsf.Account{UID: uid, Name: accountName(record), Type: accountType(record)}
+	}
+	return &cloud
+}
+
+func recordRemediation(record ocsfRecord) *ocsf.Remediation {
+	if record.Remediation == nil {
+		return nil
+	}
+	remediation := ocsf.Remediation{
+		Desc:       record.Remediation.Desc,
+		References: compact(record.Remediation.References),
+	}
+	if remediation.Desc == "" && len(remediation.References) == 0 {
+		return nil
+	}
+	return &remediation
+}
+
+// recordUnmapped keeps what prowler reports that OCSF has no field for, in
+// OCSF's own escape hatch rather than a recon-specific column.
+//
+// The compliance mappings are the reason this is not simply dropped: prowler's
+// checks are organised by framework, and "which CIS control does this fail"
+// is the question a compliance audit is actually asking.
+func recordUnmapped(record ocsfRecord) map[string]any {
+	unmapped := map[string]any{}
+	if len(record.Unmapped.Categories) > 0 {
+		unmapped["categories"] = record.Unmapped.Categories
+	}
+	if len(record.Unmapped.Compliance) > 0 {
+		unmapped["compliance"] = record.Unmapped.Compliance
+	}
+	if len(unmapped) == 0 {
+		return nil
+	}
+	return unmapped
+}
+
+// The cloud identity, read through the pointers OCSF makes optional. Prowler
+// reports an account on every record, but the schema does not require one and a
+// record that omits it must be rejected by validation rather than by a panic
+// here.
+func accountUID(record ocsfRecord) string {
+	if record.Cloud == nil || record.Cloud.Account == nil {
+		return ""
+	}
+	return record.Cloud.Account.UID
+}
+
+func accountName(record ocsfRecord) string {
+	if record.Cloud == nil || record.Cloud.Account == nil {
+		return ""
+	}
+	return record.Cloud.Account.Name
+}
+
+func accountType(record ocsfRecord) string {
+	if record.Cloud == nil || record.Cloud.Account == nil {
+		return ""
+	}
+	return record.Cloud.Account.Type
+}
+
+func cloudRegion(record ocsfRecord) string {
+	if record.Cloud == nil {
+		return ""
+	}
+	return record.Cloud.Region
+}
+
+func orgUID(record ocsfRecord) string {
+	if record.Cloud == nil || record.Cloud.Org == nil {
+		return ""
+	}
+	return record.Cloud.Org.UID
+}
+
+func orgName(record ocsfRecord) string {
+	if record.Cloud == nil || record.Cloud.Org == nil {
+		return ""
+	}
+	return record.Cloud.Org.Name
 }
 
 func recordHost(record ocsfRecord) string {
-	for _, value := range []string{record.Cloud.Account.Name, record.Cloud.Account.UID, record.Unmapped.ProviderID} {
+	for _, value := range []string{accountName(record), accountUID(record), record.Unmapped.ProviderID} {
 		if value != "" {
 			return value
 		}
@@ -221,7 +377,7 @@ func recordHost(record ocsfRecord) string {
 }
 
 func recordProvider(record ocsfRecord) string {
-	if record.Cloud.Provider != "" {
+	if record.Cloud != nil && record.Cloud.Provider != "" {
 		return record.Cloud.Provider
 	}
 	return record.Unmapped.Provider

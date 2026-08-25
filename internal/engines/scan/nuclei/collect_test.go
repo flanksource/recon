@@ -70,7 +70,7 @@ var _ = Describe("collecting a run's results", func() {
 		Expect(collected.Report()).To(Succeed())
 
 		Expect(sink.findings).To(HaveLen(1))
-		Expect(sink.findings[0].TemplateID).To(Equal("tls-version"))
+		Expect(sink.findings[0].CheckID).To(Equal("tls-version"))
 		Expect(strings.Count(results.String(), "\n")).To(Equal(1))
 	})
 

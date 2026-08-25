@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 func TestInspec(t *testing.T) {
@@ -48,12 +50,32 @@ func load() ExecJSON {
 // addresses the one case it is about.
 func find(findings []api.Finding, control string) api.Finding {
 	for _, finding := range findings {
-		if finding.TemplateID == control {
+		if finding.CheckID == control {
 			return finding
 		}
 	}
 	Fail("no finding for control " + control)
 	return api.Finding{}
+}
+
+// remediationDesc reads the advice off a finding, nil-safe: OCSF models the
+// prose and the references as one object, and a control offering neither has no
+// object at all rather than an empty one.
+func remediationDesc(finding api.Finding) string {
+	if finding.Remediation == nil {
+		return ""
+	}
+	return finding.Remediation.Desc
+}
+
+// assertion decodes one evidence entry. The assertions a control failed are
+// json_t payloads rather than modelled attributes, because what an rspec
+// matcher reports is the profile's own shape and OCSF has no name for it.
+func assertion(entry ocsf.Evidences) map[string]any {
+	GinkgoHelper()
+	var decoded map[string]any
+	Expect(json.Unmarshal(entry.Data, &decoded)).To(Succeed())
+	return decoded
 }
 
 var _ = Describe("an InSpec report", func() {
@@ -89,7 +111,7 @@ var _ = Describe("an InSpec report", func() {
 
 			var ids []string
 			for _, finding := range findings {
-				ids = append(ids, finding.TemplateID)
+				ids = append(ids, finding.CheckID)
 			}
 			Expect(ids).To(ConsistOf(
 				"cis-gcp-1.4-iam", "cis-gcp-2.2-logging",
@@ -100,30 +122,94 @@ var _ = Describe("an InSpec report", func() {
 		It("maps a failure onto the whole finding", func() {
 			// Asserted as one structure rather than field by field, so a field
 			// that stops being populated fails here rather than silently going
-			// untested.
+			// untested. The assertions are checked separately, below: they are
+			// an opaque payload rather than modelled attributes.
 			finding := find(findings, "cis-gcp-1.4-iam")
-			finding.Raw = nil // covered separately; it holds the whole control
+			finding.Evidences = nil
+
+			started, err := time.Parse(time.RFC3339, "2026-08-20T09:41:02+02:00")
+			Expect(err).ToNot(HaveOccurred())
+
+			tags := []string{
+				"profile:inspec-gcp-cis-benchmark",
+				"cis_gcp:1.4", "cis_level:1", "cis_scored", "cis_version:4.0",
+				"nist:AC-2", "nist:AC-3", "project:example-project",
+			}
 
 			Expect(finding).To(Equal(api.Finding{
-				TemplateID:  "cis-gcp-1.4-iam",
-				Name:        "[IAM] Ensure that there are only GCP-managed service account keys for each service account",
-				Severity:    api.SeverityMedium,
-				Host:        account,
-				MatchedAt:   "[example-project] Service Account: builder@example-project.iam.gserviceaccount.com should not have user-managed keys",
-				MatcherName: StatusFailed,
-				Type:        EngineName,
-				Timestamp:   "2026-08-20T09:41:02+02:00",
-				Tags: []string{
-					"profile:inspec-gcp-cis-benchmark",
-					"cis_gcp:1.4", "cis_level:1", "cis_scored", "cis_version:4.0",
-					"nist:AC-2", "nist:AC-3", "project:example-project",
+				DetectionFinding: ocsf.DetectionFinding{
+					ClassUID:    ocsf.ClassUID,
+					CategoryUID: ocsf.CategoryUID,
+					ActivityID:  ocsf.ActivityIDCreate,
+					TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+					SeverityID:  ocsf.SeverityIDMedium,
+					StatusID:    ocsf.StatusIDNew,
+					Time:        started.UnixMilli(),
+					FindingInfo: &ocsf.FindingInfo{
+						UID:   "cis-gcp-1.4-iam",
+						Title: "[IAM] Ensure that there are only GCP-managed service account keys for each service account",
+						Desc:  "User managed service account should not have user managed keys.",
+						Types: tags,
+					},
+					// No profile declared: inspec audits whatever it was pointed
+					// at and reports no cloud identity of its own, so it must not
+					// be held to naming one.
+					Metadata: &ocsf.Metadata{
+						Version:   ocsf.Version,
+						EventCode: "cis-gcp-1.4-iam",
+						Product: &ocsf.Product{
+							Name:       EngineName,
+							VendorName: api.Vendor,
+							Version:    "4.0.0-0",
+						},
+					},
+					Remediation: &ocsf.Remediation{
+						Desc: "Anyone who has access to the keys will be able to access resources through the service account.",
+						References: []string{
+							"https://www.cisecurity.org/benchmark/google_cloud_computing_platform/",
+							"https://cloud.google.com/iam/docs/understanding-service-accounts",
+						},
+					},
 				},
-				Remediation: "Anyone who has access to the keys will be able to access resources through the service account.",
-				Reference: []string{
-					"https://www.cisecurity.org/benchmark/google_cloud_computing_platform/",
-					"https://cloud.google.com/iam/docs/understanding-service-accounts",
-				},
+				CheckID:   "cis-gcp-1.4-iam",
+				Engine:    EngineName,
+				Host:      account,
+				MatchedAt: "[example-project] Service Account: builder@example-project.iam.gserviceaccount.com should not have user-managed keys",
+				Tags:      tags,
+				Resources: []api.ResourceRef{accountResource(account).Ref()},
 			}))
+		})
+
+		// One finding per control, its N failing assertions as evidence. A
+		// control is the thing a profile names, a mute rule matches and the
+		// ledger tracks; one finding per rspec assertion made the same control
+		// fork into as many identities as it had describe blocks.
+		It("collapses a control's failing assertions into one finding", func() {
+			// The fixture's first control asserts twice and fails once, so a
+			// collapse that kept the passing assertion would show two.
+			finding := find(findings, "cis-gcp-1.4-iam")
+
+			Expect(finding.Evidences).To(HaveLen(1))
+			Expect(assertion(finding.Evidences[0])).To(Equal(map[string]any{
+				"status":    StatusFailed,
+				"profile":   "inspec-gcp-cis-benchmark",
+				"code_desc": "[example-project] Service Account: builder@example-project.iam.gserviceaccount.com should not have user-managed keys",
+				"message":   `expected ["USER_MANAGED", "SYSTEM_MANAGED"] not to include "USER_MANAGED"`,
+			}))
+		})
+
+		// OCSF's evidences object requires at least one of a named set of
+		// attributes, and `name` is not among them — an entry carrying only the
+		// assertion's prose would be invalid, which is the shape this would
+		// otherwise take.
+		It("gives every evidence entry an attribute the schema counts", func() {
+			for _, finding := range findings {
+				for _, entry := range finding.Evidences {
+					Expect(entry.Data).ToNot(BeEmpty(),
+						"an entry with only a name does not satisfy at_least_one")
+				}
+				Expect(ocsf.Validate(finding.DetectionFinding)).To(Succeed())
+			}
 		})
 
 		It("carries an errored control through as a finding", func() {
@@ -132,26 +218,24 @@ var _ = Describe("an InSpec report", func() {
 			// which someone has to see.
 			finding := find(findings, "cis-gcp-3.1-networking")
 
-			Expect(finding.MatcherName).To(Equal(StatusError))
-			Expect(finding.Severity).To(Equal(api.SeverityCritical))
+			Expect(assertion(finding.Evidences[0])).To(HaveKeyWithValue("status", StatusError))
+			Expect(finding.SeverityLevel()).To(Equal(api.SeverityCritical))
 		})
 
-		It("keeps the control and result verbatim for the detail view", func() {
+		It("keeps what the assertion actually reported", func() {
 			finding := find(findings, "cis-gcp-2.2-logging")
 
-			Expect(finding.Raw).To(HaveKeyWithValue("profile", "inspec-gcp-cis-benchmark"))
-			Expect(finding.Raw).To(HaveKey("control"))
-
-			result, ok := finding.Raw["result"].(Result)
-			Expect(ok).To(BeTrue())
+			Expect(assertion(finding.Evidences[0])).
+				To(HaveKeyWithValue("profile", "inspec-gcp-cis-benchmark"))
 			// The rspec message is the only place that says what was actually
-			// wrong, and no api.Finding field is the right home for it.
-			Expect(result.Message).To(Equal("expected [] not to be empty"))
+			// wrong, and no modelled OCSF attribute is the right home for it.
+			Expect(assertion(finding.Evidences[0])).
+				To(HaveKeyWithValue("message", "expected [] not to be empty"))
 		})
 
 		DescribeTable("prefers the description that says how to fix the control",
 			func(control, expected string) {
-				Expect(find(findings, control).Remediation).To(Equal(expected))
+				Expect(remediationDesc(find(findings, control))).To(Equal(expected))
 			},
 			// Profiles disagree about the label: InSpec's docs say "fix", the
 			// CIS profiles write prose under "rationale". Reading only one would
@@ -165,15 +249,15 @@ var _ = Describe("an InSpec report", func() {
 
 		It("reads a reference from whichever field the profile used", func() {
 			// InSpec permits ref, url and uri, and profiles use all three.
-			Expect(find(findings, "cis-gcp-2.2-logging").Reference).
+			Expect(find(findings, "cis-gcp-2.2-logging").Remediation.References).
 				To(Equal([]string{"https://cloud.google.com/logging/docs/export"}))
-			Expect(find(findings, "cis-gcp-3.1-networking").Reference).
+			Expect(find(findings, "cis-gcp-3.1-networking").Remediation.References).
 				To(Equal([]string{"https://cloud.google.com/vpc/docs/vpc"}))
 		})
 
 		It("drops a duplicated reference", func() {
 			// CIS controls commonly cite the benchmark page from several refs.
-			Expect(find(findings, "cis-gcp-1.4-iam").Reference).To(HaveLen(2))
+			Expect(find(findings, "cis-gcp-1.4-iam").Remediation.References).To(HaveLen(2))
 		})
 
 		It("omits a tag whose marker is false", func() {
@@ -242,7 +326,7 @@ var _ = Describe("an InSpec report", func() {
 				}},
 			}}}
 
-			Expect(untitled.Findings(account)[0].Name).To(Equal("cis-gcp-9.9-custom"))
+			Expect(untitled.Findings(account)[0].FindingInfo.Title).To(Equal("cis-gcp-9.9-custom"))
 		})
 	})
 })

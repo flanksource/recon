@@ -43,10 +43,15 @@ var _ = Describe("the generated route surface", func() {
 			Expect(document.Paths).To(HaveKey("/api/v1/"+resource+"/{id}"), resource)
 		}
 
-		// The Scans tab pushes a run to Mission Control through this route, so
-		// it has to be on the generated HTTP surface and not the CLI alone.
-		Expect(document.Paths).To(HaveKey("/api/v1/scan/{id}/upload"))
-		Expect(document.Paths["/api/v1/scan/{id}/upload"]).To(HaveKey("post"))
+		for _, path := range []string{"/api/v1/finding/sync", "/api/v1/resource/sync"} {
+			Expect(document.Paths).To(HaveKey(path))
+			Expect(document.Paths[path]).To(HaveKey("post"))
+		}
+		for _, path := range []string{"/api/v1/finding/{id}/mute", "/api/v1/resource/{id}/mute"} {
+			Expect(document.Paths).To(HaveKey(path))
+			Expect(document.Paths[path]).To(HaveKey("post"))
+		}
+		Expect(document.Paths).ToNot(HaveKey("/api/v1/scan/{id}/upload"))
 	})
 })
 

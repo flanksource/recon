@@ -15,10 +15,29 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/httpapi"
+	"github.com/flanksource/recon/internal/ocsf"
 	"github.com/flanksource/recon/internal/report"
 	"github.com/flanksource/recon/internal/scan"
 	"github.com/flanksource/recon/internal/store"
 )
+
+// reported is a finding as a reader gets it back: an OCSF Detection Finding
+// whose title lives in finding_info rather than beside it.
+func reported(checkID, title string, severity ocsf.SeverityID) api.Finding {
+	return api.Finding{
+		DetectionFinding: ocsf.DetectionFinding{
+			ClassUID:    ocsf.ClassUID,
+			CategoryUID: ocsf.CategoryUID,
+			ActivityID:  ocsf.ActivityIDCreate,
+			TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+			SeverityID:  severity,
+			FindingInfo: &ocsf.FindingInfo{UID: checkID, Title: title},
+		},
+		Engine:  "nuclei",
+		CheckID: checkID,
+		Host:    "a.example.test",
+	}
+}
 
 // stubReportSource answers with one run and its findings, so these specs are
 // about the routes rather than the database behind them.
@@ -82,8 +101,8 @@ var _ = Describe("serving a run as a report", func() {
 		source = &stubReportSource{
 			run: run,
 			findings: []api.Finding{
-				{TemplateID: "http/tls-version", Name: "Weak TLS", Severity: api.SeverityHigh, Host: "a.example.test"},
-				{TemplateID: "http/missing-hsts", Name: "No HSTS", Severity: api.SeverityLow, Host: "a.example.test"},
+				reported("http/tls-version", "Weak TLS", ocsf.SeverityIDHigh),
+				reported("http/missing-hsts", "No HSTS", ocsf.SeverityIDLow),
 			},
 		}
 		renderer = &stubRenderer{document: []byte("%PDF-1.7 rendered")}

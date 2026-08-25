@@ -39,16 +39,17 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 	})
 
 	It("round-trips every dimension", func() {
-		saved, err := st.SaveMute(ctx, api.MuteRule{
-			Name:      "accepted-open-redirect",
-			Comment:   "httpbin is a deliberate fixture",
-			Engines:   api.StringList{"nuclei"},
-			Targets:   map[string]any{"class": []any{"non-prod"}},
-			Resources: api.StringList{"logs-*"},
-			Templates: api.StringList{"open-redirect"},
-			Tags:      api.StringList{"redirect", "!dos"},
-			Severity:  api.StringList{"low", "info"},
-			Expr:      `finding.host.endsWith(".example.test")`,
+		saved, err := st.CreateMute(ctx, api.MuteRule{
+			Name:         "accepted-open-redirect",
+			Comment:      "httpbin is a deliberate fixture",
+			Engines:      api.StringList{"nuclei"},
+			Targets:      map[string]any{"class": []any{"non-prod"}},
+			Resources:    api.StringList{"logs-*"},
+			ResourceKeys: api.StringList{"gcp/project-prod/logs-bucket"},
+			Templates:    api.StringList{"open-redirect"},
+			Tags:         api.StringList{"redirect", "!dos"},
+			Severity:     api.StringList{"low", "info"},
+			Expr:         `finding.host.endsWith(".example.test")`,
 		})
 		Expect(err).ToNot(HaveOccurred())
 
@@ -56,6 +57,7 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 		Expect(saved.Engines).To(ConsistOf("nuclei"))
 		Expect(saved.Targets).To(HaveKey("class"))
 		Expect(saved.Resources).To(ConsistOf("logs-*"))
+		Expect(saved.ResourceKeys).To(ConsistOf("gcp/project-prod/logs-bucket"))
 		Expect(saved.Templates).To(ConsistOf("open-redirect"))
 		Expect(saved.Tags).To(ConsistOf("redirect", "!dos"))
 		Expect(saved.Severity).To(ConsistOf("low", "info"))
@@ -64,7 +66,7 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 	})
 
 	It("stores a rule carrying only the fields it needs", func() {
-		saved, err := st.SaveMute(ctx, api.MuteRule{
+		saved, err := st.CreateMute(ctx, api.MuteRule{
 			Name: "minimal", Templates: api.StringList{"open-redirect"},
 		})
 		Expect(err).ToNot(HaveOccurred())
@@ -74,9 +76,9 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 	})
 
 	It("updates a rule in place rather than adding a second", func() {
-		_, err := st.SaveMute(ctx, api.MuteRule{Name: "r", Templates: api.StringList{"a"}})
+		_, err := st.CreateMute(ctx, api.MuteRule{Name: "r", Templates: api.StringList{"a"}})
 		Expect(err).ToNot(HaveOccurred())
-		_, err = st.SaveMute(ctx, api.MuteRule{Name: "r", Templates: api.StringList{"b"}, Disabled: true})
+		_, err = st.UpdateMute(ctx, api.MuteRule{Name: "r", Templates: api.StringList{"b"}, Disabled: true})
 		Expect(err).ToNot(HaveOccurred())
 
 		rules, err := st.ListMutes(ctx, store.MuteOpts{})
@@ -86,14 +88,25 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 		Expect(rules[0].Disabled).To(BeTrue())
 	})
 
+	It("refuses to replace an existing rule during creation", func() {
+		_, err := st.CreateMute(ctx, api.MuteRule{Name: "r", Templates: api.StringList{"a"}})
+		Expect(err).ToNot(HaveOccurred())
+		_, err = st.CreateMute(ctx, api.MuteRule{Name: "r", Templates: api.StringList{"b"}})
+		Expect(err).To(HaveOccurred())
+
+		stored, err := st.GetMute(ctx, "r")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(stored.Templates).To(ConsistOf("a"))
+	})
+
 	Describe("what it refuses to store", func() {
 		It("refuses a rule that selects nothing", func() {
-			_, err := st.SaveMute(ctx, api.MuteRule{Name: "everything"})
+			_, err := st.CreateMute(ctx, api.MuteRule{Name: "everything"})
 			Expect(err).To(MatchError(ContainSubstring("selects nothing")))
 		})
 
 		It("refuses an engine that does not exist", func() {
-			_, err := st.SaveMute(ctx, api.MuteRule{
+			_, err := st.CreateMute(ctx, api.MuteRule{
 				Name: "typo", Templates: api.StringList{"a"}, Engines: api.StringList{"nuclie"},
 			})
 			Expect(err).To(MatchError(ContainSubstring("nuclie")))
@@ -102,24 +115,24 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 		// Caught here rather than mid-scan, where the only choices left are to
 		// fail a run that worked or to silently mute nothing.
 		It("refuses an expression that cannot compile, and says where", func() {
-			_, err := st.SaveMute(ctx, api.MuteRule{Name: "broken", Expr: `finding.severity == `})
+			_, err := st.CreateMute(ctx, api.MuteRule{Name: "broken", Expr: `finding.severity == `})
 			Expect(err).To(MatchError(ContainSubstring("invalid expression")))
 		})
 
 		It("refuses an expression naming a variable that does not exist", func() {
-			_, err := st.SaveMute(ctx, api.MuteRule{Name: "wrong-var", Expr: `target.class == "prod"`})
+			_, err := st.CreateMute(ctx, api.MuteRule{Name: "wrong-var", Expr: `target.class == "prod"`})
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("refuses a target selector it cannot parse", func() {
-			_, err := st.SaveMute(ctx, api.MuteRule{
+			_, err := st.CreateMute(ctx, api.MuteRule{
 				Name: "bad-class", Targets: map[string]any{"class": []any{"invented"}},
 			})
 			Expect(err).To(MatchError(ContainSubstring("invented")))
 		})
 
 		It("refuses a name that could not be a filename fragment", func() {
-			_, err := st.SaveMute(ctx, api.MuteRule{Name: "Bad Name", Templates: api.StringList{"a"}})
+			_, err := st.CreateMute(ctx, api.MuteRule{Name: "Bad Name", Templates: api.StringList{"a"}})
 			Expect(err).To(MatchError(ContainSubstring("invalid mute rule name")))
 		})
 	})
@@ -132,7 +145,7 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 				{Name: "trivy-only", Templates: api.StringList{"c"}, Engines: api.StringList{"trivy"}},
 				{Name: "switched-off", Templates: api.StringList{"d"}, Disabled: true},
 			} {
-				_, err := st.SaveMute(ctx, rule)
+				_, err := st.CreateMute(ctx, rule)
 				Expect(err).ToNot(HaveOccurred())
 			}
 		})
@@ -165,7 +178,7 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 				{Name: "nuclei-only", Templates: api.StringList{"b"}, Engines: api.StringList{"nuclei"}},
 				{Name: "switched-off", Templates: api.StringList{"d"}, Disabled: true},
 			} {
-				_, err := st.SaveMute(ctx, rule)
+				_, err := st.CreateMute(ctx, rule)
 				Expect(err).ToNot(HaveOccurred())
 			}
 		})
@@ -206,7 +219,7 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 			_, err = st.CreateTarget(ctx, host("other.example.test", api.ClassProd))
 			Expect(err).ToNot(HaveOccurred())
 
-			_, err = st.SaveMute(ctx, api.MuteRule{
+			_, err = st.CreateMute(ctx, api.MuteRule{
 				Name: "non-prod-only", Templates: api.StringList{"a"},
 				Targets: map[string]any{"class": []any{"non-prod"}},
 			})
@@ -224,7 +237,7 @@ var _ = Describe("mute rules", Ordered, Label("db"), func() {
 		// rule would silently widen to every target the moment its selector
 		// stopped matching.
 		It("scopes a rule to nothing when its selector matches nothing", func() {
-			_, err := st.SaveMute(ctx, api.MuteRule{
+			_, err := st.CreateMute(ctx, api.MuteRule{
 				Name: "matches-nothing", Templates: api.StringList{"a"},
 				Targets: map[string]any{"class": []any{"internal"}},
 			})

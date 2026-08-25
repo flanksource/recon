@@ -56,6 +56,13 @@ table "mute_rules" {
     default = sql("'{}'::text[]")
   }
 
+  // Exact canonical resource identities in provider/scope/uid form.
+  column "resource_keys" {
+    null    = false
+    type    = sql("text[]")
+    default = sql("'{}'::text[]")
+  }
+
   column "templates" {
     null    = false
     type    = sql("text[]")

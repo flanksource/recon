@@ -31,6 +31,18 @@ var _ = Describe("a mute rule", func() {
 		Expect(rule.Validate()).To(Succeed())
 	})
 
+	It("accepts an exact canonical resource key", func() {
+		rule := api.MuteRule{
+			Name: "logs-bucket", ResourceKeys: api.StringList{"gcp/example-project/logs-example"},
+		}
+		Expect(rule.Validate()).To(Succeed())
+	})
+
+	It("refuses a resource key without provider, scope and uid separators", func() {
+		err := api.MuteRule{Name: "logs-bucket", ResourceKeys: api.StringList{"logs-example"}}.Validate()
+		Expect(err).To(MatchError(ContainSubstring("invalid resource key")))
+	})
+
 	It("refuses a name that could not be a filename fragment", func() {
 		Expect(api.MuteRule{Name: "Accepted Risk", Templates: api.StringList{"x"}}.Validate()).
 			To(MatchError(ContainSubstring("invalid mute rule name")))

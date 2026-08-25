@@ -3,12 +3,14 @@ package prowler
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/configdb"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 var _ = Describe("Prowler OCSF output", func() {
@@ -28,28 +30,67 @@ var _ = Describe("Prowler OCSF output", func() {
 		Expect(report.Findings).To(HaveLen(2))
 
 		gcp := report.Findings[0]
-		raw := gcp.Raw
-		gcp.Raw = nil
+		unmapped := gcp.Unmapped
+		gcp.Unmapped = nil
+
+		stamped, err := time.Parse(time.RFC3339, "2026-08-20T10:00:00Z")
+		Expect(err).ToNot(HaveOccurred())
+
+		tags := []string{
+			"category:identity",
+			"category:privilege",
+			"compliance:CIS:1.3",
+			"provider:gcp",
+			"resource-type:IAMPolicy",
+			"service:iam",
+		}
+
 		Expect(gcp).To(Equal(api.Finding{
-			TargetID:    "target-gcp",
-			TemplateID:  "gcp/gcp_iam_primitive_roles",
-			Name:        "Ensure primitive roles are not used",
-			Severity:    api.SeverityHigh,
-			Host:        "example-project",
-			MatchedAt:   "projects/example-project/roles/editor",
-			MatcherName: "FAIL",
-			Type:        EngineName,
-			Tags: []string{
-				"category:identity",
-				"category:privilege",
-				"compliance:CIS:1.3",
-				"provider:gcp",
-				"resource-type:IAMPolicy",
-				"service:iam",
+			DetectionFinding: ocsf.DetectionFinding{
+				ClassUID:     ocsf.ClassUID,
+				CategoryUID:  ocsf.CategoryUID,
+				ActivityID:   ocsf.ActivityIDCreate,
+				TypeUID:      ocsf.TypeUID(ocsf.ActivityIDCreate),
+				SeverityID:   ocsf.SeverityIDHigh,
+				Status:       "New",
+				StatusID:     ocsf.StatusIDNew,
+				StatusCode:   "FAIL",
+				StatusDetail: "roles/editor is granted to user@example.com",
+				Time:         stamped.UnixMilli(),
+				RiskDetails:  "Primitive roles grant broad permissions.",
+				FindingInfo: &ocsf.FindingInfo{
+					UID:   "gcp_iam_primitive_roles",
+					Title: "Ensure primitive roles are not used",
+					Desc:  "The project allows primitive roles.",
+					Types: tags,
+				},
+				// prowler audits a cloud account, so it declares the profile
+				// that makes cloud.provider required of it — the reason the
+				// other three engines declare none.
+				Metadata: &ocsf.Metadata{
+					Version:   ocsf.Version,
+					EventCode: "gcp_iam_primitive_roles",
+					Profiles:  []string{api.ProfileCloud},
+					Product: &ocsf.Product{
+						Name:       EngineName,
+						VendorName: api.Vendor,
+					},
+				},
+				Cloud: &ocsf.Cloud{
+					Provider: "gcp",
+					Account:  &ocsf.Account{UID: "example-project", Name: "example-project"},
+				},
+				Remediation: &ocsf.Remediation{
+					Desc:       "Replace primitive roles with predefined roles.",
+					References: []string{"https://example.com/gcp/iam"},
+				},
 			},
-			Timestamp:   "2026-08-20T10:00:00Z",
-			Remediation: "Replace primitive roles with predefined roles.",
-			Reference:   []string{"https://example.com/gcp/iam"},
+			TargetID:  "target-gcp",
+			CheckID:   "gcp/gcp_iam_primitive_roles",
+			Engine:    EngineName,
+			Host:      "example-project",
+			MatchedAt: "projects/example-project/roles/editor",
+			Tags:      tags,
 			Resources: []api.ResourceRef{{
 				Provider: "gcp",
 				Scope:    "example-project",
@@ -59,17 +100,22 @@ var _ = Describe("Prowler OCSF output", func() {
 				Service:  "iam",
 			}},
 		}))
-		Expect(raw).To(HaveKeyWithValue("risk_details", "Primitive roles grant broad permissions."))
-		Expect(raw).To(HaveKey("finding_info"))
+		// What prowler reported that OCSF has no name for goes to OCSF's own
+		// escape hatch, rather than a verbatim copy of the whole record.
+		Expect(unmapped).To(HaveKey("compliance"))
+		Expect(unmapped).ToNot(HaveKey("finding_info"),
+			"an attribute the schema models must not also be dumped in unmapped")
 
 		kubernetes := report.Findings[1]
 		Expect(kubernetes.Host).To(Equal("production"))
 		Expect(kubernetes.TargetID).To(Equal("target-gcp"))
-		Expect(kubernetes.TemplateID).To(Equal("gcp/k8s_manual_admission_policy"))
-		Expect(kubernetes.MatcherName).To(Equal("MANUAL"))
-		// The lifecycle keys on this rather than on MatcherName, which is the
-		// column nuclei means as the matcher that fired: prowler only happens to
-		// write its status code there.
+		Expect(kubernetes.CheckID).To(Equal("gcp/k8s_manual_admission_policy"))
+		// prowler's status code has a column of its own now. It used to share
+		// matcher_name with nuclei's matcher, inspec's result status and trivy's
+		// record class — four meanings, one column.
+		Expect(kubernetes.StatusCode).To(Equal("MANUAL"))
+		// The lifecycle keys on this rather than on the engine's status code,
+		// which means whatever that engine means by it.
 		Expect(kubernetes.Verdict).To(Equal(api.VerdictManual))
 	})
 

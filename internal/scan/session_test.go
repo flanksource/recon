@@ -10,6 +10,7 @@ import (
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 // stubEngine runs whatever the spec gives it, so a session can be driven through
@@ -18,10 +19,33 @@ type stubEngine struct {
 	run func(context.Context, enginescan.Sink) error
 }
 
-func (stubEngine) Spec() engines.Spec                              { return engines.Spec{Name: "stub"} }
-func (stubEngine) Risk(map[string]any) engines.Risk                { return engines.Risk{} }
+func (stubEngine) Spec() engines.Spec               { return engines.Spec{Name: "stub"} }
+func (stubEngine) Risk(map[string]any) engines.Risk { return engines.Risk{} }
 func (e stubEngine) Run(ctx context.Context, _ engines.Run, sink enginescan.Sink) error {
 	return e.run(ctx, sink)
+}
+
+// reported is what an adapter hands the sink: a Detection Finding carrying the
+// attributes OCSF requires of every one, and nothing else. Declaring no profile
+// is what a probe of a URL honestly does — it has no cloud account to name.
+func reported(checkID string) api.Finding {
+	return api.Finding{
+		DetectionFinding: ocsf.DetectionFinding{
+			ClassUID:    ocsf.ClassUID,
+			CategoryUID: ocsf.CategoryUID,
+			ActivityID:  ocsf.ActivityIDCreate,
+			TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+			SeverityID:  ocsf.SeverityIDHigh,
+			Time:        1786000000000,
+			FindingInfo: &ocsf.FindingInfo{UID: checkID, Title: checkID},
+			Metadata: &ocsf.Metadata{
+				Version: ocsf.Version,
+				Product: &ocsf.Product{Name: "stub", VendorName: api.Vendor},
+			},
+		},
+		Engine:  "stub",
+		CheckID: checkID,
+	}
 }
 
 var _ = Describe("a scan session", func() {
@@ -86,14 +110,42 @@ var _ = Describe("a scan session", func() {
 	It("keeps every finding the engine reported, in order", func() {
 		Expect(current.Run(context.Background(), stubEngine{
 			run: func(_ context.Context, sink enginescan.Sink) error {
-				Expect(sink.Finding(api.Finding{TemplateID: "tls-version"})).To(Succeed())
-				Expect(sink.Finding(api.Finding{TemplateID: "cookie-flags"})).To(Succeed())
+				Expect(sink.Finding(reported("tls-version"))).To(Succeed())
+				Expect(sink.Finding(reported("cookie-flags"))).To(Succeed())
 				return nil
 			},
 		}, engines.Run{})).To(Succeed())
 
 		Expect(current.Findings()).To(HaveLen(2))
-		Expect(current.Findings()[0].TemplateID).To(Equal("tls-version"))
-		Expect(current.Findings()[1].TemplateID).To(Equal("cookie-flags"))
+		Expect(current.Findings()[0].CheckID).To(Equal("tls-version"))
+		Expect(current.Findings()[1].CheckID).To(Equal("cookie-flags"))
+	})
+
+	// The sink is where every engine's output converges, so it is where a record
+	// that is not a valid OCSF finding has to be stopped: storing a half-record
+	// means a consumer reading `finding_info.title` gets nothing and cannot tell
+	// that from a finding that genuinely has no title.
+	It("refuses a finding that is not a valid OCSF record", func() {
+		err := current.Run(context.Background(), stubEngine{
+			run: func(_ context.Context, sink enginescan.Sink) error {
+				incomplete := reported("tls-version")
+				incomplete.FindingInfo = nil
+				return sink.Finding(incomplete)
+			},
+		}, engines.Run{})
+		Expect(err).To(MatchError(ContainSubstring("finding_info is required")))
+		Expect(current.Findings()).To(BeEmpty())
+	})
+
+	It("fills the readable half of each enum pair from the integer", func() {
+		Expect(current.Run(context.Background(), stubEngine{
+			run: func(_ context.Context, sink enginescan.Sink) error {
+				return sink.Finding(reported("tls-version"))
+			},
+		}, engines.Run{})).To(Succeed())
+
+		// OCSF's caption of severity_id 4, which no adapter writes out.
+		Expect(current.Findings()[0].Severity).To(Equal("High"))
+		Expect(current.Findings()[0].ActivityName).To(Equal("Create"))
 	})
 })

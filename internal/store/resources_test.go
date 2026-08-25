@@ -12,6 +12,7 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/models"
+	"github.com/flanksource/recon/internal/ocsf"
 	"github.com/flanksource/recon/internal/schema"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -190,7 +191,12 @@ var _ = Describe("the resource inventory", Ordered, Label("db"), func() {
 			row.Phase, row.FinishedAt, row.ExitCode = string(api.PhaseDone), &at, &exitCode
 
 			finding := api.Finding{
-				LineNo: 1, TemplateID: "gcp/bucket_public", Name: "Bucket is public",
+				DetectionFinding: ocsf.DetectionFinding{
+					FindingInfo: &ocsf.FindingInfo{
+						UID: "gcp/bucket_public", Title: "Bucket is public",
+					},
+				},
+				LineNo: 1, CheckID: "gcp/bucket_public", Engine: "prowler",
 				Resources: []api.ResourceRef{{Provider: "gcp", Scope: "another-account", UID: "logs"}},
 			}
 			Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
@@ -312,18 +318,24 @@ var _ = Describe("the resource inventory", Ordered, Label("db"), func() {
 
 			finding := func(line int, severity api.Severity, check string) api.Finding {
 				return api.Finding{
-					LineNo: line, TemplateID: check, Name: check, Severity: severity,
+					DetectionFinding: ocsf.DetectionFinding{
+						SeverityID:  api.SeverityID(severity),
+						FindingInfo: &ocsf.FindingInfo{UID: check, Title: check},
+					},
+					LineNo: line, CheckID: check, Engine: "prowler",
 					Host: account, MatchedAt: "logs",
 					Resources: []api.ResourceRef{{Provider: "gcp", Scope: account, UID: "logs", Name: "logs"}},
 				}
 			}
 			manual := finding(4, api.SeverityMedium, "gcp/manual-review")
-			// The engine's own status code stays where it was; the lifecycle keys
-			// on recon's vocabulary instead, so that a matcher an engine happens
-			// to name MANUAL cannot mint manual states.
-			manual.MatcherName = "MANUAL"
+			// The engine's own status code is an OCSF field of its own now; the
+			// lifecycle keys on recon's vocabulary instead, so that a matcher an
+			// engine happens to name MANUAL cannot mint manual states.
+			manual.StatusCode = "MANUAL"
 			manual.Verdict = api.VerdictManual
-			manual.Name = "Manual approval required"
+			manual.FindingInfo = &ocsf.FindingInfo{
+				UID: "gcp/manual-review", Title: "Manual approval required",
+			}
 			clean := bucket
 			clean.UID, clean.Name = "scratch", "scratch"
 			Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
@@ -347,7 +359,7 @@ var _ = Describe("the resource inventory", Ordered, Label("db"), func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(states.Data).To(HaveLen(1))
 			Expect(states.Data[0].Status).To(Equal(api.StatusManual))
-			Expect(states.Data[0].Finding.Name).To(Equal("Manual approval required"))
+			Expect(states.Data[0].Finding.FindingInfo.Title).To(Equal("Manual approval required"))
 			Expect([]string{
 				states.Data[0].Resource.Provider,
 				states.Data[0].Resource.Scope,

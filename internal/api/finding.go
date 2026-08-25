@@ -55,6 +55,17 @@ const (
 	VerdictManual = "manual"
 )
 
+// Vendor is who OCSF considers the producer of a record, which it asks for
+// separately from the product. Every finding recon stores was produced by recon
+// running some engine, so the vendor is constant and the engine is the product.
+const Vendor = "flanksource-recon"
+
+// ProfileCloud is the OCSF profile a record that audits a cloud account
+// declares. Declaring it is what makes cloud.provider required of that record;
+// an engine that scans a URL or a filesystem declares nothing and is held to
+// nothing. See ocsf.Validate.
+const ProfileCloud = "cloud"
+
 // Finding is one result an engine reported, stored as an OCSF Detection
 // Finding with the identity recon needs in order to track it over time.
 //

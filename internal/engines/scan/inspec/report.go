@@ -1,12 +1,15 @@
 package inspec
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/configdb"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 // ExecJSON is InSpec's `json` reporter output — the exec-json schema, stable
@@ -150,12 +153,21 @@ func (r ExecJSON) Findings(account string) []api.Finding {
 	var findings []api.Finding
 	for _, profile := range r.Profiles {
 		for _, control := range profile.Controls {
-			for _, result := range control.Results {
-				if result.Status != StatusFailed && result.Status != StatusError {
-					continue
-				}
-				findings = append(findings, finding(account, profile, control, result))
+			// One finding per control, not one per assertion.
+			//
+			// A control is the check; its results are the assertions it makes,
+			// and a failing control reports one per assertion that failed —
+			// three lines about /etc/shadow that differ only in prose. Emitting
+			// each as its own finding made three findings for one problem, all
+			// with the same check id on the same resource, so the lifecycle
+			// could not tell them apart and (engine, check, resource) was not
+			// unique. They are the control's evidence, which is what OCSF's
+			// evidences array is for.
+			failed := failures(control)
+			if len(failed) == 0 {
+				continue
 			}
+			findings = append(findings, finding(account, profile, control, failed))
 		}
 	}
 	return findings
@@ -219,26 +231,106 @@ func remove(values []string, unwanted string) []string {
 	return kept
 }
 
-func finding(account string, profile Profile, control Control, result Result) api.Finding {
-	return api.Finding{
-		TemplateID:  control.ID,
-		Name:        title(control),
-		Severity:    Severity(control.Impact),
-		Host:        account,
-		MatchedAt:   result.CodeDesc,
-		MatcherName: result.Status,
-		Type:        EngineName,
-		Tags:        tagsOf(profile, control),
-		Timestamp:   result.StartTime,
-		Remediation: remediation(control),
-		Reference:   references(control),
-		Resources:   []api.ResourceRef{accountResource(account).Ref()},
-		Raw: map[string]any{
-			"profile": profile.Name,
-			"control": control,
-			"result":  result,
-		},
+// failures are the assertions a control made that did not hold.
+func failures(control Control) []Result {
+	var failed []Result
+	for _, result := range control.Results {
+		if result.Status == StatusFailed || result.Status == StatusError {
+			failed = append(failed, result)
+		}
 	}
+	return failed
+}
+
+func finding(account string, profile Profile, control Control, failed []Result) api.Finding {
+	tags := tagsOf(profile, control)
+	built := api.Finding{
+		DetectionFinding: ocsf.DetectionFinding{
+			ClassUID:    ocsf.ClassUID,
+			CategoryUID: ocsf.CategoryUID,
+			ActivityID:  ocsf.ActivityIDCreate,
+			TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+			SeverityID:  api.SeverityID(Severity(control.Impact)),
+			StatusID:    ocsf.StatusIDNew,
+			Time:        epochMillis(failed[0].StartTime),
+
+			FindingInfo: &ocsf.FindingInfo{
+				UID:   control.ID,
+				Title: title(control),
+				Desc:  control.Desc,
+				Types: tags,
+			},
+			// No profile: inspec audits a host or an account it was pointed at,
+			// and does not report cloud identity of its own.
+			Metadata: &ocsf.Metadata{
+				Version:   ocsf.Version,
+				EventCode: control.ID,
+				Product: &ocsf.Product{
+					Name:       EngineName,
+					VendorName: api.Vendor,
+					Version:    profile.Version,
+				},
+			},
+			Evidences: assertionEvidence(profile, failed),
+		},
+		CheckID: control.ID,
+		Engine:  EngineName,
+		Host:    account,
+		// The first failing assertion, which is what a list row shows. The rest
+		// are in the evidence rather than being lost.
+		MatchedAt: failed[0].CodeDesc,
+		Tags:      tags,
+		Resources: []api.ResourceRef{accountResource(account).Ref()},
+	}
+	if desc := remediation(control); desc != "" || len(references(control)) > 0 {
+		built.Remediation = &ocsf.Remediation{Desc: desc, References: references(control)}
+	}
+	return built
+}
+
+// assertionEvidence records every assertion the control failed.
+//
+// `data` rather than `name` alone: OCSF's evidences object requires at least one
+// of a named set of attributes, and `name` is not in it — an entry carrying only
+// the assertion's prose would be invalid, which is exactly the shape this would
+// otherwise take.
+func assertionEvidence(profile Profile, failed []Result) []ocsf.Evidences {
+	evidences := make([]ocsf.Evidences, 0, len(failed))
+	for _, result := range failed {
+		data := map[string]any{"status": result.Status}
+		if result.CodeDesc != "" {
+			data["code_desc"] = result.CodeDesc
+		}
+		if result.Message != "" {
+			data["message"] = result.Message
+		}
+		if profile.Name != "" {
+			data["profile"] = profile.Name
+		}
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			continue
+		}
+		evidences = append(evidences, ocsf.Evidences{Name: result.CodeDesc, Data: encoded})
+	}
+	if len(evidences) == 0 {
+		return nil
+	}
+	return evidences
+}
+
+// epochMillis reads the timestamps inspec writes, which are RFC3339. A stamp
+// that will not parse yields zero, which the store keeps as NULL rather than
+// recording 1970.
+func epochMillis(value string) int64 {
+	if value == "" {
+		return 0
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return 0
+	}
+	return parsed.UnixMilli()
 }
 
 func accountResource(account string) api.Resource {

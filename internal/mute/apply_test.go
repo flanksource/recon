@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 // run builds a findings slice whose severities alternate, so a rule can remove
@@ -14,14 +15,14 @@ import (
 func run(count int) []api.Finding {
 	findings := make([]api.Finding, 0, count)
 	for i := range count {
-		severity := api.SeverityLow
+		severity := ocsf.SeverityIDLow
 		if i%2 == 0 {
-			severity = api.SeverityHigh
+			severity = ocsf.SeverityIDHigh
 		}
 		findings = append(findings, api.Finding{
-			TemplateID: fmt.Sprintf("check-%d", i),
-			Severity:   severity,
-			Host:       "example.test",
+			DetectionFinding: ocsf.DetectionFinding{SeverityID: severity},
+			CheckID:          fmt.Sprintf("check-%d", i),
+			Host:             "example.test",
 		})
 	}
 	return findings
@@ -107,7 +108,7 @@ var _ = Describe("applying rules to a run", func() {
 	// environment ever grows a second name or a custom function, this stops
 	// being one compile and becomes one per finding.
 	It("evaluates a large run through one expression without slowing down", func() {
-		expression := rule(api.MuteRule{Name: "expr", Expr: `finding.severity == "high"`})
+		expression := rule(api.MuteRule{Name: "expr", Expr: `finding.severity_id == 4`})
 
 		result := Apply([]Rule{expression}, run(2000))
 

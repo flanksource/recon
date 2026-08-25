@@ -20,7 +20,27 @@
 -- still failing and no pass anywhere that could ever resolve it: permanently
 -- stale open rows, which is the precise failure mode this whole feature removes.
 -- The first post-upgrade run establishes the ledger correctly and completely.
+--
+-- `raw` no longer exists once 023 has run: findings became OCSF Detection
+-- Findings and the verbatim engine record went with them. This script is a post
+-- script, and the phase order is all-pre, diff, all-post — so on any database
+-- that had not already applied it, the column it reads from is dropped before it
+-- gets to run, and it recovers nothing.
+--
+-- That is a no-op rather than a loss. The recovery was only ever a convenience so
+-- the Resources tab would not read as broken on a database holding old scans; as
+-- the paragraph above says, the first post-upgrade run records the estate
+-- properly. The guard makes the no-op explicit instead of a failed migration.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'findings' AND column_name = 'raw'
+  ) THEN
+    RETURN;
+  END IF;
 
+  EXECUTE $sql$
 INSERT INTO resources (
     provider, scope, uid, kind, type, name, service, region,
     engines, target_id, state, first_seen, last_seen, first_scan_id, last_scan_id
@@ -80,12 +100,14 @@ FROM (
     -- Newest wins for the last-writer attributes, which is what the upsert does.
     ORDER BY provider, scope, uid, seen DESC
 ) recovered
-ON CONFLICT (provider, scope, uid) DO NOTHING;
+ON CONFLICT (provider, scope, uid) DO NOTHING
+  $sql$;
 
--- Link the evidence to what it was about. Only the first resource of each
--- record: a check's verdict is about one subject and the rest are context, and
--- fanning it across all of them is what would let one verdict resolve findings
--- on things the check never judged.
+  -- Link the evidence to what it was about. Only the first resource of each
+  -- record: a check's verdict is about one subject and the rest are context, and
+  -- fanning it across all of them is what would let one verdict resolve findings
+  -- on things the check never judged.
+  EXECUTE $sql$
 UPDATE findings f
 SET resource_id = r.id
 FROM resources r
@@ -94,4 +116,6 @@ WHERE f.resource_id IS NULL
   AND jsonb_typeof(f.raw -> 'resources') = 'array'
   AND r.uid = f.raw -> 'resources' -> 0 ->> 'uid'
   AND r.scope = COALESCE(f.raw -> 'cloud' -> 'account' ->> 'uid', f.host, '')
-  AND r.provider = COALESCE(NULLIF(f.raw -> 'cloud' ->> 'provider', ''), 'gcp');
+  AND r.provider = COALESCE(NULLIF(f.raw -> 'cloud' ->> 'provider', ''), 'gcp')
+  $sql$;
+END $$;

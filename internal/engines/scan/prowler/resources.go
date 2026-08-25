@@ -50,12 +50,12 @@ type ocsfResource struct {
 // keyed `gcp`, and the two never met.
 func subjects(record ocsfRecord) (provider, scope string, resources []ocsfResource) {
 	provider = recordProvider(record)
-	scope = firstNonEmpty(record.Cloud.Account.UID, recordHost(record))
+	scope = firstNonEmpty(accountUID(record), recordHost(record))
 	resources = record.Resources
 	// A check with nothing more specific to point at is about the account
 	// itself, which is a subject recon records like any other.
 	if len(resources) == 0 && scope != "" {
-		resources = []ocsfResource{{UID: scope, Name: recordHost(record), Type: record.Cloud.Account.Type}}
+		resources = []ocsfResource{{UID: scope, Name: recordHost(record), Type: accountType(record)}}
 	}
 	return provider, scope, resources
 }
@@ -121,12 +121,12 @@ func newResource(key api.ResourceKey, record ocsfRecord, resource ocsfResource, 
 		Type:     resource.Type,
 		Name:     resource.Name,
 		Service:  resource.Group.Name,
-		Region:   firstNonEmpty(resource.Region, record.Cloud.Region),
+		Region:   firstNonEmpty(resource.Region, cloudRegion(record)),
 
 		TargetID:    targetID,
-		AccountName: record.Cloud.Account.Name,
-		OrgUID:      record.Cloud.Org.UID,
-		OrgName:     record.Cloud.Org.Name,
+		AccountName: accountName(record),
+		OrgUID:      orgUID(record),
+		OrgName:     orgName(record),
 
 		Labels:   resourceLabels(resource),
 		Metadata: resource.Data.Metadata,
@@ -140,8 +140,8 @@ func newResource(key api.ResourceKey, record ocsfRecord, resource ocsfResource, 
 	// stable type instead of four rows that swap places between runs.
 	if resource.UID == key.Scope {
 		built.Kind = api.KindAccount
-		built.Type = firstNonEmpty(record.Cloud.Account.Type, resource.Type)
-		built.Name = firstNonEmpty(record.Cloud.Account.Name, resource.Name)
+		built.Type = firstNonEmpty(accountType(record), resource.Type)
+		built.Name = firstNonEmpty(accountName(record), resource.Name)
 	}
 
 	built.Tags = resourceTags(built)
@@ -193,7 +193,7 @@ func resourceLabels(resource ocsfResource) map[string]string {
 }
 
 func templateID(record ocsfRecord, provider string) string {
-	return provider + "/" + record.Metadata.EventCode
+	return provider + "/" + eventCode(record)
 }
 
 func firstNonEmpty(values ...string) string {

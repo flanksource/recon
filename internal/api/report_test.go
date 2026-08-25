@@ -66,7 +66,7 @@ var _ = Describe("the scan report payload", func() {
 
 	full := api.ScanReport{
 		Scan:         api.Scan{ID: "1", Name: "nuclei-safe-1"},
-		Findings:     []api.Finding{{TemplateID: "http/tls-version"}},
+		Findings:     []api.Finding{{CheckID: "http/tls-version"}},
 		Parameters:   map[string]any{"rate-limit": float64(50)},
 		GeneratedAt:  "2026-03-14T09:30:00Z",
 		FindingLimit: 2000,

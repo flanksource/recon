@@ -104,7 +104,7 @@ func SeverityCounts(findings []Finding) map[string]int {
 		counts[string(severity)] = 0
 	}
 	for _, finding := range findings {
-		counts[string(finding.Severity)]++
+		counts[string(finding.SeverityLevel())]++
 	}
 	return counts
 }

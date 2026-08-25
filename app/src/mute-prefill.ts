@@ -16,7 +16,7 @@ export const NEW_MUTE = "new";
  * The dimensions a draft travels in. One list, used by both directions, so a
  * field cannot be written here and silently ignored when it is read back.
  */
-const PREFILL_FIELDS = ["templates", "resources", "tags", "severity", "engines"] as const;
+const PREFILL_FIELDS = ["templates", "resources", "resourceKeys", "tags", "severity", "engines"] as const;
 
 /**
  * How much a rule seeded from a finding should cover.
@@ -36,19 +36,27 @@ export type MuteScope =
 type ScopeSpec = {
   id: MuteScope;
   label: string;
-  /** Which of the finding's two names for its subject the rule matches on. */
-  resource: "matchedAt" | "host" | null;
+  resource: "resourceKey" | "host" | null;
   templates: boolean;
 };
 
 // Narrowest first: the list is read top to bottom by someone deciding how much
 // to hide, and the safe end of that range should be the one they reach first.
 const SCOPES: ScopeSpec[] = [
-  { id: "check-on-resource", label: "This check on this resource", resource: "matchedAt", templates: true },
+  { id: "check-on-resource", label: "This check on this resource", resource: "resourceKey", templates: true },
   { id: "check-on-host", label: "This check on this host", resource: "host", templates: true },
   { id: "check-anywhere", label: "This check everywhere", resource: null, templates: true },
-  { id: "anything-on-resource", label: "Anything on this resource", resource: "matchedAt", templates: false },
+  { id: "anything-on-resource", label: "Anything on this resource", resource: "resourceKey", templates: false },
 ];
+
+function canonicalResource(finding: Finding): { key: string; label: string } | undefined {
+  const resource = finding.resources?.[0];
+  if (!resource?.provider || !resource.uid) return undefined;
+  return {
+    key: `${resource.provider}/${resource.scope ?? ""}/${resource.uid}`,
+    label: resource.name || resource.uid,
+  };
+}
 
 /**
  * The query the rule editor reads a prefilled draft from.
@@ -71,11 +79,11 @@ export function mutePrefillQuery(
 
   if (spec.templates && finding.templateId) params.set("templates", finding.templateId);
 
-  // A finding offers two names for the thing it is about — matchedAt is the
-  // resource uid or matched URL, host is the account or hostname — and a rule
-  // matches either. Which one this rule is about is the scope's decision.
-  const resource = spec.resource === "host" ? finding.host : finding.matchedAt || finding.host;
-  if (spec.resource && resource) params.set("resources", resource);
+  if (spec.resource === "host" && finding.host) params.set("resources", finding.host);
+  if (spec.resource === "resourceKey") {
+    const resource = canonicalResource(finding);
+    if (resource) params.set("resourceKeys", resource.key);
+  }
 
   if (engine) params.set("engines", engine);
 
@@ -113,7 +121,8 @@ export function muteScopeOptions(finding: Finding, engine?: string): MuteScopeOp
   for (const spec of SCOPES) {
     if (spec.templates && !finding.templateId) continue;
 
-    const resource = spec.resource === "host" ? finding.host : finding.matchedAt || finding.host;
+    const canonical = canonicalResource(finding);
+    const resource = spec.resource === "host" ? finding.host : canonical?.key;
     if (spec.resource && !resource) continue;
 
     // Several engines report the same string for both, and two menu entries
@@ -124,7 +133,10 @@ export function muteScopeOptions(finding: Finding, engine?: string): MuteScopeOp
     options.push({
       id: spec.id,
       label: spec.label,
-      title: [spec.templates ? finding.templateId : "any check", spec.resource ? `on ${resource}` : "anywhere"]
+      title: [
+        spec.templates ? finding.templateId : "any check",
+        spec.resource ? `on ${spec.resource === "resourceKey" ? canonical?.label : resource}` : "anywhere",
+      ]
         .filter(Boolean)
         .join(" "),
       path,
@@ -164,13 +176,17 @@ function resourceLabel(resource: string): string {
  * rather than generated as an opaque id. It stays editable — this is a starting
  * point, not the last word.
  *
- * Uniqueness is not cosmetic. The server upserts on the name, so a colliding
- * name would silently rewrite somebody else's rule instead of adding one.
+ * Uniqueness is not cosmetic. The server rejects a colliding name so creating
+ * a rule can never rewrite somebody else's scope.
  */
 export function suggestMuteName(rule: MuteRule, taken: string[] = []): string {
   const parts = [
     rule.templates?.[0] ? slug(rule.templates[0]) : "",
-    rule.resources?.[0] ? slug(resourceLabel(rule.resources[0])) : "",
+    rule.resourceKeys?.[0]
+      ? slug(resourceLabel(rule.resourceKeys[0]))
+      : rule.resources?.[0]
+        ? slug(resourceLabel(rule.resources[0]))
+        : "",
   ].filter((part) => part !== "");
 
   if (parts.length === 0) {

@@ -8,9 +8,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/configdb"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 // reportSchemaVersion is the only report shape this parses. Trivy stamps it on
@@ -44,6 +46,7 @@ type result struct {
 
 type vulnerability struct {
 	VulnerabilityID  string   `json:"VulnerabilityID"`
+	Description      string   `json:"Description"`
 	PkgName          string   `json:"PkgName"`
 	InstalledVersion string   `json:"InstalledVersion"`
 	FixedVersion     string   `json:"FixedVersion"`
@@ -210,7 +213,7 @@ func (d document) parse(targetID string) (*parsed, error) {
 				if !actionable {
 					continue
 				}
-				found.templates[finding.TemplateID] = struct{}{}
+				found.templates[finding.CheckID] = struct{}{}
 				found.Findings = append(found.Findings, finding)
 			}
 		}
@@ -264,6 +267,103 @@ func (c findingContext) tags(extra ...string) []string {
 	return tags
 }
 
+// record is what one trivy finding contributes, whichever of the four kinds of
+// record it came from.
+//
+// Trivy reports four things that are alike enough to store identically and
+// different enough that each used to build its own api.Finding literal — four
+// copies of the same eleven fields, which is four places for the OCSF skeleton
+// to drift. Class is what used to be written to matcher_name, a column that
+// meant the record's kind here and something else in every other engine.
+type normalised struct {
+	CheckID     string
+	Title       string
+	Desc        string
+	Severity    api.Severity
+	Class       string
+	MatchedAt   string
+	Tags        []string
+	Time        string
+	Remediation string
+	References  []string
+	Evidence    map[string]any
+	Vulnerable  []ocsf.Vulnerability
+}
+
+// finding renders one trivy record as an OCSF Detection Finding.
+func (c findingContext) finding(r normalised) api.Finding {
+	types := append([]string{r.Class}, r.Tags...)
+	finding := api.Finding{
+		DetectionFinding: ocsf.DetectionFinding{
+			ClassUID:    ocsf.ClassUID,
+			CategoryUID: ocsf.CategoryUID,
+			ActivityID:  ocsf.ActivityIDCreate,
+			TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+			SeverityID:  api.SeverityID(r.Severity),
+			StatusID:    ocsf.StatusIDNew,
+			Time:        epochMillis(r.Time),
+
+			FindingInfo: &ocsf.FindingInfo{
+				UID:   r.CheckID,
+				Title: r.Title,
+				Desc:  r.Desc,
+				Types: types,
+			},
+			// No profile: trivy scans an image or a filesystem, which has no
+			// cloud account to name.
+			Metadata: &ocsf.Metadata{
+				Version:   ocsf.Version,
+				EventCode: r.CheckID,
+				Product: &ocsf.Product{
+					Name:       EngineName,
+					VendorName: api.Vendor,
+				},
+			},
+			Vulnerabilities: r.Vulnerable,
+			Evidences:       recordEvidence(r),
+		},
+		TargetID:  c.TargetID,
+		CheckID:   r.CheckID,
+		Engine:    EngineName,
+		Host:      c.Host,
+		MatchedAt: r.MatchedAt,
+		Tags:      c.tags(r.Tags...),
+	}
+	if r.Remediation != "" || len(r.References) > 0 {
+		finding.Remediation = &ocsf.Remediation{Desc: r.Remediation, References: r.References}
+	}
+	return finding
+}
+
+// recordEvidence carries what trivy showed of the file it was reading — the
+// offending lines and the cause metadata. An entry needs one of the attributes
+// OCSF's at_least_one constraint names, so `data` is what carries it and a
+// record with nothing to show produces no entry at all.
+func recordEvidence(r normalised) []ocsf.Evidences {
+	if len(r.Evidence) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(r.Evidence)
+	if err != nil {
+		return nil
+	}
+	return []ocsf.Evidences{{Name: r.Class, Data: encoded}}
+}
+
+// epochMillis reads the timestamps trivy writes, which are RFC3339. A stamp
+// that will not parse yields zero, which the store keeps as NULL rather than
+// recording 1970.
+func epochMillis(value string) int64 {
+	if value == "" {
+		return 0
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return 0
+	}
+	return parsed.UnixMilli()
+}
+
 func vulnerabilityFinding(raw json.RawMessage, context findingContext) (api.Finding, bool, error) {
 	var record vulnerability
 	if err := json.Unmarshal(raw, &record); err != nil {
@@ -272,11 +372,6 @@ func vulnerabilityFinding(raw json.RawMessage, context findingContext) (api.Find
 	if record.VulnerabilityID == "" {
 		return api.Finding{}, false, fmt.Errorf("trivy vulnerability has no VulnerabilityID")
 	}
-	source, err := preserve(raw, "vulnerability")
-	if err != nil {
-		return api.Finding{}, false, err
-	}
-
 	name := record.Title
 	if name == "" {
 		name = record.VulnerabilityID + " in " + record.PkgName
@@ -287,21 +382,34 @@ func vulnerabilityFinding(raw json.RawMessage, context findingContext) (api.Find
 		timestamp = context.Timestamp
 	}
 
-	return api.Finding{
-		TargetID:    context.TargetID,
-		TemplateID:  record.VulnerabilityID,
-		Name:        name,
+	return context.finding(normalised{
+		CheckID:     record.VulnerabilityID,
+		Title:       name,
+		Desc:        record.Description,
 		Severity:    api.ParseSeverity(record.Severity),
-		Host:        context.Host,
+		Class:       "vulnerability",
 		MatchedAt:   context.at(0) + ": " + record.PkgName + "@" + record.InstalledVersion,
-		MatcherName: "vulnerability",
-		Type:        EngineName,
-		Tags:        context.tags(tags...),
-		Timestamp:   timestamp,
+		Tags:        tags,
+		Time:        timestamp,
 		Remediation: fixedBy(record),
-		Reference:   references(record.PrimaryURL, record.References),
-		Raw:         source,
-	}, true, nil
+		References:  references(record.PrimaryURL, record.References),
+		// The CVE has a home OCSF defines for exactly it, rather than being
+		// spelled out in tags and a title the way it had to be before.
+		Vulnerable: []ocsf.Vulnerability{{
+			Title:          name,
+			Desc:           record.Description,
+			Severity:       record.Severity,
+			References:     references(record.PrimaryURL, record.References),
+			FixAvailable:   record.FixedVersion != "",
+			IsFixAvailable: record.FixedVersion != "",
+			CVE:            &ocsf.CVE{UID: record.VulnerabilityID, Title: record.Title, Desc: record.Description},
+			AffectedPackages: []ocsf.AffectedPackage{{
+				Name:           record.PkgName,
+				Version:        record.InstalledVersion,
+				FixedInVersion: record.FixedVersion,
+			}},
+		}},
+	}), true, nil
 }
 
 // fixedBy states the upgrade that resolves the finding, which is the whole
@@ -334,36 +442,52 @@ func misconfigurationFinding(raw json.RawMessage, context findingContext) (api.F
 		return api.Finding{}, false, fmt.Errorf(
 			"trivy misconfiguration %s: unknown status %q", record.ID, record.Status)
 	}
-	source, err := preserve(raw, "misconfiguration")
-	if err != nil {
-		return api.Finding{}, false, err
-	}
-
 	name := record.Title
 	if name == "" {
 		name = record.Message
 	}
-	return api.Finding{
-		TargetID:    context.TargetID,
-		TemplateID:  record.ID,
-		Name:        name,
-		Severity:    api.ParseSeverity(record.Severity),
-		Host:        context.Host,
-		MatchedAt:   context.at(record.CauseMetadata.StartLine),
-		MatcherName: "misconfiguration",
-		Type:        EngineName,
-		Tags: context.tags(
+	return context.finding(normalised{
+		CheckID:   record.ID,
+		Title:     name,
+		Desc:      record.Message,
+		Severity:  api.ParseSeverity(record.Severity),
+		Class:     "misconfiguration",
+		MatchedAt: context.at(record.CauseMetadata.StartLine),
+		Tags: []string{
 			"check", record.Type,
 			"provider", record.CauseMetadata.Provider,
 			"service", record.CauseMetadata.Service,
 			"avd", record.AVDID,
-		),
-		Timestamp:   context.Timestamp,
-		Extracted:   compact([]string{record.Message}),
+		},
+		Time:        context.Timestamp,
 		Remediation: record.Resolution,
-		Reference:   references(record.PrimaryURL, record.References),
-		Raw:         source,
-	}, true, nil
+		References:  references(record.PrimaryURL, record.References),
+		// Where in the file, which is the whole of what triage needs beyond the
+		// message and has no modelled home.
+		Evidence: causeEvidence(record),
+	}), true, nil
+}
+
+// causeEvidence is where in the scanned file the misconfiguration is, which is
+// what someone fixing it opens the file to find.
+func causeEvidence(record misconfiguration) map[string]any {
+	cause := map[string]any{}
+	if record.CauseMetadata.StartLine > 0 {
+		cause["start_line"] = record.CauseMetadata.StartLine
+	}
+	if record.CauseMetadata.Provider != "" {
+		cause["provider"] = record.CauseMetadata.Provider
+	}
+	if record.CauseMetadata.Service != "" {
+		cause["service"] = record.CauseMetadata.Service
+	}
+	if record.Message != "" {
+		cause["message"] = record.Message
+	}
+	if len(cause) == 0 {
+		return nil
+	}
+	return cause
 }
 
 func secretFinding(raw json.RawMessage, context findingContext) (api.Finding, bool, error) {
@@ -374,32 +498,34 @@ func secretFinding(raw json.RawMessage, context findingContext) (api.Finding, bo
 	if record.RuleID == "" {
 		return api.Finding{}, false, fmt.Errorf("trivy secret has no RuleID")
 	}
-	source, err := preserve(raw, "secret")
-	if err != nil {
-		return api.Finding{}, false, err
-	}
-
 	name := record.Title
 	if name == "" {
 		name = record.RuleID
 	}
-	return api.Finding{
-		TargetID:    context.TargetID,
-		TemplateID:  record.RuleID,
-		Name:        name,
-		Severity:    api.ParseSeverity(record.Severity),
-		Host:        context.Host,
-		MatchedAt:   context.at(record.StartLine),
-		MatcherName: "secret",
-		Type:        EngineName,
-		Tags:        context.tags("category", record.Category),
-		Timestamp:   context.Timestamp,
+	return context.finding(normalised{
+		CheckID:   record.RuleID,
+		Title:     name,
+		Severity:  api.ParseSeverity(record.Severity),
+		Class:     "secret",
+		MatchedAt: context.at(record.StartLine),
+		Tags:      []string{"category", record.Category},
+		Time:      context.Timestamp,
 		// The matched text is deliberately not lifted out of the record. Trivy
 		// masks it before writing the report, and copying the masked form into
-		// a typed field would only invite someone to un-mask it later.
+		// a typed field would only invite someone to un-mask it later. The line
+		// number is the whole of what is carried.
 		Remediation: "Rotate the credential and remove it from " + context.Result.Target,
-		Raw:         source,
-	}, true, nil
+		Evidence:    lineEvidence(record.StartLine),
+	}), true, nil
+}
+
+// lineEvidence is where a secret was found. Deliberately only the location:
+// see secretFinding on why the matched text is not carried.
+func lineEvidence(line int) map[string]any {
+	if line <= 0 {
+		return nil
+	}
+	return map[string]any{"start_line": line}
 }
 
 func licenseFinding(raw json.RawMessage, context findingContext) (api.Finding, bool, error) {
@@ -410,11 +536,6 @@ func licenseFinding(raw json.RawMessage, context findingContext) (api.Finding, b
 	if record.Name == "" {
 		return api.Finding{}, false, fmt.Errorf("trivy license has no Name")
 	}
-	source, err := preserve(raw, "license")
-	if err != nil {
-		return api.Finding{}, false, err
-	}
-
 	subject := record.PkgName
 	if subject == "" {
 		subject = record.FilePath
@@ -422,29 +543,18 @@ func licenseFinding(raw json.RawMessage, context findingContext) (api.Finding, b
 	if subject == "" {
 		subject = context.Result.Target
 	}
-	return api.Finding{
-		TargetID:    context.TargetID,
-		TemplateID:  "license/" + record.Name,
-		Name:        record.Name + " licence in " + subject,
-		Severity:    api.ParseSeverity(record.Severity),
-		Host:        context.Host,
-		MatchedAt:   context.at(0) + ": " + subject,
-		MatcherName: "license",
-		Type:        EngineName,
-		Tags:        context.tags("category", record.Category, "license", record.Name),
-		Timestamp:   context.Timestamp,
-		Reference:   compact([]string{record.Link}),
-		Raw:         source,
-	}, true, nil
-}
-
-// preserve keeps the engine's own record alongside the typed projection.
-func preserve(raw json.RawMessage, kind string) (map[string]any, error) {
-	var source map[string]any
-	if err := json.Unmarshal(raw, &source); err != nil {
-		return nil, fmt.Errorf("preserve trivy %s: %w", kind, err)
-	}
-	return source, nil
+	return context.finding(normalised{
+		// Already composed, and the precedent for composing a check id where the
+		// engine's own is not unique on its own: a licence name is not a check.
+		CheckID:    "license/" + record.Name,
+		Title:      record.Name + " licence in " + subject,
+		Severity:   api.ParseSeverity(record.Severity),
+		Class:      "license",
+		MatchedAt:  context.at(0) + ": " + subject,
+		Tags:       []string{"category", record.Category, "license", record.Name},
+		Time:       context.Timestamp,
+		References: compact([]string{record.Link}),
+	}), true, nil
 }
 
 func cweTags(ids []string) []string {

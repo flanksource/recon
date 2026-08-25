@@ -19,6 +19,12 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     host: "acme-prod",
     matchedAt: "//storage.googleapis.com/acme-logs",
     tags: ["gcp", "storage"],
+    resources: [{
+      provider: "gcp",
+      scope: "acme-prod",
+      uid: "projects/acme/buckets/logs",
+      name: "acme-logs",
+    }],
     ...overrides,
   };
 }
@@ -31,16 +37,14 @@ describe("mutePrefillQuery", () => {
 
     expect(Object.fromEntries(params)).toEqual({
       templates: "gcp/bucket-public-access",
-      resources: "//storage.googleapis.com/acme-logs",
+      resourceKeys: "gcp/acme-prod/projects/acme/buckets/logs",
       engines: "prowler",
     });
   });
 
-  it("takes the resource over the host, because a rule matching either should take the narrower", () => {
-    // resourcesOf in internal/mute/match.go matches on matchedAt OR host, so a
-    // prefill that chose host would cover every finding on that account.
-    expect(mutePrefillQuery(finding(), undefined, "check-on-resource").get("resources")).toBe(
-      "//storage.googleapis.com/acme-logs",
+  it("uses the canonical resource key rather than evidence location fields", () => {
+    expect(mutePrefillQuery(finding(), undefined, "check-on-resource").get("resourceKeys")).toBe(
+      "gcp/acme-prod/projects/acme/buckets/logs",
     );
   });
 
@@ -55,17 +59,20 @@ describe("mutePrefillQuery", () => {
 
     expect(params.get("templates")).toBe("gcp/bucket-public-access");
     expect(params.has("resources")).toBe(false);
+    expect(params.has("resourceKeys")).toBe(false);
   });
 
   it("names no check when the scope is anything on the resource", () => {
     const params = mutePrefillQuery(finding(), undefined, "anything-on-resource");
 
     expect(params.has("templates")).toBe(false);
-    expect(params.get("resources")).toBe("//storage.googleapis.com/acme-logs");
+    expect(params.get("resourceKeys")).toBe("gcp/acme-prod/projects/acme/buckets/logs");
   });
 
-  it("falls back to the host when the finding names no resource", () => {
-    expect(mutePrefillQuery(finding({ matchedAt: "" })).get("resources")).toBe("acme-prod");
+  it("does not silently widen a resource scope when canonical identity is missing", () => {
+    const params = mutePrefillQuery(finding({ resources: undefined }), undefined, "check-on-resource");
+    expect(params.has("resourceKeys")).toBe(false);
+    expect(params.has("resources")).toBe(false);
   });
 
   it("omits the engine when the run's engine is unknown", () => {
@@ -87,32 +94,33 @@ describe("muteScopeOptions", () => {
   it("says which values each scope resolves to", () => {
     const options = muteScopeOptions(finding());
 
-    expect(options[0].title).toBe("gcp/bucket-public-access on //storage.googleapis.com/acme-logs");
+    expect(options[0].title).toBe("gcp/bucket-public-access on acme-logs");
     expect(options[2].title).toBe("gcp/bucket-public-access anywhere");
   });
 
-  it("does not offer two scopes that would build the same rule", () => {
-    // Several engines report one string for both names, and a menu whose two
-    // entries produce byte-identical rules is a choice that is not one.
-    const same = finding({ host: "api.example.test", matchedAt: "api.example.test" });
+  it("omits resource scopes when the finding has no canonical resource", () => {
+    const same = finding({
+      host: "api.example.test",
+      matchedAt: "api.example.test",
+      resources: undefined,
+    });
 
     expect(muteScopeOptions(same).map((option) => option.id)).toEqual([
-      "check-on-resource",
+      "check-on-host",
       "check-anywhere",
-      "anything-on-resource",
     ]);
   });
 
   it("leaves out a scope the finding cannot fill rather than silently widening it", () => {
     // "This check on this resource" with no resource is "this check
     // everywhere", which is a different decision.
-    const noResource = finding({ matchedAt: "", host: "" });
+    const noResource = finding({ resources: undefined, matchedAt: "", host: "" });
 
     expect(muteScopeOptions(noResource).map((option) => option.id)).toEqual(["check-anywhere"]);
   });
 
   it("offers nothing at all for a finding that names neither a check nor a subject", () => {
-    expect(muteScopeOptions(finding({ templateId: "", matchedAt: "", host: "" }))).toEqual([]);
+    expect(muteScopeOptions(finding({ templateId: "", resources: undefined, matchedAt: "", host: "" }))).toEqual([]);
   });
 
   it("hands back a path the editor can open", () => {
@@ -126,13 +134,13 @@ describe("mutePrefillPath", () => {
   it("opens the editor on an unsaved draft", () => {
     expect(mutePrefillPath(finding(), "prowler")).toBe(
       "/mutes/new?templates=gcp%2Fbucket-public-access" +
-        "&resources=%2F%2Fstorage.googleapis.com%2Facme-logs" +
+        "&resourceKeys=gcp%2Facme-prod%2Fprojects%2Facme%2Fbuckets%2Flogs" +
         "&engines=prowler",
     );
   });
 
   it("still opens the editor when a finding names nothing to select on", () => {
-    expect(mutePrefillPath(finding({ templateId: "", matchedAt: "", host: "" }))).toBe("/mutes/new");
+    expect(mutePrefillPath(finding({ templateId: "", resources: undefined, matchedAt: "", host: "" }))).toBe("/mutes/new");
   });
 });
 
@@ -145,7 +153,7 @@ describe("mutePrefillDraft", () => {
     expect(mutePrefillDraft(`?${query}`)).toEqual({
       name: "",
       templates: ["gcp/bucket-public-access"],
-      resources: ["//storage.googleapis.com/acme-logs"],
+      resourceKeys: ["gcp/acme-prod/projects/acme/buckets/logs"],
       engines: ["prowler"],
     });
   });
@@ -177,10 +185,10 @@ describe("suggestMuteName", () => {
     const name = suggestMuteName({
       name: "",
       templates: ["gcp/bucket-public-access"],
-      resources: ["//storage.googleapis.com/acme-logs"],
+      resourceKeys: ["gcp/acme-prod/projects/acme/buckets/logs"],
     });
 
-    expect(name).toBe("gcp-bucket-public-access-acme-logs");
+    expect(name).toBe("gcp-bucket-public-access-logs");
   });
 
   it("produces a name the server's own pattern accepts", () => {

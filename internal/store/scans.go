@@ -404,7 +404,7 @@ func saveFindings(db *gorm.DB, scanID string, findings []api.Finding, ids map[ap
 			return fmt.Errorf(
 				"save findings for %s: %q has no line number; a finding is addressed by the line it "+
 					"occupied in the engine's own output, and the caller assigns it",
-				scanID, finding.TemplateID)
+				scanID, finding.CheckID)
 		}
 		if finding.TargetID == "" {
 			finding.TargetID = finding.Host
@@ -435,11 +435,11 @@ func saveFindings(db *gorm.DB, scanID string, findings []api.Finding, ids map[ap
 		resourceID := ""
 		switch {
 		case len(finding.Resources) == 0:
-			unattached = append(unattached, finding.TemplateID)
+			unattached = append(unattached, finding.CheckID)
 		default:
 			resolved, err := resolveResource(ids, finding.Resources[0])
 			if err != nil {
-				unattached = append(unattached, finding.TemplateID)
+				unattached = append(unattached, finding.CheckID)
 			}
 			resourceID = resolved
 		}
@@ -466,7 +466,7 @@ func saveFindings(db *gorm.DB, scanID string, findings []api.Finding, ids map[ap
 		if row.ID == "" {
 			return fmt.Errorf(
 				"save findings for %s: the insert returned no id for %q, so the resources it "+
-					"names cannot be linked", scanID, row.TemplateID)
+					"names cannot be linked", scanID, row.CheckID)
 		}
 		for _, link := range linked[index] {
 			link.FindingID = row.ID

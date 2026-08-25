@@ -93,7 +93,7 @@ var vocabularies = map[Vocabulary]string{
 	// ORDER BY expression to be there.
 	FindingHosts:     `SELECT DISTINCT host COLLATE "C" AS value FROM findings ORDER BY value`,
 	FindingTargets:   `SELECT DISTINCT target_id COLLATE "C" AS value FROM findings WHERE target_id IS NOT NULL ORDER BY value`,
-	FindingTemplates: `SELECT DISTINCT template_id AS value FROM findings ORDER BY template_id`,
+	FindingTemplates: `SELECT DISTINCT check_id AS value FROM findings ORDER BY check_id`,
 	FindingTags:      `SELECT DISTINCT unnest(tags) AS value FROM findings ORDER BY value`,
 
 	ResourceAccounts: `SELECT DISTINCT scope AS value FROM resources WHERE scope <> '' ORDER BY scope`,

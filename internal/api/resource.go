@@ -241,6 +241,6 @@ func (f Finding) ResourceFallback() ResourceRef {
 	if name == "" {
 		name = f.Host
 	}
-	return ResourceRef{UID: f.Host, Name: name, Type: f.Type}
+	return ResourceRef{UID: f.Host, Name: name, Type: f.Engine}
 }
 

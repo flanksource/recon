@@ -50,6 +50,11 @@ type MuteRule struct {
 	// can only be said here.
 	Resources StringList `json:"resources,omitempty"`
 
+	// ResourceKeys are exact provider/scope/uid identities. They are separate
+	// from legacy resource globs so adding canonical identity cannot widen an
+	// existing rule's match candidates.
+	ResourceKeys StringList `json:"resourceKeys,omitempty"`
+
 	// Templates are globs over TemplateID — the check that fired.
 	Templates StringList `json:"templates,omitempty"`
 
@@ -75,7 +80,7 @@ type MuteRule struct {
 // an engine would mute everything that engine found while reading like a
 // filter. Saying that out loud takes `templates=*`.
 func (m MuteRule) Selects() bool {
-	return len(m.Targets) > 0 || len(m.Resources) > 0 || len(m.Templates) > 0 ||
+	return len(m.Targets) > 0 || len(m.Resources) > 0 || len(m.ResourceKeys) > 0 || len(m.Templates) > 0 ||
 		len(m.Tags) > 0 || len(m.Severity) > 0 || strings.TrimSpace(m.Expr) != ""
 }
 
@@ -93,8 +98,13 @@ func (m MuteRule) Validate() error {
 	}
 	if !m.Selects() {
 		return fmt.Errorf(
-			"mute rule %s selects nothing: set at least one of targets, resources, templates, tags, severity or expr",
+			"mute rule %s selects nothing: set at least one of targets, resources, resourceKeys, templates, tags, severity or expr",
 			m.Name)
+	}
+	for _, value := range m.ResourceKeys {
+		if _, err := ParseResourceKey(value); err != nil {
+			return fmt.Errorf("mute rule %s: invalid resource key %q: %w", m.Name, value, err)
+		}
 	}
 	for _, value := range m.Severity {
 		if severity := ParseSeverity(value); severity == SeverityUnknown && value != string(SeverityUnknown) {

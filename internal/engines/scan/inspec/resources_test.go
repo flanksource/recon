@@ -89,7 +89,7 @@ var _ = Describe("what an InSpec run concluded", func() {
 		// the evidence of a problem and the proof that it is gone.
 		failing := map[string]struct{}{}
 		for _, finding := range parsed.Findings(account) {
-			failing[finding.TemplateID] = struct{}{}
+			failing[finding.CheckID] = struct{}{}
 		}
 		for _, control := range verdicts {
 			Expect(failing).ToNot(HaveKey(control),

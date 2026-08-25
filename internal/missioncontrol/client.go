@@ -47,5 +47,10 @@ func newClient(contextName string) (*sdk.Client, *mccontext.MCContext, error) {
 			context.Name, context.Server)
 	}
 
-	return mccontext.NewAPIClient(context), context, nil
+	return sdk.New(
+		context.Server,
+		context.AccessToken(),
+		sdk.WithTokenProvider(mccontext.ContextTokenProvider(context)),
+		sdk.WithRetry(mccontext.RetryAttempts, mccontext.RetryDelay),
+	), context, nil
 }

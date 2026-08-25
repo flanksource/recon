@@ -58,7 +58,13 @@ func (c *collector) Event(event *output.ResultEvent) {
 		return
 	}
 
-	record, finding := convert(event)
+	record, finding, err := convert(event)
+	if err != nil {
+		if c.err == nil {
+			c.err = err
+		}
+		return
+	}
 	if err := c.encoder.Encode(record); err != nil && c.err == nil {
 		c.err = err
 	}

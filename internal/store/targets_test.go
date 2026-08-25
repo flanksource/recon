@@ -447,12 +447,17 @@ var _ = Describe("the target store", Ordered, Label("db"), func() {
 			finished := started.Add(time.Second)
 			exitCode := 0
 			run.Phase, run.FinishedAt, run.ExitCode = string(api.PhaseDone), &finished, &exitCode
+			endpoint := nucleiEndpointResource(host)
 			Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
-				Scan: run,
+				Scan:      run,
+				Resources: []api.Resource{endpoint},
 				Findings: []api.Finding{{
-					LineNo:     1,
-					TemplateID: "tls-version", Name: "Deprecated TLS version",
-					Severity: api.SeverityHigh, Host: host,
+					DetectionFinding: detection("tls-version", "Deprecated TLS version", api.SeverityHigh),
+					LineNo:           1,
+					CheckID:          "tls-version",
+					Engine:           "nuclei",
+					Host:             host,
+					Resources:        []api.ResourceRef{endpoint.Ref()},
 				}},
 			})).To(Succeed())
 

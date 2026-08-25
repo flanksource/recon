@@ -89,9 +89,9 @@ var _ = Describe("the parser over a whole provider report", func() {
 			emitted[resource.UID] = struct{}{}
 		}
 		for _, finding := range report.Findings {
-			Expect(finding.Resources).ToNot(BeEmpty(), "%s names nothing", finding.TemplateID)
+			Expect(finding.Resources).ToNot(BeEmpty(), "%s names nothing", finding.CheckID)
 			Expect(emitted).To(HaveKey(finding.Resources[0].UID),
-				"%s is about a resource the report never emitted", finding.TemplateID)
+				"%s is about a resource the report never emitted", finding.CheckID)
 		}
 	})
 })

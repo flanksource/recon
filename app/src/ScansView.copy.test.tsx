@@ -57,7 +57,10 @@ function mockRequests(findings: Finding[]) {
       return new Response(JSON.stringify({ filters: {} }), { status: 200 });
     }
     if (path === "/api/v1/finding?scan=scan-1&limit=500") {
-      return new Response(JSON.stringify(findings), { status: 200 });
+      return new Response(JSON.stringify({
+        data: findings,
+        page: { limit: 500, offset: 0, total: findings.length },
+      }), { status: 200 });
     }
     if (path === "/api/v1/scan/scan-1") {
       return new Response(JSON.stringify(SCAN), { status: 200 });
@@ -133,7 +136,7 @@ describe("ScanDetailView finding copy action", () => {
       screen.getByPlaceholderText("Search findings, hosts, templates…"),
       { target: { value: "tail-only-template" } },
     );
-    expect(await screen.findByText("Tail-only finding")).toBeInTheDocument();
+    expect(await screen.findAllByText("Tail-only finding")).not.toHaveLength(0);
     fireEvent.click(
       await screen.findByRole("button", {
         name: "Copy visible findings for an LLM",

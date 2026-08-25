@@ -69,7 +69,8 @@ func convertAll(name string) []api.Finding {
 
 	var found []api.Finding
 	for _, event := range events {
-		_, finding := convert(event)
+		_, finding, err := convert(event)
+		Expect(err).ToNot(HaveOccurred())
 		found = append(found, finding)
 	}
 	return found
@@ -88,32 +89,57 @@ var _ = Describe("converting a captured scan", func() {
 
 	It("maps a finding's fields onto the wire type", func() {
 		first := findings[0]
-		Expect(first.TemplateID).To(Equal("flanksource-security-headers-baseline"))
-		Expect(first.Name).To(Equal("Flanksource - HTTP Security Header Baseline"))
-		Expect(first.Severity).To(Equal(api.SeverityMedium))
+		Expect(first.CheckID).To(Equal("flanksource-security-headers-baseline"))
+		Expect(first.FindingInfo.Title).To(Equal("Flanksource - HTTP Security Header Baseline"))
+		Expect(first.SeverityLevel()).To(Equal(api.SeverityMedium))
 		Expect(first.Host).To(Equal("host-2.example.test"))
 		Expect(first.MatchedAt).To(Equal("https://host-2.example.test"))
+		Expect(first.Resources).To(Equal([]api.ResourceRef{
+			endpointResource("https://host-2.example.test").Ref(),
+		}))
 		Expect(first.Tags).To(ContainElement("headers"))
-		Expect(first.Timestamp).ToNot(BeEmpty())
+		Expect(first.Time).ToNot(BeZero())
 	})
 
-	It("carries the whole record through so the UI can render unmodelled keys", func() {
-		// ScansView renders keys the Finding type does not name, so dropping
-		// anything the engine reported would silently blank parts of that view.
-		Expect(findings[0].Raw).To(HaveKey("curl-command"))
-		Expect(findings[0].Raw).To(HaveKey("matcher-status"))
+	// The HTTP exchange, in the place OCSF defines for it rather than in four
+	// columns of recon's own that no other engine ever filled.
+	It("carries the exchange as evidence", func() {
+		Expect(findings[0].Evidences).To(HaveLen(1))
+		evidence := findings[0].Evidences[0]
+
+		Expect(evidence.HTTPRequest.Args).To(HavePrefix("GET "))
+		Expect(evidence.HTTPResponse.Message).To(HavePrefix("HTTP/"))
+		Expect(evidence.URL.URLString).To(Equal("https://host-2.example.test"))
+
+		var data map[string]any
+		Expect(json.Unmarshal(evidence.Data, &data)).To(Succeed())
+		Expect(data).To(HaveKeyWithValue("curl", ContainSubstring("curl")))
 	})
 
-	It("drops the base64 template copy attached to every finding", func() {
+	// What nuclei reported that the schema has no name for, in OCSF's own escape
+	// hatch. `protocol` is the one that mattered: event.Type is "http" or "dns",
+	// and it used to be written to the same column prowler wrote its engine name
+	// to — so `findings.type` meant "engine" for one and "protocol" for another.
+	It("puts the engine's own extras where the schema says to", func() {
+		Expect(findings[0].Unmapped).To(HaveKeyWithValue("protocol", "http"))
+		Expect(findings[0].Engine).To(Equal(EngineName))
+	})
+
+	// The base64 copy of the template is attached to every event and is the
+	// single largest thing nuclei reports. Nothing renders it.
+	It("does not carry the base64 template copy attached to every finding", func() {
 		for _, finding := range findings {
-			Expect(finding.Raw).ToNot(HaveKey("template-encoded"))
+			Expect(finding.Unmapped).ToNot(HaveKey("template-encoded"))
+			encoded, err := json.Marshal(finding)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(string(encoded)).ToNot(ContainSubstring("template-encoded"))
 		}
 	})
 
 	It("recognises every severity the capture contains", func() {
 		bySeverity := map[api.Severity]int{}
 		for _, finding := range findings {
-			bySeverity[finding.Severity]++
+			bySeverity[finding.SeverityLevel()]++
 		}
 		Expect(bySeverity).To(Equal(map[api.Severity]int{
 			api.SeverityCritical: 1,
@@ -139,14 +165,15 @@ var _ = Describe("converting the edge cases", func() {
 
 		findings = nil
 		for _, event := range events {
-			_, finding := convert(event)
+			_, finding, err := convert(event)
+			Expect(err).ToNot(HaveOccurred())
 			findings = append(findings, finding)
 		}
 	})
 
 	byID := func(id string) api.Finding {
 		for _, finding := range findings {
-			if finding.TemplateID == id {
+			if finding.CheckID == id {
 				return finding
 			}
 		}
@@ -158,9 +185,10 @@ var _ = Describe("converting the edge cases", func() {
 		// This is the reachable case: nuclei hands us a severity enum, and its
 		// zero value means the template declared none. A finding nobody can
 		// classify is still a finding.
-		_, finding := convert(&output.ResultEvent{TemplateID: "no-severity", Host: "h.example.test"})
+		_, finding, err := convert(&output.ResultEvent{TemplateID: "no-severity", Host: "h.example.test"})
 
-		Expect(finding.Severity).To(Equal(api.SeverityUnknown))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(finding.SeverityLevel()).To(Equal(api.SeverityUnknown))
 	})
 
 	It("falls back to matched-at when the finding has no host", func() {
@@ -176,7 +204,7 @@ var _ = Describe("converting the edge cases", func() {
 	})
 
 	It("names a finding by its template when info carries no name", func() {
-		Expect(byID("edge-no-name").Name).To(Equal("edge-no-name"))
+		Expect(byID("edge-no-name").FindingInfo.Title).To(Equal("edge-no-name"))
 	})
 })
 

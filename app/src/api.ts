@@ -9,101 +9,40 @@ import type {
   CuratedTarget,
   Discover,
   Engine,
-  Finding,
   Profile,
   ProbeRun,
-  Scan,
-  ScanFiles,
-  ScanStatus,
-  Severity,
   Target,
   TargetDocument,
   TargetSelector,
   TargetUpdate,
   Template,
   TemplatePreview,
-  Upload,
   FilterVocabulary,
   Zone,
 } from "./types";
-import { overrideFields, scanFileUrl } from "./api-helpers";
+import { overrideFields } from "./api-helpers";
 import type { EngineConfig, NewTarget, RunTarget } from "./api-run-types";
-import type { ScanReportData } from "../reports/scan-report-types";
-import { reportDataUrl } from "./scan-report";
 import { curatedTarget, targetKind } from "./types";
+import { json, query, request } from "./api-client";
+
+export { json, query, request } from "./api-client";
 
 export { scanFileUrl } from "./api-helpers";
+export {
+  cancelScan,
+  fetchFindingPage,
+  fetchFindings,
+  fetchReportData,
+  fetchScan,
+  fetchScanFiles,
+  fetchScanParameters,
+  fetchScans,
+  fetchScanStatus,
+  SCAN_EVENTS_URL,
+  startScan,
+} from "./api-scans";
 
 const API = "/api/v1";
-
-// The executor reports a command failure as 200 with success:false, so the
-// status code alone does not tell us whether the call worked.
-type ExecutorFailure = { success?: boolean; error?: string; message?: string };
-
-// request, query and json are exported so a listing that lives in its own
-// module — this file is already at the size the repo splits at — reaches the
-// API the same way rather than growing a second fetch layer beside it.
-export async function request<T>(
-  path: string,
-  init?: RequestInit,
-  ...rest: never[]
-): Promise<T> {
-  void rest;
-  const method = init?.method ?? "GET";
-  const res = await fetch(path, init);
-
-  let body: unknown = null;
-  const text = await res.text();
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      throw new Error(
-        `${method} ${path} returned invalid JSON: ${text.slice(0, 200)}`,
-      );
-    }
-  }
-
-  const failure = body as ExecutorFailure | null;
-  if (!res.ok) {
-    throw new Error(
-      failure?.error ??
-        failure?.message ??
-        `${method} ${path} failed: ${res.status}`,
-    );
-  }
-  if (failure && typeof failure === "object" && failure.success === false) {
-    throw new Error(
-      failure.error ?? failure.message ?? `${method} ${path} failed`,
-    );
-  }
-  return body as T;
-}
-
-export function query(params: Record<string, unknown> | undefined): string {
-  if (!params) return "";
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (
-      value === undefined ||
-      value === null ||
-      value === "" ||
-      value === false
-    )
-      continue;
-    search.set(key, Array.isArray(value) ? value.join(",") : String(value));
-  }
-  const encoded = search.toString();
-  return encoded ? `?${encoded}` : "";
-}
-
-export function json(method: string, body: unknown): RequestInit {
-  return {
-    method,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  };
-}
 
 // ---------------------------------------------------------------- filters
 
@@ -334,137 +273,6 @@ export function previewTemplates(args: {
     "/api/template/preview",
     json("POST", { engine: args.engine ?? "nuclei", config: args.config }),
   );
-}
-
-// ---------------------------------------------------------------- scans
-
-export function fetchScans(params?: {
-  engine?: string;
-  profile?: string;
-  phase?: string;
-  since?: string;
-  severity?: string;
-  limit?: number;
-}): Promise<Scan[]> {
-  return request<Scan[]>(`${API}/scan${query(params)}`);
-}
-
-export function fetchScan(id: string): Promise<Scan> {
-  return request<Scan>(`${API}/scan/${encodeURIComponent(id)}`);
-}
-
-// Pushes a run's findings to Mission Control as insights.
-//
-// The credential is the one `faro auth login` stored on the machine serving
-// this app, not anything the browser holds — so a server without a faro context
-// fails the call with a message saying which command fixes it.
-export function uploadScan(
-  id: string,
-  options?: { dryRun?: boolean; severity?: Severity; context?: string },
-): Promise<Upload> {
-  return request<Upload>(
-    `${API}/scan/${encodeURIComponent(id)}/upload`,
-    json("POST", {
-      "dry-run": options?.dryRun ?? false,
-      ...(options?.severity ? { severity: options.severity } : {}),
-      ...(options?.context ? { context: options.context } : {}),
-    }),
-  );
-}
-
-// A run's retained artifacts: the engine's own findings file, the target list,
-// the effective configuration and the log. Served from the directory the run
-// recorded rather than rebuilt from the database, so what a download returns is
-// byte-for-byte what the engine wrote.
-export function fetchScanFiles(id: string): Promise<ScanFiles> {
-  return request<ScanFiles>(`/api/scan/${encodeURIComponent(id)}/files`);
-}
-
-export async function fetchScanParameters(
-  id: string,
-): Promise<Record<string, unknown>> {
-  const parameters = await request<unknown>(scanFileUrl(id, "config.json"));
-  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
-    throw new Error(`scan ${id} config.json must contain a JSON object`);
-  }
-  return parameters as Record<string, unknown>;
-}
-
-// The payload the printed report is rendered from — the run, its findings, and
-// when the export was taken. Fetched rather than assembled here so the preview
-// and the PDF describe the run identically: the same JSON reaches the same
-// template, whether facet renders it or the playground does.
-export function fetchReportData(id: string): Promise<ScanReportData> {
-  return request<ScanReportData>(reportDataUrl(id));
-}
-
-// Findings are queried rather than read out of a result file, so the same call
-// drills into one scan or compares a template across every run.
-export function fetchFindings(params: {
-  scan?: string;
-  severity?: string;
-  host?: string;
-  template?: string;
-  tag?: string;
-  limit?: number;
-}): Promise<Finding[]> {
-  return request<Finding[]>(`${API}/finding${query(params)}`);
-}
-
-// The current (or last) scan. The event stream replays this to every new
-// subscriber; this route exists for the first paint and for tests without an
-// EventSource.
-export function fetchScanStatus(): Promise<ScanStatus> {
-  return request<ScanStatus>("/api/scan/current");
-}
-
-export const SCAN_EVENTS_URL = "/api/scan/events";
-
-// Starts a scan over everything the selector matches and returns the created
-// scan — not a live status, which arrives on the event stream. `confirm`
-// authorises an intrusive scan of prod, public or unclassified hosts; the
-// server refuses without it and names the hosts. `wait` is false so the call
-// returns as soon as the run starts.
-export function startScan(args: {
-  target: RunTarget;
-  engine: string;
-  profile: string;
-  discoveryProfiles?: string[];
-  /** Which engines sweep before the scan. Empty runs the ones the sweep needs. */
-  discoveryEngines?: string[];
-  /** Run-only scan configuration, layered over the profile without saving it. */
-  override?: EngineConfig;
-  /** Run-only discovery configuration, keyed by engine. */
-  discoveryOverride?: Record<string, EngineConfig>;
-  confirm?: boolean;
-  /**
-   * Runs with every mute rule ignored. A muted finding is never recorded, so
-   * this is how someone sees what the rules are currently hiding without
-   * deleting them first.
-   */
-  noMutes?: boolean;
-}): Promise<Scan> {
-  return request<Scan>(
-    `${API}/scan`,
-    json("POST", {
-      ...args.target,
-      engine: args.engine,
-      profile: args.profile,
-      "discovery-profile": args.discoveryProfiles ?? ["default"],
-      ...(args.discoveryEngines?.length
-        ? { "discovery-engine": args.discoveryEngines }
-        : {}),
-      ...overrideFields("override", args.override),
-      ...overrideFields("discovery-override", args.discoveryOverride),
-      confirm: args.confirm ?? false,
-      "no-mutes": args.noMutes ?? false,
-      wait: false,
-    }),
-  );
-}
-
-export function cancelScan(): Promise<ScanStatus> {
-  return request<ScanStatus>("/api/scan/cancel", { method: "POST" });
 }
 
 // ---------------------------------------------------------------- discovery

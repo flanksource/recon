@@ -18,10 +18,11 @@ type MuteRule struct {
 
 	Targets JSON[map[string]any] `gorm:"column:targets;type:jsonb"`
 
-	Resources pq.StringArray `gorm:"column:resources;type:text[]"`
-	Templates pq.StringArray `gorm:"column:templates;type:text[]"`
-	Tags      pq.StringArray `gorm:"column:tags;type:text[]"`
-	Severity  pq.StringArray `gorm:"column:severity;type:text[]"`
+	Resources    pq.StringArray `gorm:"column:resources;type:text[]"`
+	ResourceKeys pq.StringArray `gorm:"column:resource_keys;type:text[]"`
+	Templates    pq.StringArray `gorm:"column:templates;type:text[]"`
+	Tags         pq.StringArray `gorm:"column:tags;type:text[]"`
+	Severity     pq.StringArray `gorm:"column:severity;type:text[]"`
 
 	Expr *string `gorm:"column:expr"`
 
@@ -35,18 +36,19 @@ func (MuteRule) TableName() string { return "mute_rules" }
 // Document projects the row onto the wire type.
 func (m MuteRule) Document() api.MuteRule {
 	rule := api.MuteRule{
-		Name:      m.Name,
-		Comment:   deref(m.Comment),
-		Disabled:  m.Disabled,
-		Engines:   api.StringList(stringSlice(m.Engines)),
-		Targets:   m.Targets.Get(),
-		Resources: api.StringList(stringSlice(m.Resources)),
-		Templates: api.StringList(stringSlice(m.Templates)),
-		Tags:      api.StringList(stringSlice(m.Tags)),
-		Severity:  api.StringList(stringSlice(m.Severity)),
-		Expr:      deref(m.Expr),
-		CreatedAt: m.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: m.UpdatedAt.Format(time.RFC3339),
+		Name:         m.Name,
+		Comment:      deref(m.Comment),
+		Disabled:     m.Disabled,
+		Engines:      api.StringList(stringSlice(m.Engines)),
+		Targets:      m.Targets.Get(),
+		Resources:    api.StringList(stringSlice(m.Resources)),
+		ResourceKeys: api.StringList(stringSlice(m.ResourceKeys)),
+		Templates:    api.StringList(stringSlice(m.Templates)),
+		Tags:         api.StringList(stringSlice(m.Tags)),
+		Severity:     api.StringList(stringSlice(m.Severity)),
+		Expr:         deref(m.Expr),
+		CreatedAt:    m.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    m.UpdatedAt.Format(time.RFC3339),
 	}
 	if rule.Targets == nil {
 		rule.Targets = map[string]any{}
@@ -68,15 +70,16 @@ func MuteRuleFrom(rule api.MuteRule) MuteRule {
 		targets = map[string]any{}
 	}
 	return MuteRule{
-		Name:      rule.Name,
-		Comment:   nonEmpty(rule.Comment),
-		Disabled:  rule.Disabled,
-		Engines:   pq.StringArray(orEmpty(rule.Engines)),
-		Targets:   wrapMap(targets),
-		Resources: pq.StringArray(orEmpty(rule.Resources)),
-		Templates: pq.StringArray(orEmpty(rule.Templates)),
-		Tags:      pq.StringArray(orEmpty(rule.Tags)),
-		Severity:  pq.StringArray(orEmpty(rule.Severity)),
-		Expr:      nonEmpty(rule.Expr),
+		Name:         rule.Name,
+		Comment:      nonEmpty(rule.Comment),
+		Disabled:     rule.Disabled,
+		Engines:      pq.StringArray(orEmpty(rule.Engines)),
+		Targets:      wrapMap(targets),
+		Resources:    pq.StringArray(orEmpty(rule.Resources)),
+		ResourceKeys: pq.StringArray(orEmpty(rule.ResourceKeys)),
+		Templates:    pq.StringArray(orEmpty(rule.Templates)),
+		Tags:         pq.StringArray(orEmpty(rule.Tags)),
+		Severity:     pq.StringArray(orEmpty(rule.Severity)),
+		Expr:         nonEmpty(rule.Expr),
 	}
 }

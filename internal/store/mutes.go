@@ -3,8 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
-
-	"gorm.io/gorm/clause"
+	"time"
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines/scan"
@@ -69,49 +68,74 @@ func (s *Store) GetMute(ctx context.Context, name string) (api.MuteRule, error) 
 	return row.Document(), nil
 }
 
-// SaveMute validates a rule and stores it.
-//
-// Validation happens here rather than at the edge so every path into the
-// database is held to the same contract — the rule SaveProfile states. A rule
-// that selects nothing, names an engine that does not exist, or carries an
-// expression that cannot compile must never be stored: each of those would
-// otherwise be discovered halfway through a scan, where the only options left
-// are to fail a run that worked or to silently do nothing.
-func (s *Store) SaveMute(ctx context.Context, rule api.MuteRule) (api.MuteRule, error) {
+func validateMuteRule(rule api.MuteRule) error {
 	if err := rule.Validate(); err != nil {
-		return api.MuteRule{}, err
+		return err
 	}
 	for _, engine := range rule.Engines {
 		if _, err := scan.Get(engine); err != nil {
-			return api.MuteRule{}, fmt.Errorf("mute rule %s: %w", rule.Name, err)
+			return fmt.Errorf("mute rule %s: %w", rule.Name, err)
 		}
 	}
 	if _, err := TargetOptsFrom(rule.Targets); err != nil {
-		return api.MuteRule{}, fmt.Errorf("mute rule %s targets: %w", rule.Name, err)
+		return fmt.Errorf("mute rule %s targets: %w", rule.Name, err)
 	}
 	if err := mute.Compile(rule.Expr); err != nil {
-		return api.MuteRule{}, fmt.Errorf("mute rule %s: %w", rule.Name, err)
+		return fmt.Errorf("mute rule %s: %w", rule.Name, err)
 	}
+	return nil
+}
 
+// CreateMute validates and inserts a new rule. Duplicate names fail rather
+// than silently replacing a rule with a different scope.
+func (s *Store) CreateMute(ctx context.Context, rule api.MuteRule) (api.MuteRule, error) {
+	if err := validateMuteRule(rule); err != nil {
+		return api.MuteRule{}, err
+	}
 	row := models.MuteRuleFrom(rule)
-	err := s.DB(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"comment", "disabled", "engines", "targets",
-			"resources", "templates", "tags", "severity", "expr", "updated_at",
-		}),
-	}).Create(&row).Error
-	if err != nil {
-		return api.MuteRule{}, fmt.Errorf("save mute rule %s: %w", rule.Name, err)
+	if err := s.DB(ctx).Create(&row).Error; err != nil {
+		return api.MuteRule{}, fmt.Errorf("create mute rule %s: %w", rule.Name, err)
+	}
+	if err := s.applyMuteChange(ctx, rule.Name, &rule); err != nil {
+		return api.MuteRule{}, err
 	}
 	return s.GetMute(ctx, rule.Name)
 }
 
-// DeleteMute removes a rule.
+// UpdateMute validates and replaces every editable field on an existing rule.
+func (s *Store) UpdateMute(ctx context.Context, rule api.MuteRule) (api.MuteRule, error) {
+	if err := validateMuteRule(rule); err != nil {
+		return api.MuteRule{}, err
+	}
+	row := models.MuteRuleFrom(rule)
+	result := s.DB(ctx).Model(&models.MuteRule{}).Where("name = ?", rule.Name).Updates(map[string]any{
+		"comment": row.Comment, "disabled": row.Disabled, "engines": row.Engines,
+		"targets": row.Targets, "resources": row.Resources, "resource_keys": row.ResourceKeys,
+		"templates": row.Templates, "tags": row.Tags, "severity": row.Severity,
+		"expr": row.Expr, "updated_at": time.Now(),
+	})
+	if result.Error != nil {
+		return api.MuteRule{}, fmt.Errorf("update mute rule %s: %w", rule.Name, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return api.MuteRule{}, NotFound("mute", rule.Name)
+	}
+	// Both halves: an edit that narrows a rule has to release what it no longer
+	// covers, not merely take what it now does.
+	if err := s.applyMuteChange(ctx, rule.Name, &rule); err != nil {
+		return api.MuteRule{}, err
+	}
+	return s.GetMute(ctx, rule.Name)
+}
+
+// DeleteMute removes a rule and reopens what it was suppressing.
 //
-// Findings an earlier run dropped are not restored: they were not recorded, and
-// what a run removed is in that run's own mutes.json. Deleting a rule stops it
-// applying to future runs, which is all it can mean.
+// Findings an earlier run dropped are still not restored: those rows were never
+// written, and what a run removed is in that run's own mutes.json. What is
+// restored is the ledger — every state carrying this rule's name goes back to
+// open, because "somebody accepted this" stops being true the moment the rule
+// saying so is gone. Leaving them muted made a deleted rule keep suppressing
+// findings indefinitely, with nothing left in the database to explain why.
 func (s *Store) DeleteMute(ctx context.Context, name string) error {
 	result := s.DB(ctx).Where("name = ?", name).Delete(&models.MuteRule{})
 	if result.Error != nil {
@@ -120,7 +144,7 @@ func (s *Store) DeleteMute(ctx context.Context, name string) error {
 	if result.RowsAffected == 0 {
 		return NotFound("mute", name)
 	}
-	return nil
+	return s.applyMuteChange(ctx, name, nil)
 }
 
 // MuteRules returns the rules in force for one engine, with every target

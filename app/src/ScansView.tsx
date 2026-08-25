@@ -21,7 +21,6 @@ import {
 } from "./scanColumns";
 import { FindingDetail } from "./FindingDetail";
 import { FindingCopyButton } from "./FindingCopyButton";
-import { UploadInsightsButton } from "./UploadInsightsButton";
 import { ScanExportMenu } from "./ScanExportMenu";
 import { SEVERITIES, type Finding, type Scan, type Severity } from "./types";
 import { ScanExecutionDetails } from "./ScanExecutionDetails";
@@ -372,7 +371,6 @@ export function ScanDetailView({
             />
           )}
           <ScanExportMenu scan={scan} onOpenPlayground={onOpenPlayground} />
-          <UploadInsightsButton scan={scan} />
           <Button variant="outline" size="sm" onClick={onBack}>
             Back to scans
           </Button>

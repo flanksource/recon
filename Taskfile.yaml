@@ -37,6 +37,23 @@ tasks:
     cmds:
       - go install ./cmd/reconctl
 
+  gen:ocsf:
+    desc: Regenerate internal/ocsf from the vendored OCSF schema.
+    cmds:
+      - go run ./hack/gen-ocsf
+
+  gen:ocsf:check:
+    desc: Fail when internal/ocsf has drifted from the vendored OCSF schema.
+    cmds:
+      - go run ./hack/gen-ocsf -check
+
+  gen:ocsf:refresh:
+    desc: Re-vendor the OCSF schema export at OCSF_VERSION (default 1.5.0) and regenerate.
+    cmds:
+      - go run ./hack/gen-ocsf -refresh {{.OCSF_VERSION | default "1.5.0"}}
+    vars:
+      OCSF_VERSION: '{{.OCSF_VERSION}}'
+
   tools:check:
     desc: Verify required tools are installed; fail loudly with install commands.
     silent: true

@@ -12,6 +12,7 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/models"
+	"github.com/flanksource/recon/internal/ocsf"
 	"github.com/flanksource/recon/internal/schema"
 	"github.com/flanksource/recon/internal/store"
 )
@@ -72,8 +73,16 @@ var _ = Describe("what a run makes true", Ordered, Label("db"), func() {
 
 	failure := func(line int, uid, checkID string) api.Finding {
 		return api.Finding{
-			LineNo: line, TemplateID: checkID, Name: checkID,
-			Severity: api.SeverityHigh, Host: account, MatchedAt: uid,
+			DetectionFinding: ocsf.DetectionFinding{
+				ClassUID:    ocsf.ClassUID,
+				CategoryUID: ocsf.CategoryUID,
+				ActivityID:  ocsf.ActivityIDCreate,
+				TypeUID:     ocsf.TypeUID(ocsf.ActivityIDCreate),
+				SeverityID:  ocsf.SeverityIDHigh,
+				FindingInfo: &ocsf.FindingInfo{UID: checkID, Title: checkID},
+			},
+			LineNo: line, CheckID: checkID, Engine: "prowler",
+			Host: account, MatchedAt: uid,
 			Resources: []api.ResourceRef{{Provider: provider, Scope: account, UID: uid, Name: uid, Type: bucket}},
 		}
 	}
@@ -775,9 +784,13 @@ var _ = Describe("what a run makes true", Ordered, Label("db"), func() {
 
 		described := func(line int, uid, checkID string) api.Finding {
 			finding := failure(line, uid, checkID)
-			finding.Name = "Buckets must not be public"
-			finding.Remediation = "Remove allUsers from the bucket IAM policy"
-			finding.Reference = []string{"https://example.test/cis-5-1"}
+			finding.FindingInfo = &ocsf.FindingInfo{
+				UID: checkID, Title: "Buckets must not be public",
+			}
+			finding.Remediation = &ocsf.Remediation{
+				Desc:       "Remove allUsers from the bucket IAM policy",
+				References: []string{"https://example.test/cis-5-1"},
+			}
 			return finding
 		}
 
@@ -792,7 +805,7 @@ var _ = Describe("what a run makes true", Ordered, Label("db"), func() {
 			Expect(evidence.Synthetic).To(BeFalse(), "an open state has evidence and must show it")
 			Expect(evidence.ID).To(Equal(*state("logs", check).FindingID),
 				"the finding the ledger names, not whichever one is newest")
-			Expect(evidence.Remediation).To(Equal("Remove allUsers from the bucket IAM policy"))
+			Expect(evidence.Remediation.Desc).To(Equal("Remove allUsers from the bucket IAM policy"))
 		})
 
 		It("still describes a check after the run that reported it is gone", func() {
@@ -842,16 +855,16 @@ var _ = Describe("what a run makes true", Ordered, Label("db"), func() {
 			// there being nothing else to show: hydration used to search for the
 			// newest finding matching the pair and would find this one.
 			var stale int64
-			Expect(db.Gorm().Raw(`SELECT count(*) FROM findings WHERE template_id = ?`, check).
+			Expect(db.Gorm().Raw(`SELECT count(*) FROM findings WHERE check_id = ?`, check).
 				Scan(&stale).Error).To(Succeed())
 			Expect(stale).To(Equal(int64(1)))
 
 			shown := hydrated("logs", check)
 			Expect(shown.Synthetic).To(BeTrue())
-			Expect(shown.Name).To(Equal("Buckets must not be public"),
+			Expect(shown.FindingInfo.Title).To(Equal("Buckets must not be public"),
 				"the catalogue still knows what the check is")
-			Expect(shown.Remediation).To(Equal("Remove allUsers from the bucket IAM policy"))
-			Expect(shown.Remediation).ToNot(Equal(api.ReasonPassed))
+			Expect(shown.Remediation.Desc).To(Equal("Remove allUsers from the bucket IAM policy"))
+			Expect(shown.Remediation.Desc).ToNot(Equal(api.ReasonPassed))
 		})
 	})
 

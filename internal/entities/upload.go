@@ -9,105 +9,119 @@ import (
 	"github.com/flanksource/recon/internal/store"
 )
 
-// uploadFlags are the choices a push into Mission Control takes.
-//
-// There is no server or token flag on purpose: the credential is faro's, so
-// `faro auth login` is the setup and `--context` is the only thing left to
-// choose between servers.
-type uploadFlags struct {
-	Context string `flag:"context" help:"Mission Control context to push to; defaults to the current faro context"`
-	Agent   string `flag:"agent" help:"Agent name the insights are attributed to" default:"recon"`
-	// Named severity rather than min-severity: every other filter in this CLI is
-	// named for what it selects.
-	Severity   string `flag:"severity" help:"Only upload findings at or above this severity"`
-	Unresolved string `flag:"unresolved" help:"What to do with findings no config item claims: report or error" default:"report"`
-	DryRun     bool   `flag:"dry-run" help:"Resolve and report what would be uploaded without writing anything"`
+type syncFlags struct {
+	Context    string `flag:"context" help:"Mission Control context; defaults to the current faro context"`
+	Agent      string `flag:"agent" help:"Agent name the insights are attributed to" default:"recon"`
+	Unresolved string `flag:"unresolved" help:"What to do with unresolved resources: report or error" default:"report"`
+	DryRun     bool   `flag:"dry-run" help:"Resolve and preview without writing"`
 }
 
-func (uploadFlags) ClickyActionFlags() {}
+type resourceSyncFlags struct {
+	store.ResourceOpts
+	syncFlags
+}
 
-// uploadScan pushes one run's findings to Mission Control as insights.
-func (r *Registry) uploadScan(ctx context.Context, id string, opts uploadFlags) (api.Upload, error) {
+type findingSyncFlags struct {
+	store.FindingStateOpts
+	syncFlags
+}
+
+func (resourceSyncFlags) ClickyActionFlags() {}
+func (findingSyncFlags) ClickyActionFlags()  {}
+
+func (r *Registry) syncResources(ctx context.Context, _ string, opts resourceSyncFlags) (api.InsightSync, error) {
 	st, err := r.store()
 	if err != nil {
-		return api.Upload{}, err
+		return api.InsightSync{}, err
 	}
+	selector := opts.ResourceOpts
+	selector.Limit, selector.Offset = 0, 0
+	resources, err := st.ListResources(ctx, selector)
+	if err != nil {
+		return api.InsightSync{}, err
+	}
+	if len(resources) == 0 {
+		return r.pushStates(ctx, st, nil, 0, opts.syncFlags)
+	}
+	stateOpts := store.FindingStateOpts{Resource: make([]string, 0, len(resources))}
+	for _, resource := range resources {
+		stateOpts.Resource = append(stateOpts.Resource, resource.ID)
+	}
+	return r.syncStates(ctx, st, stateOpts, len(resources), opts.syncFlags)
+}
 
-	unresolved, err := missioncontrol.ParseUnresolvedPolicy(opts.Unresolved)
+func (r *Registry) syncFindings(ctx context.Context, _ string, opts findingSyncFlags) (api.InsightSync, error) {
+	st, err := r.store()
 	if err != nil {
-		return api.Upload{}, err
+		return api.InsightSync{}, err
 	}
-	severity, err := parseMinSeverity(opts.Severity)
+	selector := opts.FindingStateOpts
+	selector.Limit, selector.Offset = 0, 0
+	if len(selector.Status) == 0 {
+		selector.Status = []string{api.StatusOpen}
+	}
+	states, err := st.ListInsightStates(ctx, selector)
 	if err != nil {
-		return api.Upload{}, err
+		return api.InsightSync{}, err
 	}
+	resources := map[string]struct{}{}
+	for _, state := range states {
+		resources[state.Resource.ID] = struct{}{}
+	}
+	return r.pushStates(ctx, st, states, len(resources), opts.syncFlags)
+}
 
-	scan, err := st.GetScan(ctx, id)
+func (r *Registry) syncStates(
+	ctx context.Context,
+	st *store.Store,
+	selector store.FindingStateOpts,
+	matchedResources int,
+	flags syncFlags,
+) (api.InsightSync, error) {
+	states, err := st.ListInsightStates(ctx, selector)
 	if err != nil {
-		return api.Upload{}, err
+		return api.InsightSync{}, err
 	}
-	// A run that never finished has not decided what it found, and uploading a
-	// partial view of it would put insights upstream that the completed run
-	// might not have produced.
-	if !scan.Phase.Terminal() {
-		return api.Upload{}, fmt.Errorf("scan %s is %s; only a finished run can be uploaded", scan.ID, scan.Phase)
-	}
+	return r.pushStates(ctx, st, states, matchedResources, flags)
+}
 
-	findings, err := scanFindings(ctx, st, scan)
+func (r *Registry) pushStates(
+	ctx context.Context,
+	st *store.Store,
+	states []api.InsightState,
+	matchedResources int,
+	flags syncFlags,
+) (api.InsightSync, error) {
+	unresolved, err := missioncontrol.ParseUnresolvedPolicy(flags.Unresolved)
 	if err != nil {
-		return api.Upload{}, err
+		return api.InsightSync{}, err
 	}
-	targets, err := findingTargets(ctx, st, findings)
+	targets, err := stateTargets(ctx, st, states)
 	if err != nil {
-		return api.Upload{}, err
+		return api.InsightSync{}, err
 	}
-
-	uploader, err := missioncontrol.NewUploader(opts.Context)
+	uploader, err := missioncontrol.NewUploader(flags.Context)
 	if err != nil {
-		return api.Upload{}, err
+		return api.InsightSync{}, err
 	}
-	return uploader.Upload(ctx, scan, findings, targets, missioncontrol.UploadOptions{
-		Context:     opts.Context,
-		Agent:       opts.Agent,
-		MinSeverity: severity,
-		DryRun:      opts.DryRun,
-		Unresolved:  unresolved,
+	result, err := uploader.Sync(ctx, states, targets, matchedResources, missioncontrol.SyncOptions{
+		Agent: flags.Agent, DryRun: flags.DryRun, Unresolved: unresolved,
 	})
-}
-
-// scanFindings reads every finding of a run.
-//
-// FindingOpts.Limit defaults to 500 for the list endpoint, which is a sensible
-// page for a browser and completely wrong here: an upload that silently stopped
-// at 500 would report a clean result while leaving the rest of the run behind.
-// The run already recorded how many it has.
-func scanFindings(ctx context.Context, st *store.Store, scan api.Scan) ([]api.Finding, error) {
-	limit := scan.Findings
-	if limit <= 0 {
-		return nil, nil
-	}
-	findings, err := st.ListFindings(ctx, store.FindingOpts{Scan: []string{scan.ID}, Limit: limit})
 	if err != nil {
-		return nil, err
+		return result, fmt.Errorf("sync current insights: %w", err)
 	}
-	if len(findings) < scan.Findings {
-		return nil, fmt.Errorf("scan %s records %d findings but only %d were read; refusing to upload a partial run",
-			scan.ID, scan.Findings, len(findings))
-	}
-	return findings, nil
+	return result, nil
 }
 
-// findingTargets loads the inventory targets the findings point at, which is
-// where the cluster and account a finding rolls up to comes from. A finding
-// whose target has since been deleted simply has no scope to roll up to.
-func findingTargets(ctx context.Context, st *store.Store, findings []api.Finding) (map[string]api.TargetDocument, error) {
-	wanted := map[string]bool{}
-	for _, finding := range findings {
-		if finding.TargetID != "" {
-			wanted[finding.TargetID] = true
+func stateTargets(ctx context.Context, st *store.Store, states []api.InsightState) (map[string]api.TargetDocument, error) {
+	wanted := map[string]struct{}{}
+	for _, state := range states {
+		for _, id := range []string{state.State.TargetID, state.Resource.TargetID} {
+			if id != "" {
+				wanted[id] = struct{}{}
+			}
 		}
 	}
-
 	targets := make(map[string]api.TargetDocument, len(wanted))
 	for id := range wanted {
 		target, err := st.GetTarget(ctx, id)
@@ -117,18 +131,4 @@ func findingTargets(ctx context.Context, st *store.Store, findings []api.Finding
 		targets[id] = target
 	}
 	return targets, nil
-}
-
-// parseMinSeverity refuses a severity it does not know rather than letting
-// api.ParseSeverity fold it into `unknown`, which as a floor would silently
-// keep everything.
-func parseMinSeverity(value string) (api.Severity, error) {
-	if value == "" {
-		return "", nil
-	}
-	severity := api.ParseSeverity(value)
-	if severity == api.SeverityUnknown && value != string(api.SeverityUnknown) {
-		return "", fmt.Errorf("unknown severity %q: expected one of %v", value, api.Severities())
-	}
-	return severity, nil
 }

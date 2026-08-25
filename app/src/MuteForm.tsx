@@ -29,6 +29,10 @@ const DIMENSION_HELP: Record<(typeof MUTE_DIMENSIONS)[number], { label: string; 
     label: "Resources",
     hint: "The thing a finding is about: a bucket uid, a URL, a hostname. Globs allowed.",
   },
+  resourceKeys: {
+    label: "Exact resources",
+    hint: "Canonical provider/scope/uid identities. Each value matches one exact resource.",
+  },
   tags: {
     label: "Tags",
     hint: "Tags the finding carries. Prefix with ! to exclude — redirect, !dos.",

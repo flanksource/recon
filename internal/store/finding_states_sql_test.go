@@ -113,8 +113,8 @@ var _ = Describe("the statements that reconcile a run into the ledger", func() {
 	It("deduplicates findings before opening states, so one run cannot conflict with itself", func() {
 		sql := render(openFromFindingsSQL)
 
-		Expect(sql).To(ContainSubstring("SELECT DISTINCT ON (resource_id, template_id)"))
-		Expect(sql).To(ContainSubstring("ORDER BY resource_id, template_id, line_no"),
+		Expect(sql).To(ContainSubstring("SELECT DISTINCT ON (resource_id, check_id)"))
+		Expect(sql).To(ContainSubstring("ORDER BY resource_id, check_id, line_no"),
 			"the lowest line wins, so the surviving evidence is the engine's first report")
 	})
 

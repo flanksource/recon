@@ -22,7 +22,7 @@ func (r *Registry) registerMute() {
 		ToolGroup("configuration").
 		ListWithContext(bind(r, (*store.Store).ListMutes)).
 		GetWithContext(bind(r, (*store.Store).GetMute)).
-		CreateWithContext(bind(r, saveMute)).
+		CreateWithContext(bind(r, createMute)).
 		UpdateWithContext(bind2(r, updateMute)).
 		DeleteWithContext(deleteMute(r)).
 		Filters(r.muteFilters()...).
@@ -31,7 +31,7 @@ func (r *Registry) registerMute() {
 		Register()
 }
 
-func saveMute(st *store.Store, ctx context.Context, body map[string]any) (api.MuteRule, error) {
+func createMute(st *store.Store, ctx context.Context, body map[string]any) (api.MuteRule, error) {
 	var err error
 	body, err = requestBody(ctx, body)
 	if err != nil {
@@ -41,17 +41,13 @@ func saveMute(st *store.Store, ctx context.Context, body map[string]any) (api.Mu
 	if err != nil {
 		return api.MuteRule{}, err
 	}
-	return st.SaveMute(ctx, rule)
+	return st.CreateMute(ctx, rule)
 }
 
 // updateMute edits an existing rule. The name comes from the path, not the
 // body, so an edit cannot silently rename a rule and leave the runs that cited
 // the old name pointing at nothing.
 func updateMute(st *store.Store, ctx context.Context, name string, body map[string]any) (api.MuteRule, error) {
-	if _, err := st.GetMute(ctx, name); err != nil {
-		return api.MuteRule{}, err
-	}
-
 	body, err := requestBody(ctx, body)
 	if err != nil {
 		return api.MuteRule{}, err
@@ -68,7 +64,7 @@ func updateMute(st *store.Store, ctx context.Context, name string, body map[stri
 		return api.MuteRule{}, err
 	}
 	rule.Name = name
-	return st.SaveMute(ctx, rule)
+	return st.UpdateMute(ctx, rule)
 }
 
 // deleteMute has no result to return, so it does not fit bind.

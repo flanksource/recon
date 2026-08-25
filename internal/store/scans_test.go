@@ -55,24 +55,27 @@ var _ = Describe("scan execution evidence", Ordered, Label("db"), func() {
 		finished := started.Add(3250 * time.Millisecond)
 		exitCode := 0
 		stats := api.ScanStats{Requests: 40, Total: 60, Percent: 66.7, Matched: 1, Templates: 12}
-		severities := api.SeverityCounts([]api.Finding{{Severity: api.SeverityHigh}})
+		severities := api.SeverityCounts([]api.Finding{{DetectionFinding: detection("tls-version", "", api.SeverityHigh)}})
 		row.Phase = string(api.PhaseDone)
 		row.FinishedAt = &finished
 		row.DurationMS = 3250
 		row.ExitCode = &exitCode
 		row.Stats = models.Wrap(&stats)
 		row.Severities = models.Wrap(&severities)
+		endpoint := nucleiEndpointResource("api.example.test")
 
 		Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
-			Scan: row,
+			Scan:      row,
+			Resources: []api.Resource{endpoint},
 			Output: models.ScanOutput{
 				Stdout: "scan output\n", Stderr: "one warning\n",
 				StdoutTruncated: true, StderrTruncated: false,
 			},
 			Findings: []api.Finding{{
-				LineNo:     1,
-				TemplateID: "tls-version", Name: "Deprecated TLS version",
-				Severity: api.SeverityHigh, Host: "api.example.test",
+				DetectionFinding: detection("tls-version", "Deprecated TLS version", api.SeverityHigh),
+				LineNo:           1, CheckID: "tls-version", Engine: "nuclei",
+				Host:      "api.example.test",
+				Resources: []api.ResourceRef{endpoint.Ref()},
 			}},
 		})).To(Succeed())
 
@@ -133,15 +136,20 @@ var _ = Describe("scan execution evidence", Ordered, Label("db"), func() {
 		row.FinishedAt = &finished
 		row.DurationMS = 1000
 		row.ExitCode = &exitCode
+		endpoint := nucleiEndpointResource("api.example.test")
 		Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
-			Scan: row,
+			Scan:      row,
+			Resources: []api.Resource{endpoint},
 			Findings: []api.Finding{
-				{LineNo: 1, TemplateID: "tls-version", Host: "api.example.test",
-					Severity: api.SeverityHigh, Tags: []string{"tls", "ssl"}},
-				{LineNo: 2, TemplateID: "missing-headers", Host: "api.example.test",
-					Severity: api.SeverityInfo, Tags: []string{"headers", "misconfig"}},
-				{LineNo: 3, TemplateID: "weak-cipher", Host: "api.example.test",
-					Severity: api.SeverityMedium, Tags: []string{"tls", "misconfig"}},
+				{DetectionFinding: detection("tls-version", "", api.SeverityHigh),
+					LineNo: 1, CheckID: "tls-version", Engine: "nuclei", Host: "api.example.test",
+					Tags: []string{"tls", "ssl"}, Resources: []api.ResourceRef{endpoint.Ref()}},
+				{DetectionFinding: detection("missing-headers", "", api.SeverityInfo),
+					LineNo: 2, CheckID: "missing-headers", Engine: "nuclei", Host: "api.example.test",
+					Tags: []string{"headers", "misconfig"}, Resources: []api.ResourceRef{endpoint.Ref()}},
+				{DetectionFinding: detection("weak-cipher", "", api.SeverityMedium),
+					LineNo: 3, CheckID: "weak-cipher", Engine: "nuclei", Host: "api.example.test",
+					Tags: []string{"tls", "misconfig"}, Resources: []api.ResourceRef{endpoint.Ref()}},
 			},
 		})).To(Succeed())
 
@@ -152,7 +160,7 @@ var _ = Describe("scan execution evidence", Ordered, Label("db"), func() {
 			Expect(err).ToNot(HaveOccurred())
 			var ids []string
 			for _, finding := range found {
-				ids = append(ids, finding.TemplateID)
+				ids = append(ids, finding.CheckID)
 			}
 			return ids
 		}
@@ -163,6 +171,31 @@ var _ = Describe("scan execution evidence", Ordered, Label("db"), func() {
 			To(ConsistOf("missing-headers"))
 		Expect(templates(store.FindingOpts{Tag: []string{"misconfig", "!tls"}})).
 			To(ConsistOf("missing-headers"))
+
+		page, err := st.ListFindingsPaged(ctx, store.FindingOpts{
+			Scan: []string{row.ID}, Limit: 2, Offset: 0,
+			Sort: "severity", Order: "asc",
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(page.Page.Total).To(Equal(int64(3)))
+		Expect(page.Data).To(HaveLen(2))
+		Expect(page.Data[0].ID).To(MatchRegexp(`^[0-9a-f-]{36}$`))
+		Expect([]string{page.Data[0].CheckID, page.Data[1].CheckID}).
+			To(Equal([]string{"tls-version", "weak-cipher"}))
+
+		loaded, err := st.GetFinding(ctx, page.Data[0].ID)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(loaded).To(Equal(page.Data[0]))
+		_, err = st.GetFinding(ctx, row.ID+"#1")
+		Expect(err).To(MatchError(ContainSubstring("finding")))
+
+		page, err = st.ListFindingsPaged(ctx, store.FindingOpts{
+			Scan: []string{row.ID}, Limit: 2, Offset: 2,
+			Sort: "severity", Order: "asc",
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(page.Data).To(HaveLen(1))
+		Expect(page.Data[0].CheckID).To(Equal("missing-headers"))
 	})
 })
 
@@ -212,8 +245,18 @@ var _ = Describe("recording that a run covered a host", Ordered, Label("db"), fu
 		row.Phase = string(api.PhaseDone)
 		row.FinishedAt = &finished
 		row.DurationMS = 1000
+		resources := make(map[api.ResourceKey]api.Resource)
+		for i := range findings {
+			endpoint := nucleiEndpointResource(findings[i].Host)
+			findings[i].Resources = []api.ResourceRef{endpoint.Ref()}
+			resources[endpoint.Key()] = endpoint
+		}
+		emitted := make([]api.Resource, 0, len(resources))
+		for _, resource := range resources {
+			emitted = append(emitted, resource)
+		}
 		Expect(st.FinalizeScan(ctx, store.FinalizeScanOptions{
-			Scan: row, Findings: findings, TargetIDs: hosts, CountFindings: count,
+			Scan: row, Resources: emitted, Findings: findings, TargetIDs: hosts, CountFindings: count,
 		})).To(Succeed())
 		return row.ID
 	}
@@ -233,8 +276,8 @@ var _ = Describe("recording that a run covered a host", Ordered, Label("db"), fu
 		// A host that was named but is not in the inventory: it is skipped, not
 		// invented, which is the rule the probe runner already follows.
 		finalize("nuclei", at, []string{covered, quiet, "ghost.example.test"}, true, []api.Finding{
-			{LineNo: 1, TemplateID: "tls-version", Host: covered, Severity: api.SeverityHigh},
-			{LineNo: 2, TemplateID: "weak-cipher", Host: covered, Severity: api.SeverityMedium},
+			{DetectionFinding: detection("tls-version", "", api.SeverityHigh), LineNo: 1, CheckID: "tls-version", Engine: "nuclei", Host: covered},
+			{DetectionFinding: detection("weak-cipher", "", api.SeverityMedium), LineNo: 2, CheckID: "weak-cipher", Engine: "nuclei", Host: covered},
 		})
 
 		two := 2
@@ -305,3 +348,11 @@ var _ = Describe("recording that a run covered a host", Ordered, Label("db"), fu
 		Expect(found.OutputCaptured).To(BeFalse(), "a sweep runs no process")
 	})
 })
+
+func nucleiEndpointResource(host string) api.Resource {
+	return api.Resource{
+		Provider: "nuclei", Scope: host, UID: host,
+		Kind: api.KindEndpoint, Type: "url", Name: host,
+		TargetID: host,
+	}
+}

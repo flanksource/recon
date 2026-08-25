@@ -2,7 +2,7 @@
 // at the size the repo splits at; it shares the same fetch helpers, so there is
 // one way of reaching the API rather than two.
 
-import { json, query, request } from "./api";
+import { json, query, request } from "./api-client";
 import type { MutePreview, MuteRule } from "./mute-types";
 
 const API = "/api/v1";
@@ -43,6 +43,7 @@ function muteBody(rule: MuteRule): Record<string, unknown> {
   carry("engines");
   carry("targets");
   carry("resources");
+  carry("resourceKeys");
   carry("templates");
   carry("tags");
   carry("severity");

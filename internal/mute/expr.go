@@ -65,19 +65,23 @@ func evaluate(expression string, finding api.Finding) (bool, error) {
 // into the message — RunTemplateBool's error does not carry one. It catches
 // syntax errors and unknown identifiers.
 //
-// It cannot catch everything, and what it misses is worth knowing. gomplate
-// installs cel's nilsafe library with zero values, so reading a key a finding
-// does not carry yields null instead of failing: a rule written against one
-// engine's raw record quietly matches nothing on another engine's findings
-// rather than erroring. What survives to evaluation time is the genuine
-// failures — an expression that does not answer yes or no, a bad conversion, a
-// bad regex — and a rule that hits one of those mutes nothing.
+// Compiled against a fully-populated exemplar rather than a zero Finding, so
+// that a path the schema does not define is an error here rather than a null at
+// evaluation time. gomplate installs cel's nilsafe library, which answers an
+// absent path with null: against a zero Finding almost the whole schema was
+// absent, so a rule with a typo in it stored successfully and then muted
+// nothing, which is indistinguishable from a rule that correctly matched
+// nothing.
+//
+// What it still cannot catch is `unmapped`, and that is deliberate: OCSF's
+// escape hatch has no fixed keys, so reading into it stays dynamic and a rule
+// written against one engine's extras evaluates to null on another's.
 func Compile(expression string) error {
 	if strings.TrimSpace(expression) == "" {
 		return nil
 	}
 
-	sample, err := environment(api.Finding{})
+	sample, err := environment(exemplar())
 	if err != nil {
 		return err
 	}
@@ -85,8 +89,13 @@ func Compile(expression string) error {
 	if err != nil {
 		return fmt.Errorf("build expression environment: %w", err)
 	}
-	if _, issues := compiler.Compile(expression); issues != nil && issues.Err() != nil {
+	compiled, issues := compiler.Compile(expression)
+	if issues != nil && issues.Err() != nil {
 		return fmt.Errorf("invalid expression: %w", issues.Err())
 	}
-	return nil
+	projected, ok := sample[Variable].(map[string]any)
+	if !ok {
+		return fmt.Errorf("project finding for compilation: %s is not an object", Variable)
+	}
+	return checkPaths(compiled, projected)
 }

@@ -35,6 +35,8 @@ export type MuteRule = Identified & {
    * resource uid is in matchedAt.
    */
   resources?: string[];
+  /** Exact canonical provider/scope/uid resource identities. */
+  resourceKeys?: string[];
   /** Globs over templateId — the check that fired. */
   templates?: string[];
   /** Matched against the finding's tags; a `!` prefix excludes. */
@@ -71,6 +73,7 @@ export type MutePreview = {
 export const MUTE_DIMENSIONS = [
   "templates",
   "resources",
+  "resourceKeys",
   "tags",
   "severity",
 ] as const;

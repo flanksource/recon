@@ -188,16 +188,18 @@ table "findings" {
     comment = "1-based; preserves the engine's output order"
   }
 
-  column "template_id" {
+  // The check this is an instance of. Half of a finding's identity — the other
+  // half is the resource — and what stored mute rules match against. OCSF
+  // records it twice more, in finding_info.uid and metadata.event_code, but a
+  // jsonb path cannot carry an index.
+  column "check_id" {
     null = false
     type = text
   }
-  column "name" {
-    null = false
-    type = text
-  }
-  column "severity" {
-    null = false
+  // Which scanner produced this. Was `type`, which named neither a type nor
+  // anything else consistently.
+  column "engine" {
+    null = true
     type = text
   }
   column "host" {
@@ -206,10 +208,6 @@ table "findings" {
   }
   column "matched_at" {
     null = false
-    type = text
-  }
-  column "matcher_name" {
-    null = true
     type = text
   }
   // What kind of verdict this evidence is, in recon's vocabulary rather than the
@@ -225,46 +223,113 @@ table "findings" {
     default = "fail"
     comment = "fail | manual; manual is a verdict a human still owes"
   }
-  column "type" {
-    null = true
-    type = text
-  }
+  // Recon's own cross-cutting labels, which OCSF has no equivalent for. The
+  // check catalogue is built from these and the UI filters on them, so they stay
+  // an indexed column as well as being projected into finding_info.types.
   column "tags" {
     null    = false
     type    = sql("text[]")
     default = sql("'{}'::text[]")
   }
-  column "timestamp" {
+
+  // The OCSF scalars. class_uid, category_uid, type_uid, activity_id,
+  // severity_id and time are all required by the schema, so none is nullable —
+  // a row that could not answer them would not be an OCSF record.
+  column "class_uid" {
+    null    = false
+    type    = integer
+    default = 2004
+    comment = "OCSF Detection Finding; category_uid * 1000 + the class's own uid"
+  }
+  column "category_uid" {
+    null    = false
+    type    = integer
+    default = 2
+    comment = "OCSF Findings category"
+  }
+  column "type_uid" {
+    null    = false
+    type    = bigint
+    comment = "class_uid * 100 + activity_id"
+  }
+  column "activity_id" {
+    null    = false
+    type    = integer
+    default = 1
+    comment = "0 Unknown | 1 Create | 2 Update | 3 Close | 99 Other"
+  }
+  column "severity_id" {
+    null    = false
+    type    = integer
+    comment = "0 Unknown | 1 Informational | 2 Low | 3 Medium | 4 High | 5 Critical | 6 Fatal | 99 Other"
+  }
+  // Where the finding is in triage, which is OCSF's question and a different
+  // one from `verdict`. Note this is the enum the finding classes define, not
+  // the activity outcome the attribute dictionary defines under the same name.
+  column "status_id" {
+    null    = true
+    type    = integer
+    comment = "0 Unknown | 1 New | 2 In Progress | 3 Suppressed | 4 Resolved | 5 Archived | 99 Other"
+  }
+  column "status_code" {
+    null = true
+    type = text
+  }
+  column "status_detail" {
+    null = true
+    type = text
+  }
+  column "time" {
     null = true
     type = timestamptz
   }
-  column "extracted" {
+
+  // One column per OCSF object rather than a single blob holding the record.
+  // The list paths select what they render and no more — the fix that stopped a
+  // page of findings dragging every engine's payload through the database — and
+  // one column would put that straight back.
+  column "finding_info" {
     null = true
-    type = sql("text[]")
+    type = jsonb
+  }
+  column "metadata" {
+    null = true
+    type = jsonb
   }
   column "remediation" {
     null = true
-    type = text
+    type = jsonb
   }
-  column "reference" {
-    null = true
-    type = sql("text[]")
-  }
-  column "curl" {
-    null = true
-    type = text
-  }
-  column "request" {
-    null = true
-    type = text
-  }
-  column "response" {
-    null = true
-    type = text
-  }
-  column "raw" {
+  column "cloud" {
     null = true
     type = jsonb
+  }
+  column "vulnerabilities" {
+    null = true
+    type = jsonb
+  }
+  column "observables" {
+    null = true
+    type = jsonb
+  }
+  column "unmapped" {
+    null    = true
+    type    = jsonb
+    comment = "OCSF's own escape hatch for what an engine reported and the schema has no home for"
+  }
+
+  // The one part of a finding with no natural size: an HTTP exchange, a
+  // control's assertions, a block of matched source. Excluded from every list
+  // path and bounded on the way in, the way scan_outputs already bounds stdout
+  // and stderr — the column this replaced had no limit at all.
+  column "evidences" {
+    null = true
+    type = jsonb
+  }
+  column "evidences_truncated" {
+    null    = false
+    type    = boolean
+    default = false
   }
   // The primary subject the evidence is about. A record may name several and
   // they all become resources, but the lifecycle keys on one: a check has a
@@ -308,10 +373,30 @@ table "findings" {
     columns = [column.target_id]
   }
   index "findings_severity_idx" {
-    columns = [column.severity]
+    columns = [column.severity_id]
   }
-  index "findings_template_idx" {
-    columns = [column.template_id]
+  index "findings_check_idx" {
+    columns = [column.check_id]
+  }
+  // The catalogue's own key, and how a finding finds the check that describes
+  // it once its evidence is gone.
+  index "findings_engine_check_idx" {
+    columns = [column.engine, column.check_id]
+  }
+
+  // OCSF 1.5.0 defines 0-5 and 99 on the finding classes. `main` has since added
+  // 6 (Deleted); widening this is a one-line change when the pinned version moves.
+  check "findings_status_id_known" {
+    expr = "status_id IS NULL OR status_id IN (0, 1, 2, 3, 4, 5, 99)"
+  }
+  check "findings_severity_id_known" {
+    expr = "severity_id IN (0, 1, 2, 3, 4, 5, 6, 99)"
+  }
+  // The composition OCSF states, checked rather than trusted: a row whose
+  // type_uid disagrees with its class and activity is not a record any other
+  // OCSF consumer can read.
+  check "findings_type_uid_composed" {
+    expr = "type_uid = class_uid::bigint * 100 + activity_id"
   }
   index "findings_resource_idx" {
     columns = [column.resource_id]

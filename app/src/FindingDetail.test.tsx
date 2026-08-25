@@ -9,7 +9,7 @@ import type { Finding } from "./types";
 // of what triage needs — description, impact, classification and the template
 // path only exist under `raw.info`.
 const HTTP_FINDING: Finding = {
-  _id: "scan-1#5",
+  id: "01JFINDING",
   scanId: "scan-1",
   lineNo: 5,
   templateId: "CVE-2018-15811",
@@ -17,6 +17,12 @@ const HTTP_FINDING: Finding = {
   severity: "high",
   host: "https://api.example.test",
   matchedAt: "https://api.example.test/dnn",
+  resources: [{
+    provider: "nuclei",
+    scope: "api.example.test",
+    uid: "https://api.example.test/dnn",
+    name: "https://api.example.test/dnn",
+  }],
   type: "http",
   tags: ["cve", "rce"],
   timestamp: "2026-08-11T07:35:45+03:00",
@@ -144,7 +150,7 @@ describe("FindingDetail", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Raw JSON" }));
 
-    expect(screen.getByText(/scan-1#5/)).toBeInTheDocument();
+    expect(screen.getByText(/01JFINDING/)).toBeInTheDocument();
     expect(screen.getByText("raw")).toBeInTheDocument();
   });
 });
@@ -364,7 +370,7 @@ describe("an artifact finding", () => {
     expect(onMute).toHaveBeenCalledWith("/mutes/new?templates=CVE-2018-15811&engines=nuclei");
   });
 
-  it("scopes to the matched URL, not the host, when the choice says this resource", () => {
+  it("scopes to the canonical endpoint, not the host, when the choice says this resource", () => {
     const onMute = vi.fn();
     render(<FindingDetail finding={HTTP_FINDING} engine="nuclei" onMute={onMute} />);
 
@@ -373,7 +379,7 @@ describe("an artifact finding", () => {
 
     expect(onMute).toHaveBeenCalledWith(
       "/mutes/new?templates=CVE-2018-15811" +
-        "&resources=https%3A%2F%2Fapi.example.test%2Fdnn&engines=nuclei",
+        "&resourceKeys=nuclei%2Fapi.example.test%2Fhttps%3A%2F%2Fapi.example.test%2Fdnn&engines=nuclei",
     );
   });
 

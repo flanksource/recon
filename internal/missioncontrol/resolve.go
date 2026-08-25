@@ -17,20 +17,26 @@ import (
 // An insight has to hang off a config item Mission Control already knows about
 // — config_analysis.config_id is a foreign key, and recon inventing its own
 // config items would put a second, thinner copy of every host beside the real
-// one. So each finding is resolved against the catalog instead.
+// one. So each current state is resolved against the catalog instead.
 //
 // The ladder runs from the most specific identity the engine reported to the
 // broadest scope the inventory records. Prowler names the resource it failed on
-// and the account that owns it; nuclei names the URL and the host. When neither
-// is in the catalog the finding still belongs somewhere — the cluster or
+// and the account that owns it; nuclei names the scanned endpoint. When neither
+// is in the catalog the state can still belong somewhere — the cluster or
 // account the target sits in — which is what rolling up means. Only when even
 // that is unknown is the finding reported unresolved rather than pushed to a
 // guess.
 type Candidate struct {
 	Value string
+	Type  string
 	// Scope marks a rung that identifies the account, project or cluster rather
 	// than the thing the finding is about.
 	Scope bool
+}
+
+type ResolveOptions struct {
+	State  api.InsightState
+	Target api.TargetDocument
 }
 
 // Match is the config item a finding was attached to.
@@ -73,14 +79,14 @@ func NewResolver(client *sdk.Client) *Resolver {
 
 // Resolve returns the config item a finding belongs to, or the report of why
 // nothing could be found for it.
-func (r *Resolver) Resolve(ctx context.Context, scan api.Scan, finding api.Finding, target api.TargetDocument) (*Match, *api.UploadUnresolved, error) {
+func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (*Match, *api.InsightUnresolved, error) {
 	var tried []string
 	var skipped []string
 
-	for _, candidate := range candidates(finding, target) {
+	for _, candidate := range candidates(options.State, options.Target) {
 		tried = append(tried, candidate.Value)
 
-		found, err := r.lookupCandidate(ctx, candidate.Value)
+		found, err := r.lookupCandidate(ctx, candidate)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -100,17 +106,17 @@ func (r *Resolver) Resolve(ctx context.Context, scan api.Scan, finding api.Findi
 		return &match, nil, nil
 	}
 
-	reason := "no catalog config item matches the finding's resource, host, cluster or target"
+	reason := "no catalog config item matches the resource, its account, cluster or target"
 	if len(skipped) > 0 {
 		reason = strings.Join(skipped, "; ")
 	}
 	if len(tried) == 0 {
 		reason = "the finding carries no identity to resolve against"
 	}
-	return nil, &api.UploadUnresolved{
-		Finding:  findingRef(scan, finding),
-		Host:     finding.Host,
-		Severity: finding.Severity,
+	return nil, &api.InsightUnresolved{
+		Finding:  findingRef(options.State.Scan, options.State.Finding),
+		Host:     options.State.Resource.Name,
+		Severity: options.State.Finding.SeverityLevel(),
 		Tried:    tried,
 		Reason:   reason,
 	}, nil
@@ -118,22 +124,30 @@ func (r *Resolver) Resolve(ctx context.Context, scan api.Scan, finding api.Findi
 
 // candidates builds the ladder, most specific first, dropping duplicates and
 // anything the search grammar cannot express verbatim.
-func candidates(finding api.Finding, target api.TargetDocument) []Candidate {
-	ladder := []Candidate{
-		{Value: finding.MatchedAt},
-		{Value: finding.Host},
-		{Value: target.Cluster, Scope: true},
-		{Value: target.ID, Scope: true},
+func candidates(state api.InsightState, target api.TargetDocument) []Candidate {
+	ladder := make([]Candidate, 0, len(state.Resource.ExternalIDs)+4)
+	for _, externalID := range state.Resource.ExternalIDs {
+		ladder = append(ladder, Candidate{Value: externalID, Type: state.Resource.ConfigType})
 	}
+	if state.Parent != nil {
+		for _, externalID := range state.Parent.ExternalIDs {
+			ladder = append(ladder, Candidate{Value: externalID, Type: state.Parent.ConfigType, Scope: true})
+		}
+	}
+	ladder = append(ladder,
+		Candidate{Value: target.Cluster, Scope: true},
+		Candidate{Value: target.ID, Scope: true},
+	)
 
 	seen := map[string]bool{}
 	out := make([]Candidate, 0, len(ladder))
 	for _, candidate := range ladder {
 		candidate.Value = strings.TrimSpace(candidate.Value)
-		if candidate.Value == "" || seen[candidate.Value] || !searchable(candidate.Value) {
+		key := candidate.Type + "\x00" + candidate.Value
+		if candidate.Value == "" || seen[key] || !searchable(candidate.Value) || !searchable(candidate.Type) {
 			continue
 		}
-		seen[candidate.Value] = true
+		seen[key] = true
 		out = append(out, candidate)
 	}
 	return out
@@ -155,20 +169,26 @@ func searchable(value string) bool {
 // compares it by casting the whole array to text, so an exact comparison can
 // never match an array. Narrowing with LIKE and then confirming the exact value
 // against the fetched rows is what keeps the match honest.
-func (r *Resolver) lookupCandidate(ctx context.Context, value string) (lookup, error) {
-	if cached, ok := r.cache[value]; ok {
+func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lookup, error) {
+	cacheKey := r.Agent + "\x00" + candidate.Type + "\x00" + candidate.Value
+	if cached, ok := r.cache[cacheKey]; ok {
 		return cached, nil
+	}
+	search := fmt.Sprintf(`name="%s" | external_id="*%s*"`, candidate.Value, candidate.Value)
+	if candidate.Type != "" {
+		search = fmt.Sprintf(`type="%s" name="%s" | type="%s" external_id="*%s*"`,
+			candidate.Type, candidate.Value, candidate.Type, candidate.Value)
 	}
 
 	resp, err := r.client.SearchCatalog(ctx, query.SearchResourcesRequest{
 		Limit: resolveLimit,
 		Configs: []dutytypes.ResourceSelector{{
-			Search: fmt.Sprintf(`name="%s" | external_id="*%s*"`, value, value),
+			Search: search,
 			Agent:  r.Agent,
 		}},
 	})
 	if err != nil {
-		return lookup{}, fmt.Errorf("search the catalog for %q: %w", value, err)
+		return lookup{}, fmt.Errorf("search the catalog for %q: %w", candidate.Value, err)
 	}
 
 	ids := make([]string, 0, len(resp.Configs))
@@ -177,12 +197,12 @@ func (r *Resolver) lookupCandidate(ctx context.Context, value string) (lookup, e
 	}
 	items, err := r.client.GetCatalogItems(ctx, ids)
 	if err != nil {
-		return lookup{}, fmt.Errorf("read the catalog items matching %q: %w", value, err)
+		return lookup{}, fmt.Errorf("read the catalog items matching %q: %w", candidate.Value, err)
 	}
 
 	var exact []dutymodels.ConfigItem
 	for _, item := range items {
-		if identifies(item, value) {
+		if identifies(item, candidate) {
 			exact = append(exact, item)
 		}
 	}
@@ -201,18 +221,21 @@ func (r *Resolver) lookupCandidate(ctx context.Context, value string) (lookup, e
 			result.ambiguous = append(result.ambiguous, item.ID.String())
 		}
 	}
-	r.cache[value] = result
+	r.cache[cacheKey] = result
 	return result, nil
 }
 
 // identifies confirms the server's candidate really carries the identity, which
 // the LIKE narrowing only approximates.
-func identifies(item dutymodels.ConfigItem, value string) bool {
-	if strings.EqualFold(derefString(item.Name), value) {
+func identifies(item dutymodels.ConfigItem, candidate Candidate) bool {
+	if candidate.Type != "" && !strings.EqualFold(derefString(item.Type), candidate.Type) {
+		return false
+	}
+	if strings.EqualFold(derefString(item.Name), candidate.Value) {
 		return true
 	}
 	for _, external := range item.ExternalID {
-		if strings.EqualFold(external, value) {
+		if strings.EqualFold(external, candidate.Value) {
 			return true
 		}
 	}

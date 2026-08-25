@@ -35,17 +35,20 @@ INSERT INTO finding_states (
     first_seen, last_seen, last_open_at, first_scan_id, last_scan_id, open_scan_id,
     finding_id, occurrences, target_id, created_at, updated_at
 )
-SELECT f.resource_id, CAST(@engine AS text), f.template_id,
+SELECT f.resource_id, CAST(@engine AS text), f.check_id,
        CASE WHEN f.verdict = 'manual' THEN 'manual' ELSE 'open' END,
-       f.severity, NULL,
+       ` + severityText + `, NULL,
        CAST(@at AS timestamptz), CAST(@at AS timestamptz), CAST(@at AS timestamptz),
        CAST(@scan AS uuid), CAST(@scan AS uuid), CAST(@scan AS uuid),
        f.id, 1, f.target_id, now(), now()
 FROM (
-    SELECT DISTINCT ON (resource_id, template_id) *
+    -- Only the columns this statement reads. Selecting the whole row sorted
+    -- every finding.s evidence to pick one per (resource, check).
+    SELECT DISTINCT ON (resource_id, check_id)
+           id, resource_id, check_id, verdict, severity_id, target_id, line_no
     FROM findings
     WHERE scan_id = CAST(@scan AS uuid) AND resource_id IS NOT NULL
-    ORDER BY resource_id, template_id, line_no
+    ORDER BY resource_id, check_id, line_no
 ) f
 ON CONFLICT (resource_id, engine, check_id) DO UPDATE SET
     status       = EXCLUDED.status,
@@ -384,7 +387,7 @@ func applyMutes(db *gorm.DB, options reconcileOptions) error {
 		}
 		rule := rules[finding.LineNo]
 		pairs := byRule[rule]
-		pairs.add(id, finding.TemplateID)
+		pairs.add(id, finding.CheckID)
 		byRule[rule] = pairs
 	}
 
