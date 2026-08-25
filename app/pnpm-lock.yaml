@@ -12,8 +12,8 @@ importers:
         specifier: ^3.0.262
         version: 3.0.262(react@19.2.8)(zod@4.4.3)
       '@flanksource/clicky-ui':
-        specifier: ^0.3.22
-        version: 0.3.22(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(marked@15.0.12)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(shiki@1.29.2)(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)
+        specifier: ^0.3.25
+        version: 0.3.25(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(marked@15.0.12)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(shiki@1.29.2)(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)
       '@flanksource/facet':
         specifier: 0.1.71
         version: 0.1.71(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(immer@11.1.18)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)
@@ -373,8 +373,8 @@ packages:
       '@noble/hashes':
         optional: true
 
-  '@flanksource/clicky-ui@0.3.22':
-    resolution: {integrity: sha512-AjTDt0bgcGFUQKUB5/UPjrxFgKJ2LThHxVnkBu8I4DS7rLFIigX8lZlVVOYfNYpN6dZiJYtROzBgU2KmfWs0nA==}
+  '@flanksource/clicky-ui@0.3.25':
+    resolution: {integrity: sha512-YsPyxwJxpYDn4GFcWKSDrA1VDjsR0REtnEvNyUzTfsfQ5piOJnuG4FJuDwh3z2YhHssfl2uS/BKoetG5aSEeAw==}
     peerDependencies:
       '@ai-sdk/react': ^3.0.0
       '@mdxeditor/editor': ^4.0.4
@@ -1225,6 +1225,9 @@ packages:
 
   cose-base@2.2.0:
     resolution: {integrity: sha512-AzlgcsCbUMymkADOJtQm3wO9S3ltPfYOFD5033keQn9NJzIbtnZj+UdBJe7DYml/8TdbtHJW3j58SOnKhWY/5g==}
+
+  country-flag-icons@1.6.20:
+    resolution: {integrity: sha512-py8JiEKzjhYw6HPJ0L7SxLgCYim36UPRTZX43/kqGueUCZLSvnrqAiwW8HtQibur7mdkFQUkjOgdK+o/9FBtaw==}
 
   crelt@1.0.7:
     resolution: {integrity: sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==}
@@ -2813,7 +2816,7 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
-  '@flanksource/clicky-ui@0.3.22(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(marked@15.0.12)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(shiki@1.29.2)(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)':
+  '@flanksource/clicky-ui@0.3.25(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(marked@15.0.12)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(shiki@1.29.2)(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)':
     dependencies:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/commands': 6.11.0
@@ -2829,6 +2832,7 @@ snapshots:
       '@tanstack/react-query': 5.101.4(react@19.2.8)
       class-variance-authority: 0.7.1
       clsx: 2.1.1
+      country-flag-icons: 1.6.20
       dompurify: 3.4.14
       jotai: 2.20.2(@types/react@19.2.18)(react@19.2.8)
       monaco-editor: 0.56.0
@@ -2854,7 +2858,7 @@ snapshots:
 
   '@flanksource/facet@0.1.71(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(immer@11.1.18)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)':
     dependencies:
-      '@flanksource/clicky-ui': 0.3.22(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(marked@15.0.12)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(shiki@1.29.2)(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)
+      '@flanksource/clicky-ui': 0.3.25(@ai-sdk/react@3.0.262(react@19.2.8)(zod@4.4.3))(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react@19.2.18)(ai@6.0.259(zod@4.4.3))(marked@15.0.12)(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(recharts@3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1))(shiki@1.29.2)(streamdown@2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(tailwindcss@4.3.3)
       '@flanksource/icons': 1.0.63(react@19.2.8)
       '@iconify/react': 5.2.1(react@19.2.8)
       '@xyflow/react': 12.11.3(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -3599,6 +3603,8 @@ snapshots:
   cose-base@2.2.0:
     dependencies:
       layout-base: 2.0.1
+
+  country-flag-icons@1.6.20: {}
 
   crelt@1.0.7: {}
 
