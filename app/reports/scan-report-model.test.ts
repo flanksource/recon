@@ -13,6 +13,7 @@ import {
   type ScanReportModel,
 } from "./scan-report-model";
 import { formatBytes, formatDuration } from "./scan-report-format";
+import { reportSeverity } from "./scan-report-types";
 import type {
   ReportFinding,
   ReportScan,
@@ -59,21 +60,46 @@ function scan(overrides: Partial<ReportScan> = {}): ReportScan {
 // The server always sends at least one resource, synthesising it from the
 // finding's own identity for engines that name none of their own — so a fixture
 // without one would be a payload the API cannot produce.
-function finding(overrides: Partial<ReportFinding> = {}): ReportFinding {
+/** Recon's ladder onto OCSF's scale, so a spec can still say "low". */
+const SEVERITY_ID: Record<string, number> = {
+  unknown: 0,
+  info: 1,
+  low: 2,
+  medium: 3,
+  high: 4,
+  critical: 5,
+};
+
+// severity, title and desc are named the way a spec reads rather than the way
+// the record stores them: they live on severity_id and inside finding_info now,
+// and spelling that out in every fixture would bury what each spec is about.
+type FindingOverrides = Partial<ReportFinding> & {
+  severity?: string;
+  title?: string;
+  desc?: string;
+};
+
+function finding({ severity, title, desc, ...overrides }: FindingOverrides = {}): ReportFinding {
+  const checkId = overrides.checkId ?? "aws/iam_root_mfa";
   const built: ReportFinding = {
     scanId: "scan-1",
     lineNo: 1,
-    templateId: "aws/iam_root_mfa",
-    name: "Root account has no MFA",
-    severity: "critical",
+    checkId,
+    engine: "prowler",
     host: "acct-a",
     matchedAt: "arn:aws:iam::1:root",
     tags: ["iam"],
+    severity_id: SEVERITY_ID[severity ?? "critical"],
+    finding_info: {
+      uid: checkId,
+      title: title ?? "Root account has no MFA",
+      ...(desc ? { desc } : {}),
+    },
     ...overrides,
   };
   if (!built.resources) {
     built.resources = [
-      { uid: built.host, name: built.matchedAt || built.host, type: built.type },
+      { uid: built.host, name: built.matchedAt || built.host, type: built.engine },
     ];
   }
   return built;
@@ -231,11 +257,11 @@ describe("severityCards", () => {
 describe("sortFindings", () => {
   it("orders worst severity first, then by check and resource", () => {
     const sorted = sortFindings([
-      finding({ severity: "low", templateId: "b", host: "h2" }),
-      finding({ severity: "critical", templateId: "z", host: "h1" }),
-      finding({ severity: "low", templateId: "a", host: "h3" }),
+      finding({ severity: "low", checkId: "b", host: "h2" }),
+      finding({ severity: "critical", checkId: "z", host: "h1" }),
+      finding({ severity: "low", checkId: "a", host: "h3" }),
     ]);
-    expect(sorted.map((row) => [row.severity, row.templateId])).toEqual([
+    expect(sorted.map((row) => [reportSeverity(row), row.checkId])).toEqual([
       ["critical", "z"],
       ["low", "a"],
       ["low", "b"],
@@ -254,40 +280,38 @@ describe("groupFindings", () => {
     const groups = groupFindings([
       finding({
         lineNo: 2,
-        templateId: "gcp/iam_service_account_keys",
-        name: "Service account key is exposed",
+        checkId: "gcp/iam_service_account_keys",
+        title: "Service account key is exposed",
         severity: "high",
-        matcherName: "FAIL",
-        type: "prowler",
+        status_code: "FAIL",
+        engine: "prowler",
         tags: ["identity", "compliance:CIS-1.2"],
-        remediation: "Rotate the **affected key**.",
+        remediation: { desc: "Rotate the **affected key**." },
         resources: [serviceAccount],
-        raw: {
-          info: { description: "The **service account** has an exposed key." },
-        },
+        desc: "The **service account** has an exposed key.",
       }),
       finding({
         lineNo: 3,
-        templateId: "gcp/iam_service_account_keys",
-        name: "Service account key is exposed",
+        checkId: "gcp/iam_service_account_keys",
+        title: "Service account key is exposed",
         severity: "critical",
-        matcherName: "FAIL",
-        type: "prowler",
+        status_code: "FAIL",
+        engine: "prowler",
         tags: ["identity", "leaked-secret", "compliance:PCI-DSS"],
         resources: [serviceAccount],
       }),
-      finding({ lineNo: 4, templateId: "http/header-check", severity: "low" }),
+      finding({ lineNo: 4, checkId: "http/header-check", severity: "low" }),
     ]);
 
-    expect(groups.map((group) => [group.templateId, group.findings.length])).toEqual([
+    expect(groups.map((group) => [group.checkId, group.findings.length])).toEqual([
       ["gcp/iam_service_account_keys", 2],
       ["http/header-check", 1],
     ]);
     expect(groups[0]).toMatchObject({
       names: ["Service account key is exposed"],
       severity: "critical",
-      matcherNames: ["FAIL"],
-      types: ["prowler"],
+      statusCodes: ["FAIL"],
+      engines: ["prowler"],
       tags: ["identity", "leaked-secret"],
       descriptions: ["The **service account** has an exposed key."],
       remediations: ["Rotate the **affected key**."],
@@ -299,7 +323,7 @@ describe("groupFindings", () => {
   // built server-side now, so what this asserts is that the projection carries it
   // through unchanged rather than re-deriving anything from matchedAt and host.
   it("projects the reference the server synthesised for an engine that names none", () => {
-    expect(groupFindings([finding({ type: "ssl" })])[0].instances).toEqual([
+    expect(groupFindings([finding({ engine: "ssl" })])[0].instances).toEqual([
       {
         name: "arn:aws:iam::1:root",
         region: "",
@@ -315,8 +339,8 @@ describe("breakdowns", () => {
     const result = breakdowns(
       scan({ severities: { critical: 1, high: 0, medium: 2, low: 0, info: 0, unknown: 0 } }),
       [
-        finding({ templateId: "a", host: "h1", tags: ["iam", "cis", "compliance:CIS-1.2"] }),
-        finding({ templateId: "a", host: "h2", tags: ["iam"] }),
+        finding({ checkId: "a", host: "h1", tags: ["iam", "cis", "compliance:CIS-1.2"] }),
+        finding({ checkId: "a", host: "h2", tags: ["iam"] }),
       ],
     );
     expect(result.find((entry) => entry.key === "severity")?.rows).toEqual([

@@ -74,31 +74,85 @@ export type ReportScan = {
   hosts: string[];
 };
 
+/**
+ * One finding as the report payload carries it: an OCSF Detection Finding.
+ *
+ * The attributes sit under their published OCSF names, so the template renders
+ * the record the schema defines rather than a recon-shaped one. The four
+ * columns only nuclei ever filled — request, response, curl, extracted — are
+ * one `evidences[]` array now, which is also where inspec's assertions and
+ * trivy's cause metadata arrive.
+ */
 export type ReportFinding = {
   scanId: string;
   lineNo: number;
-  templateId: string;
-  name: string;
-  severity: ReportSeverity;
+  /** The check this is an instance of. Was `templateId`. */
+  checkId: string;
+  /** Which scanner produced it. Was `type`. */
+  engine?: string;
   host: string;
   matchedAt: string;
-  matcherName?: string;
-  type?: string;
   tags: string[];
-  timestamp?: string;
-  extracted?: string[];
-  remediation?: string;
-  reference?: string[];
-  curl?: string;
+  severity_id?: number;
+  /** The engine's own status code; prowler writes FAIL or MANUAL. */
+  status_code?: string;
+  /** Epoch milliseconds, absent when the engine reported no time. */
+  time?: number;
+  finding_info?: {
+    uid?: string;
+    title?: string;
+    desc?: string;
+    types?: string[];
+    src_url?: string;
+  };
+  remediation?: { desc?: string; references?: string[] };
+  cloud?: { provider?: string; region?: string; account?: { uid?: string; name?: string } };
+  vulnerabilities?: {
+    title?: string;
+    desc?: string;
+    severity?: string;
+    is_fix_available?: boolean;
+    cve?: { uid?: string; title?: string };
+    affected_packages?: { name?: string; version?: string; fixed_in_version?: string }[];
+  }[];
+  evidences?: ReportEvidence[];
+  unmapped?: Record<string, unknown>;
   /**
    * The subjects the evidence names, in the engine's own order. The server
-   * always sends at least one, so the template never reaches into `raw` for a
-   * resource identity of its own.
+   * always sends at least one, so the template never has to derive a resource
+   * identity of its own.
    */
   resources?: ReportResourceRef[];
-  /** The engine's original record, including provider-native resource identities. */
-  raw?: Record<string, unknown>;
 };
+
+/** One piece of evidence. `data` is OCSF's json_t: the engine's own shape. */
+export type ReportEvidence = {
+  name?: string;
+  url?: { url_string?: string };
+  http_request?: { args?: string };
+  http_response?: { message?: string; code?: number };
+  data?: unknown;
+};
+
+/** Recon's severity ladder, from OCSF's integer scale. */
+export const REPORT_SEVERITY_BY_ID: Record<number, ReportSeverity> = {
+  0: "unknown",
+  1: "info",
+  2: "low",
+  3: "medium",
+  4: "high",
+  5: "critical",
+  6: "critical",
+};
+
+export function reportSeverity(finding: { severity_id?: number }): ReportSeverity {
+  return REPORT_SEVERITY_BY_ID[finding.severity_id ?? 0] ?? "unknown";
+}
+
+/** What a finding calls itself, falling back to the check id. */
+export function reportFindingTitle(finding: ReportFinding): string {
+  return finding.finding_info?.title || finding.checkId;
+}
 
 /** One thing a finding is about. Render `name`, fall back to `uid`. */
 export type ReportResourceRef = {

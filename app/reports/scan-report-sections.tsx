@@ -22,7 +22,7 @@ import {
   resourceInstanceIcon,
   severityBadge,
 } from "./scan-report-tags";
-import type { ReportFinding, ReportScan } from "./scan-report-types";
+import type { ReportEvidence, ReportFinding, ReportScan } from "./scan-report-types";
 
 const SEVERITY_TAG_MAPPING = (key: string, value: unknown): string =>
   key === "severity" ? (SEVERITY_BADGE[value as keyof typeof SEVERITY_BADGE] ?? "") : "";
@@ -32,7 +32,7 @@ export function FindingsSummaryTable({ groups }: { groups: FindingGroup[] }) {
     id: `#${index + 1}`,
     name: group.names.join("; "),
     severity: group.severity,
-    check: group.templateId,
+    check: group.checkId,
     instances: `${group.instances.length} ${group.instances.length === 1 ? "instance" : "instances"}`,
   }));
   return (
@@ -50,30 +50,61 @@ export function FindingsSummaryTable({ groups }: { groups: FindingGroup[] }) {
 }
 
 /**
- * The parts of a finding that are proof rather than description: where it
- * matched, what was pulled out of the response, and the one-liner that
- * reproduces it. Printed under the finding rather than inside it because a curl
- * line is a code block, and the Finding card has no slot that survives one.
+ * The parts of a finding that are proof rather than description.
+ *
+ * One block per entry of `evidences[]`, which is where every engine's proof
+ * now arrives: nuclei's HTTP exchange and curl line, inspec's failed
+ * assertions, trivy's cause metadata. It used to read four recon-specific
+ * columns only nuclei ever filled, so the other three engines printed nothing
+ * here however much they had reported.
+ *
+ * Printed under the finding rather than inside it because a request body is a
+ * code block, and the Finding card has no slot that survives one.
  */
 function Evidence({ finding }: { finding: ReportFinding }) {
-  const extracted = finding.extracted?.filter(Boolean) ?? [];
-  if (extracted.length === 0 && !finding.curl) return null;
+  const entries = finding.evidences ?? [];
+  if (entries.length === 0) return null;
   return (
     <div className="mb-4 ml-4 border-l-2 border-gray-200 pl-3">
       <div className="mb-1 text-[8pt] font-semibold text-gray-500">
         Evidence · {finding.scanId}#{finding.lineNo} · {finding.matchedAt}
       </div>
-      {extracted.length > 0 && (
+      {entries.map((entry, index) => (
+        <EvidenceEntry key={entry.name ?? index} entry={entry} />
+      ))}
+    </div>
+  );
+}
+
+function EvidenceEntry({ entry }: { entry: ReportEvidence }) {
+  // `data` is OCSF's json_t — the engine's own shape, which the schema has no
+  // names for — so it is printed as JSON rather than picked apart by key.
+  const details =
+    entry.data === undefined || entry.data === null
+      ? undefined
+      : JSON.stringify(entry.data, null, 2);
+  const blocks = [
+    { label: "Request", body: entry.http_request?.args },
+    { label: "Response", body: entry.http_response?.message },
+    { label: "Details", body: details },
+  ].filter((block): block is { label: string; body: string } => Boolean(block.body));
+  if (blocks.length === 0 && !entry.name) return null;
+  return (
+    <div className="mb-2">
+      {entry.name && (
         <div className="mb-1 text-[8pt]">
-          <span className="text-gray-400">Extracted: </span>
-          <span className="font-mono text-gray-700">{extracted.join(", ")}</span>
+          <span className="text-gray-400">Matched: </span>
+          <span className="font-mono text-gray-700">{entry.name}</span>
         </div>
       )}
-      {finding.curl && (
-        <pre className="overflow-hidden whitespace-pre-wrap break-all rounded bg-gray-50 p-2 font-mono text-[7.5pt] text-gray-700">
-          {finding.curl}
-        </pre>
-      )}
+      {blocks.map((block) => (
+        <div key={block.label} className="mb-1">
+          <div className="text-[7.5pt] text-gray-400">{block.label}</div>
+          <pre className="overflow-hidden whitespace-pre-wrap break-all rounded bg-gray-50 p-2 font-mono text-[7.5pt] text-gray-700">
+            {block.body}
+          </pre>
+        </div>
+      ))}
     </div>
   );
 }
@@ -135,11 +166,11 @@ export function DetailedFindings({
       {groups.map((group, index) => {
         const TypeIcon = findingTypeIcon(group);
         return (
-          <div key={group.templateId}>
+          <div key={group.checkId}>
             <Finding
               id={`#${index + 1}`}
               title={group.names.join("; ")}
-              summary={group.templateId}
+              summary={group.checkId}
               typeIcon={<TypeIcon className="h-full w-full" />}
               className={SEVERITY_BORDER[group.severity]}
               severity={severityBadge(group.severity)}

@@ -228,8 +228,140 @@ export type Severity = (typeof SEVERITIES)[number];
 
 export type SeverityCounts = Record<Severity, number>;
 
-// Findings keep an index signature: nuclei emits template-specific keys the
-// details pane renders without knowing them in advance.
+/**
+ * OCSF's severity scale, which recon's ladder maps onto rung for rung.
+ *
+ * The integer is what a finding carries and what the server filters on;
+ * `severityOf` renders it back into the vocabulary the UI groups and sorts by.
+ * Fatal has no recon rung and reads as critical — a finding an engine called
+ * the worst thing it found must not be filed under "nobody could classify it".
+ */
+export const OCSF_SEVERITY: Record<number, Severity> = {
+  0: "unknown",
+  1: "info",
+  2: "low",
+  3: "medium",
+  4: "high",
+  5: "critical",
+  6: "critical",
+};
+
+export function severityOf(finding: {
+  severity_id?: number;
+}): Severity {
+  return OCSF_SEVERITY[finding.severity_id ?? 0] ?? "unknown";
+}
+
+/** What a finding is about, in OCSF's words. */
+export type FindingInfo = {
+  uid?: string;
+  title?: string;
+  desc?: string;
+  /** Recon's tags, projected. The engine's record class rides here too. */
+  types?: string[];
+  src_url?: string;
+  uid_alt?: string;
+};
+
+export type OcsfProduct = {
+  name?: string;
+  vendor_name?: string;
+  version?: string;
+};
+
+export type OcsfMetadata = {
+  version?: string;
+  event_code?: string;
+  product?: OcsfProduct;
+  /** Which OCSF profiles the record declares; prowler declares `cloud`. */
+  profiles?: string[];
+};
+
+export type OcsfRemediation = {
+  desc?: string;
+  references?: string[];
+};
+
+export type OcsfCloud = {
+  provider?: string;
+  region?: string;
+  account?: { uid?: string; name?: string; type?: string };
+  org?: { uid?: string; name?: string };
+};
+
+export type OcsfCve = {
+  uid?: string;
+  title?: string;
+  desc?: string;
+  cvss?: { base_score?: number; vector_string?: string; severity?: string }[];
+  /** OCSF carries the CWE both as an object and as a bare id. */
+  cwe_uid?: string;
+  cwe_url?: string;
+  epss?: { score?: string; percentile?: number };
+  references?: string[];
+};
+
+export type OcsfVulnerability = {
+  title?: string;
+  desc?: string;
+  severity?: string;
+  references?: string[];
+  is_fix_available?: boolean;
+  cve?: OcsfCve;
+  cwe?: { uid?: string; caption?: string; src_url?: string };
+  affected_packages?: {
+    name?: string;
+    version?: string;
+    fixed_in_version?: string;
+    purl?: string;
+  }[];
+};
+
+/**
+ * One piece of evidence for a finding.
+ *
+ * This is where the fat engine-specific payload lives now — nuclei's HTTP
+ * exchange, inspec's failed assertions, trivy's cause metadata — bounded and
+ * excluded from every list path, rather than a verbatim copy of the whole
+ * engine record travelling with every row.
+ *
+ * `data` is OCSF's json_t: the engine's own shape, which the schema has no
+ * names for. Render it as JSON rather than reaching for keys.
+ */
+export type NetworkEndpoint = {
+  ip?: string;
+  port?: number;
+  hostname?: string;
+  domain?: string;
+  svc_name?: string;
+};
+
+export type Evidence = {
+  name?: string;
+  uid?: string;
+  url?: { url_string?: string };
+  http_request?: { args?: string; http_method?: string; url?: { url_string?: string } };
+  http_response?: { code?: number; message?: string; status?: string };
+  // The address that actually answered, which a URL does not say: behind a load
+  // balancer or a wildcard record, which host served the request is what makes
+  // a finding reproducible.
+  src_endpoint?: NetworkEndpoint;
+  dst_endpoint?: NetworkEndpoint;
+  data?: unknown;
+};
+
+/**
+ * One result an engine reported, stored as an OCSF Detection Finding.
+ *
+ * The OCSF attributes sit at the top level under their published names — this
+ * is the record the schema defines, not a recon invention with OCSF projected
+ * onto it — beside the identity recon needs in order to track a finding over
+ * time. A mute expression addressing `finding.finding_info.title` is addressing
+ * the same names as this type.
+ *
+ * The index signature stays: `unmapped` aside, nuclei emits template-specific
+ * keys the details pane renders without knowing them in advance.
+ */
 export type Finding = {
   id?: string;
   scanId: string;
@@ -241,32 +373,65 @@ export type Finding = {
   // which is the provider's own identity in the evidence — for a cloud account
   // they differ, and a mute rule's target scope matches on this one.
   targetId?: string;
-  templateId: string;
-  name: string;
-  severity: Severity;
+
+  /** The check this is an instance of. Was `templateId`. */
+  checkId: string;
+  /** Which scanner produced it. Was `type`, which named neither a type nor a kind. */
+  engine?: string;
+  /** `fail` or `manual`; absent means fail. Recon's vocabulary, not the engine's. */
+  verdict?: string;
+
   host: string;
   matchedAt: string;
-  matcherName?: string;
-  type?: string;
   tags: string[];
-  timestamp?: string;
-  extracted?: string[];
-  remediation?: string;
-  reference?: string[];
-  curl?: string;
-  request?: string;
-  response?: string;
+
+  // The OCSF envelope.
+  class_uid?: number;
+  category_uid?: number;
+  type_uid?: number;
+  activity_id?: number;
+  severity_id?: number;
+  /** OCSF's caption of severity_id — "High", not "high". Use `severityOf`. */
+  severity?: string;
+  status_id?: number;
+  status?: string;
+  /** The engine's own status code. prowler writes FAIL or MANUAL here. */
+  status_code?: string;
+  status_detail?: string;
+  /** Epoch milliseconds, or absent when the engine reported no time. */
+  time?: number;
+
+  /** Why it matters, in OCSF's words. prowler writes its risk into risk_details. */
+  impact?: string;
+  impact_id?: number;
+  confidence_id?: number;
+
+  finding_info?: FindingInfo;
+  metadata?: OcsfMetadata;
+  remediation?: OcsfRemediation;
+  cloud?: OcsfCloud;
+  vulnerabilities?: OcsfVulnerability[];
+  risk_details?: string;
+  evidences?: Evidence[];
+  /** Whatever the engine reported that the schema has no name for. */
+  unmapped?: Record<string, unknown>;
+
   /**
    * The subjects the evidence names, in the engine's own order. Resources[0] is
    * the one the check has a verdict about; the rest are context. The server
    * always sends at least one, synthesising it from the finding's own identity
-   * for engines that name none, so nothing here has to read `raw`.
+   * for engines that name none.
    */
   resources?: ResourceRef[];
-  /** The engine's original record, kept verbatim. */
-  raw?: Record<string, unknown>;
+  /** True when the row describes the check rather than an observation. */
+  synthetic?: boolean;
   [key: string]: unknown;
 };
+
+/** What a finding calls itself, falling back to the check id. */
+export function findingTitle(finding: Finding): string {
+  return finding.finding_info?.title || finding.checkId;
+}
 
 /**
  * One thing a finding is about.
@@ -451,6 +616,35 @@ export type InsightConfig = {
   // True when this config is the cluster, account or project containing the
   // thing the finding was about, rather than that thing itself.
   rolledUp?: boolean;
+  // True when a person chose this config item rather than the ladder finding it.
+  pinned?: boolean;
+};
+
+// One config item an ambiguous identity could be attached to.
+export type InsightChoice = {
+  id: string;
+  name?: string;
+  type?: string;
+  /** Nothing in the catalog contains this item — it is the top of its tree. */
+  root?: boolean;
+  /** Offered because it contains the matches, not because it carried the identity. */
+  ancestor?: boolean;
+  deleted?: boolean;
+};
+
+// An identity more than one config item carries. Ambiguity is not a miss: the
+// identity is right and the catalog holds several things wearing it, so nothing
+// is attached until somebody says which one.
+export type InsightAmbiguity = {
+  identity: string;
+  type?: string;
+  /** The identity names the account, project or cluster, not the finding's subject. */
+  scope?: boolean;
+  states: number;
+  /** A bounded sample of the affected resources; `states` is the true count. */
+  resources?: string[];
+  chosen?: string;
+  options: InsightChoice[];
 };
 
 // A current state nothing in the Mission Control catalog claims, and every identity
@@ -478,10 +672,12 @@ export type InsightSync = {
   silenced: number;
   direct: number;
   rolledUp: number;
+  /** States attached through a choice an earlier sync remembered. */
+  pinned: number;
   pushed: number;
   configs: InsightConfig[];
   unresolved: InsightUnresolved[];
-  notes?: string[];
+  ambiguous: InsightAmbiguity[];
 };
 
 export type Zone = Identified & { zone: string };

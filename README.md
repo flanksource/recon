@@ -286,15 +286,31 @@ selects nothing at all, because that would mute everything.
 
 `expr` narrows the rows above with a [CEL](https://github.com/google/cel-spec)
 expression over a single `finding` variable, holding the finding exactly as the API
-renders it. It is what reaches detail the columns cannot:
+renders it — which is an [OCSF Detection Finding](https://schema.ocsf.io/1.5.0/classes/detection_finding)
+(class 2004). The attributes are the schema's own, so an expression here is written
+against published names rather than a recon invention. It is what reaches detail the
+columns cannot:
 
 ```bash
 reconctl mute create name=logs-buckets templates=gcp/bucket_public \
-    'expr=finding.raw.resources[0].uid.startsWith("logs-")'
+    'expr=finding.resources[0].uid.startsWith("logs-")'
 ```
 
+Commonly useful paths: `finding.finding_info.title`, `finding.finding_info.desc`,
+`finding.cloud.provider`, `finding.cloud.account.uid`, `finding.severity_id` (OCSF's
+scale — 5 critical, 4 high, 3 medium, 2 low, 1 informational), `finding.status_code`
+(the engine's own), `finding.vulnerabilities[0].cve.uid`, and `finding.checkId`,
+`finding.host`, `finding.matchedAt`, `finding.tags` for recon's own identity.
+`finding.unmapped` holds whatever the engine reported that OCSF has no name for and
+is deliberately unchecked, so a path into it evaluates to null on an engine that does
+not carry it rather than failing.
+
+A path the schema does not define is rejected when the rule is saved rather than
+quietly matching nothing, so a typo is a validation error and not a rule that silently
+mutes zero findings.
+
 > On the CLI an argument containing `==` is read as a query parameter, so escape it as
-> `\=\=` — `'expr=finding.severity \=\= "high"'`. The API and the Mutes tab take the
+> `\=\=` — `'expr=finding.severity_id \=\= 4'`. The API and the Mutes tab take the
 > expression verbatim.
 
 A rule has two effects. Where the engine can express the same exclusion natively the
@@ -382,15 +398,52 @@ Each state is resolved against the catalog rather than given a config item of
 recon's own: the resource's typed `externalIds`, its parent account's typed identity,
 then the target's cluster and finally the target itself. A state that only matches one of the
 scope rungs is **rolled up** — recorded against the cluster or account
-containing it — and one that matches nothing is reported, not synced. An
+containing it — one that matches nothing is reported, not synced, and one that
+matches several is offered as a choice rather than guessed at. An
 insight attached to the wrong resource is worse than one that is missing and
 accounted for, so `--dry-run` reports the same coverage a real sync would
 achieve. Finding sync defaults to open and manual-review states; `--status resolved`
 and `--status muted` include lifecycle updates, and `--unresolved=error` refuses to push
 anything unless every selected state resolves.
 
+### Identities more than one config item carries
+
+A rung that matches several config items is not a miss — the identity is right and
+the catalog holds several things wearing it, which is what a second scrape of the
+same estate produces. Nothing is attached by rule in that case: the preflight
+reports the identity, every config item that carried it, and the root item
+containing them, with the states and resources riding on the answer.
+
+```bash
+reconctl finding sync --status open --dry-run
+# workload-prod-eu-02 — 412 states (web-1, web-2, …)
+#     eb6a8af6-…  workload-prod-eu-02  GCP::Project
+#     03525cee-…  workload-prod-eu-02  Kubernetes::Cluster
+#     9f0c1d22-…  acme-root            GCP::Organization  [contains the matches]  [root]
+#     choose with --config workload-prod-eu-02=<config-id>
+
+reconctl finding sync --status open --config workload-prod-eu-02=eb6a8af6-251d-aff5-abc3-ca3311b51ef9
+```
+
+A sync that pushes writes the choice onto every resource it decided
+(`resources.config_id`), so the question is asked once: later syncs attach those
+resources straight to the chosen item without walking the ladder or searching the
+catalog at all. A re-scan never clears it — only another choice, or `--repin`,
+which ignores what is remembered and resolves everything from the catalog again.
+A chosen config item that has since been deleted upstream is reported as
+unresolved rather than pushed against a dangling id.
+
+### Following a sync
+
+A sync spends its time in the catalog, one lookup per distinct identity, so it
+runs as a task: `reconctl` draws the progress bar and running tally it draws for
+a scan, and the browser follows the same run through `/api/v1/tasks` while its
+own request is still in flight. A run that left states unresolved or undecided
+finishes as a warning rather than clean.
+
 Syncing twice does not duplicate: an insight's identity is derived from the config,
 resource provider/scope/uid, engine, and check ID, so later runs update the same row
 and its `first_observed` survives. The Resources and Findings tabs expose a preview-first
-**Sync insights** action. The API exposes `POST /api/v1/resource/sync` and
+**Sync insights** action, where each undecided identity is a choice and the projected
+count updates as they are answered. The API exposes `POST /api/v1/resource/sync` and
 `POST /api/v1/finding/sync`; the Scans tab remains historical and has no sync action.

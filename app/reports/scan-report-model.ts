@@ -9,6 +9,8 @@
 
 import {
   REPORT_SEVERITIES,
+  reportFindingTitle,
+  reportSeverity,
   type ReportFinding,
   type ReportScan,
   type ReportSections,
@@ -116,13 +118,15 @@ export type TrafficModel = {
 };
 
 export type FindingGroup = {
-  templateId: string;
+  checkId: string;
   names: string[];
   severity: ReportSeverity;
   findings: ReportFinding[];
   instances: FindingResourceInstance[];
-  matcherNames: string[];
-  types: string[];
+  /** The engines' own status codes — prowler's FAIL or MANUAL. */
+  statusCodes: string[];
+  /** Which scanners reported the check. */
+  engines: string[];
   tags: string[];
   descriptions: string[];
   remediations: string[];
@@ -286,8 +290,8 @@ export function severityCards(
 export function sortFindings(findings: ReportFinding[]): ReportFinding[] {
   return [...findings].sort(
     (left, right) =>
-      SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity] ||
-      left.templateId.localeCompare(right.templateId) ||
+      SEVERITY_RANK[reportSeverity(left)] - SEVERITY_RANK[reportSeverity(right)] ||
+      left.checkId.localeCompare(right.checkId) ||
       left.host.localeCompare(right.host) ||
       left.lineNo - right.lineNo,
   );
@@ -308,36 +312,34 @@ export function visibleFindingTags(tags: Iterable<string>): string[] {
   return uniqueValues(tags).filter((tag) => !tag.toLowerCase().startsWith("compliance:"));
 }
 
+// What the check found, from the attribute OCSF defines for it. It used to be
+// reachable only as raw.info.description — or raw.description, or
+// raw.Description, depending on which engine wrote the record — which is why
+// this had to try three spellings and still missed some.
 function findingDescription(finding: ReportFinding): string | undefined {
-  const raw = finding.raw;
-  const info = raw?.info;
-  const nested =
-    typeof info === "object" && info !== null && !Array.isArray(info)
-      ? (info as Record<string, unknown>).description
-      : undefined;
-  for (const value of [nested, raw?.description, raw?.Description]) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
+  const desc = finding.finding_info?.desc?.trim();
+  return desc || undefined;
 }
 
 export function groupFindings(findings: ReportFinding[]): FindingGroup[] {
   const grouped = new Map<string, ReportFinding[]>();
   for (const finding of sortFindings(findings)) {
-    grouped.set(finding.templateId, [...(grouped.get(finding.templateId) ?? []), finding]);
+    grouped.set(finding.checkId, [...(grouped.get(finding.checkId) ?? []), finding]);
   }
-  return [...grouped.entries()].map(([templateId, occurrences]) => ({
-    templateId,
-    names: uniqueValues(occurrences.map((finding) => finding.name)),
-    severity: occurrences[0].severity,
+  return [...grouped.entries()].map(([checkId, occurrences]) => ({
+    checkId,
+    names: uniqueValues(occurrences.map(reportFindingTitle)),
+    severity: reportSeverity(occurrences[0]),
     findings: occurrences,
     instances: uniqueFindingResourceInstances(occurrences),
-    matcherNames: uniqueValues(occurrences.map((finding) => finding.matcherName)),
-    types: uniqueValues(occurrences.map((finding) => finding.type)),
+    statusCodes: uniqueValues(occurrences.map((finding) => finding.status_code)),
+    engines: uniqueValues(occurrences.map((finding) => finding.engine)),
     tags: visibleFindingTags(occurrences.flatMap((finding) => finding.tags)),
     descriptions: uniqueValues(occurrences.map(findingDescription)),
-    remediations: uniqueValues(occurrences.map((finding) => finding.remediation)),
-    references: uniqueValues(occurrences.flatMap((finding) => finding.reference ?? [])),
+    remediations: uniqueValues(occurrences.map((finding) => finding.remediation?.desc)),
+    references: uniqueValues(
+      occurrences.flatMap((finding) => finding.remediation?.references ?? []),
+    ),
   }));
 }
 
@@ -347,7 +349,7 @@ export function breakdowns(scan: ReportScan, findings: ReportFinding[]): Breakdo
   );
   return [
     { key: "severity", title: "By severity", rows: bySeverity },
-    { key: "check", title: "By check", rows: tally(findings.map((finding) => finding.templateId)) },
+    { key: "check", title: "By check", rows: tally(findings.map((finding) => finding.checkId)) },
     { key: "resource", title: "By resource", rows: tally(findings.map((finding) => finding.host)) },
     {
       key: "tag",
@@ -458,7 +460,7 @@ export function buildScanReport(data: ScanReportData): ScanReportModel {
   const generatedAt = data.generatedAt ?? new Date().toISOString();
   const floor = options?.minSeverity ? SEVERITY_RANK[options.minSeverity] : Number.POSITIVE_INFINITY;
   const kept = sortFindings(
-    data.findings.filter((finding) => SEVERITY_RANK[finding.severity] <= floor),
+    data.findings.filter((finding) => SEVERITY_RANK[reportSeverity(finding)] <= floor),
   );
   const detailed =
     options?.maxDetailedFindings && options.maxDetailedFindings < kept.length

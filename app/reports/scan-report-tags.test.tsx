@@ -27,13 +27,13 @@ import type { ReportFinding } from "./scan-report-types";
 const FINDING: ReportFinding = {
   scanId: "scan-1",
   lineNo: 1,
-  templateId: "supply-chain-check",
-  name: "Supply chain finding",
-  severity: "high",
+  checkId: "supply-chain-check",
+  engine: "nuclei",
   host: "repo.example.test",
   matchedAt: "repo.example.test",
-  matcherName: "FAIL",
-  type: "http",
+  severity_id: 4,
+  status_code: "FAIL",
+  finding_info: { uid: "supply-chain-check", title: "Supply chain finding" },
   tags: [
     "identity",
     "leaked-secret",
@@ -51,7 +51,7 @@ describe("findingBadges", () => {
 
     expect([...byLabel.keys()]).toEqual([
       "FAIL",
-      "http",
+      "nuclei",
       "identity",
       "leaked-secret",
       "vulnerability",

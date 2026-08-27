@@ -6,7 +6,12 @@
     "bulk-size": 20,
     "headless": false,
     "rate-limit": 50,
-    "severity": ["critical", "high", "medium", "low"]
+    "severity": [
+      "critical",
+      "high",
+      "medium",
+      "low"
+    ]
   },
   "options": {
     "title": "Attack Surface Scan Report",
@@ -39,7 +44,14 @@
     ],
     "exitCode": 0,
     "findings": 11,
-    "severities": { "critical": 1, "high": 2, "medium": 4, "low": 3, "info": 1, "unknown": 0 },
+    "severities": {
+      "critical": 1,
+      "high": 2,
+      "medium": 4,
+      "low": 3,
+      "info": 1,
+      "unknown": 0
+    },
     "hosts": [
       "billing.example.com",
       "docs.example.com",
@@ -62,10 +74,27 @@
         "responses": 40012,
         "failed": 1268,
         "bytes": 734003200,
-        "statusCodes": { "200": 21044, "404": 14988, "301": 2610, "403": 1102, "500": 268 },
-        "protocols": { "http": 38820, "ssl": 1980, "dns": 480 },
-        "errors": { "timeout": 812, "connection refused": 331, "tls handshake": 125 },
-        "waf": { "cloudflare": 9, "aws-waf": 3 }
+        "statusCodes": {
+          "200": 21044,
+          "404": 14988,
+          "301": 2610,
+          "403": 1102,
+          "500": 268
+        },
+        "protocols": {
+          "http": 38820,
+          "ssl": 1980,
+          "dns": 480
+        },
+        "errors": {
+          "timeout": 812,
+          "connection refused": 331,
+          "tls handshake": 125
+        },
+        "waf": {
+          "cloudflare": 9,
+          "aws-waf": 3
+        }
       }
     }
   },
@@ -73,150 +102,630 @@
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 1,
-      "templateId": "http/exposures/configs/git-config",
-      "name": "Exposed .git configuration",
-      "severity": "critical",
+      "checkId": "http/exposures/configs/git-config",
+      "engine": "nuclei",
       "host": "legacy.example.com",
       "matchedAt": "https://legacy.example.com/.git/config",
-      "matcherName": "status",
-      "type": "http",
-      "tags": ["exposure", "config", "git"],
-      "timestamp": "2026-03-14T08:47:03.000Z",
-      "extracted": ["url = https://git.example.com/platform/legacy-portal.git"],
-      "remediation": "1. **Block dotfile paths** at the edge.\n2. Remove the `.git` directory from the deployed artifact.\n3. Follow the [incident response guide](https://owasp.org/www-project-web-security-testing-guide/) and rotate exposed credentials.",
-      "reference": ["https://owasp.org/www-project-web-security-testing-guide/"],
-      "curl": "curl -sS -i 'https://legacy.example.com/.git/config'",
-      "raw": {
-        "info": {
-          "description": "The deployed site exposes its **Git configuration**, which can reveal repository metadata and `credential` values."
+      "tags": [
+        "exposure",
+        "config",
+        "git"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 5,
+      "status_id": 1,
+      "time": 1773478023000,
+      "finding_info": {
+        "uid": "http/exposures/configs/git-config",
+        "title": "Exposed .git configuration",
+        "desc": "The deployed site exposes its **Git configuration**, which can reveal repository metadata and `credential` values.",
+        "types": [
+          "exposure",
+          "config",
+          "git"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/exposures/configs/git-config",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
         }
-      }
+      },
+      "unmapped": {
+        "protocol": "http",
+        "matcher_name": "status"
+      },
+      "remediation": {
+        "desc": "1. **Block dotfile paths** at the edge.\n2. Remove the `.git` directory from the deployed artifact.\n3. Follow the [incident response guide](https://owasp.org/www-project-web-security-testing-guide/) and rotate exposed credentials.",
+        "references": [
+          "https://owasp.org/www-project-web-security-testing-guide/"
+        ]
+      },
+      "evidences": [
+        {
+          "name": "status",
+          "url": {
+            "url_string": "https://legacy.example.com/.git/config"
+          },
+          "data": {
+            "curl": "curl -sS -i 'https://legacy.example.com/.git/config'",
+            "extracted": [
+              "url = https://git.example.com/platform/legacy-portal.git"
+            ]
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "legacy.example.com",
+          "name": "https://legacy.example.com/.git/config",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 2,
-      "templateId": "http/misconfiguration/server-status",
-      "name": "Apache server-status exposed",
-      "severity": "high",
+      "checkId": "http/misconfiguration/server-status",
+      "engine": "nuclei",
       "host": "legacy.example.com",
       "matchedAt": "https://legacy.example.com/server-status",
-      "matcherName": "word",
-      "type": "http",
-      "tags": ["misconfig", "apache", "disclosure"],
-      "timestamp": "2026-03-14T08:47:09.000Z",
-      "remediation": "Restrict mod_status to localhost or remove the module from the production build.",
-      "curl": "curl -sS -i 'https://legacy.example.com/server-status'"
+      "tags": [
+        "misconfig",
+        "apache",
+        "disclosure"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 4,
+      "status_id": 1,
+      "time": 1773478029000,
+      "finding_info": {
+        "uid": "http/misconfiguration/server-status",
+        "title": "Apache server-status exposed",
+        "types": [
+          "misconfig",
+          "apache",
+          "disclosure"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/misconfiguration/server-status",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http",
+        "matcher_name": "word"
+      },
+      "remediation": {
+        "desc": "Restrict mod_status to localhost or remove the module from the production build."
+      },
+      "evidences": [
+        {
+          "name": "word",
+          "url": {
+            "url_string": "https://legacy.example.com/server-status"
+          },
+          "data": {
+            "curl": "curl -sS -i 'https://legacy.example.com/server-status'"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "legacy.example.com",
+          "name": "https://legacy.example.com/server-status",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 3,
-      "templateId": "ssl/expired-certificate",
-      "name": "TLS certificate expires in 6 days",
-      "severity": "high",
+      "checkId": "ssl/expired-certificate",
+      "engine": "nuclei",
       "host": "status.example.com",
       "matchedAt": "status.example.com:443",
-      "type": "ssl",
-      "tags": ["ssl", "expiry"],
-      "timestamp": "2026-03-14T08:52:41.000Z",
-      "extracted": ["notAfter=2026-03-20T00:00:00Z"],
-      "remediation": "Renew the certificate and confirm the ACME renewal hook is scheduled."
+      "tags": [
+        "ssl",
+        "expiry"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 4,
+      "status_id": 1,
+      "time": 1773478361000,
+      "finding_info": {
+        "uid": "ssl/expired-certificate",
+        "title": "TLS certificate expires in 6 days",
+        "types": [
+          "ssl",
+          "expiry"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "ssl/expired-certificate",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "ssl"
+      },
+      "remediation": {
+        "desc": "Renew the certificate and confirm the ACME renewal hook is scheduled."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "status.example.com:443"
+          },
+          "data": {
+            "extracted": [
+              "notAfter=2026-03-20T00:00:00Z"
+            ]
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "status.example.com",
+          "name": "status.example.com:443",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 4,
-      "templateId": "http/misconfiguration/missing-hsts",
-      "name": "Strict-Transport-Security header missing",
-      "severity": "medium",
+      "checkId": "http/misconfiguration/missing-hsts",
+      "engine": "nuclei",
       "host": "billing.example.com",
       "matchedAt": "https://billing.example.com/",
-      "type": "http",
-      "tags": ["headers", "hsts"],
-      "remediation": "Add Strict-Transport-Security with a max-age of at least 31536000 at the edge."
+      "tags": [
+        "headers",
+        "hsts"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 3,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "http/misconfiguration/missing-hsts",
+        "title": "Strict-Transport-Security header missing",
+        "types": [
+          "headers",
+          "hsts"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/misconfiguration/missing-hsts",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http"
+      },
+      "remediation": {
+        "desc": "Add Strict-Transport-Security with a max-age of at least 31536000 at the edge."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "https://billing.example.com/"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "billing.example.com",
+          "name": "https://billing.example.com/",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 5,
-      "templateId": "http/misconfiguration/missing-hsts",
-      "name": "Strict-Transport-Security header missing",
-      "severity": "medium",
+      "checkId": "http/misconfiguration/missing-hsts",
+      "engine": "nuclei",
       "host": "docs.example.com",
       "matchedAt": "https://docs.example.com/",
-      "type": "http",
-      "tags": ["headers", "hsts"],
-      "remediation": "Add Strict-Transport-Security with a max-age of at least 31536000 at the edge."
+      "tags": [
+        "headers",
+        "hsts"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 3,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "http/misconfiguration/missing-hsts",
+        "title": "Strict-Transport-Security header missing",
+        "types": [
+          "headers",
+          "hsts"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/misconfiguration/missing-hsts",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http"
+      },
+      "remediation": {
+        "desc": "Add Strict-Transport-Security with a max-age of at least 31536000 at the edge."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "https://docs.example.com/"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "docs.example.com",
+          "name": "https://docs.example.com/",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 6,
-      "templateId": "http/technologies/version-disclosure",
-      "name": "Server version disclosed in response headers",
-      "severity": "medium",
+      "checkId": "http/technologies/version-disclosure",
+      "engine": "nuclei",
       "host": "legacy.example.com",
       "matchedAt": "https://legacy.example.com/",
-      "type": "http",
-      "tags": ["disclosure", "headers"],
-      "extracted": ["Server: Apache/2.4.29 (Ubuntu)"],
-      "remediation": "Set ServerTokens Prod so the banner no longer advertises the patch level."
+      "tags": [
+        "disclosure",
+        "headers"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 3,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "http/technologies/version-disclosure",
+        "title": "Server version disclosed in response headers",
+        "types": [
+          "disclosure",
+          "headers"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/technologies/version-disclosure",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http"
+      },
+      "remediation": {
+        "desc": "Set ServerTokens Prod so the banner no longer advertises the patch level."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "https://legacy.example.com/"
+          },
+          "data": {
+            "extracted": [
+              "Server: Apache/2.4.29 (Ubuntu)"
+            ]
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "legacy.example.com",
+          "name": "https://legacy.example.com/",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 7,
-      "templateId": "http/exposures/files/directory-listing",
-      "name": "Directory listing enabled",
-      "severity": "medium",
+      "checkId": "http/exposures/files/directory-listing",
+      "engine": "nuclei",
       "host": "docs.example.com",
       "matchedAt": "https://docs.example.com/assets/",
-      "type": "http",
-      "tags": ["exposure", "listing"],
-      "remediation": "Disable autoindex for the assets prefix."
+      "tags": [
+        "exposure",
+        "listing"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 3,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "http/exposures/files/directory-listing",
+        "title": "Directory listing enabled",
+        "types": [
+          "exposure",
+          "listing"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/exposures/files/directory-listing",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http"
+      },
+      "remediation": {
+        "desc": "Disable autoindex for the assets prefix."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "https://docs.example.com/assets/"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "docs.example.com",
+          "name": "https://docs.example.com/assets/",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 8,
-      "templateId": "http/misconfiguration/cookies-without-secure",
-      "name": "Session cookie set without the Secure attribute",
-      "severity": "low",
+      "checkId": "http/misconfiguration/cookies-without-secure",
+      "engine": "nuclei",
       "host": "id.example.com",
       "matchedAt": "https://id.example.com/login",
-      "type": "http",
-      "tags": ["cookies", "session"],
-      "remediation": "Set Secure, HttpOnly and SameSite on every session cookie."
+      "tags": [
+        "cookies",
+        "session"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 2,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "http/misconfiguration/cookies-without-secure",
+        "title": "Session cookie set without the Secure attribute",
+        "types": [
+          "cookies",
+          "session"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/misconfiguration/cookies-without-secure",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http"
+      },
+      "remediation": {
+        "desc": "Set Secure, HttpOnly and SameSite on every session cookie."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "https://id.example.com/login"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "id.example.com",
+          "name": "https://id.example.com/login",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 9,
-      "templateId": "http/misconfiguration/missing-csp",
-      "name": "Content-Security-Policy header missing",
-      "severity": "low",
+      "checkId": "http/misconfiguration/missing-csp",
+      "engine": "nuclei",
       "host": "billing.example.com",
       "matchedAt": "https://billing.example.com/",
-      "type": "http",
-      "tags": ["headers", "csp"],
-      "remediation": "Publish a Content-Security-Policy, starting in report-only mode."
+      "tags": [
+        "headers",
+        "csp"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 2,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "http/misconfiguration/missing-csp",
+        "title": "Content-Security-Policy header missing",
+        "types": [
+          "headers",
+          "csp"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/misconfiguration/missing-csp",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http"
+      },
+      "remediation": {
+        "desc": "Publish a Content-Security-Policy, starting in report-only mode."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "https://billing.example.com/"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "billing.example.com",
+          "name": "https://billing.example.com/",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 10,
-      "templateId": "http/misconfiguration/missing-csp",
-      "name": "Content-Security-Policy header missing",
-      "severity": "low",
+      "checkId": "http/misconfiguration/missing-csp",
+      "engine": "nuclei",
       "host": "status.example.com",
       "matchedAt": "https://status.example.com/",
-      "type": "http",
-      "tags": ["headers", "csp"],
-      "remediation": "Publish a Content-Security-Policy, starting in report-only mode."
+      "tags": [
+        "headers",
+        "csp"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 2,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "http/misconfiguration/missing-csp",
+        "title": "Content-Security-Policy header missing",
+        "types": [
+          "headers",
+          "csp"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "http/misconfiguration/missing-csp",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "http"
+      },
+      "remediation": {
+        "desc": "Publish a Content-Security-Policy, starting in report-only mode."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "https://status.example.com/"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "status.example.com",
+          "name": "https://status.example.com/",
+          "type": "nuclei"
+        }
+      ]
     },
     {
       "scanId": "9f2c1a70-4c1b-4d2e-9a55-0d1f7c3b8e10",
       "lineNo": 11,
-      "templateId": "dns/caa-fingerprint",
-      "name": "No CAA record published",
-      "severity": "info",
+      "checkId": "dns/caa-fingerprint",
+      "engine": "nuclei",
       "host": "billing.example.com",
       "matchedAt": "billing.example.com",
-      "type": "dns",
-      "tags": ["dns", "caa"],
-      "remediation": "Publish a CAA record naming the issuers permitted for this zone."
+      "tags": [
+        "dns",
+        "caa"
+      ],
+      "class_uid": 2004,
+      "category_uid": 2,
+      "type_uid": 200401,
+      "activity_id": 1,
+      "severity_id": 1,
+      "status_id": 1,
+      "finding_info": {
+        "uid": "dns/caa-fingerprint",
+        "title": "No CAA record published",
+        "types": [
+          "dns",
+          "caa"
+        ]
+      },
+      "metadata": {
+        "version": "1.5.0",
+        "event_code": "dns/caa-fingerprint",
+        "product": {
+          "name": "nuclei",
+          "vendor_name": "flanksource-recon"
+        }
+      },
+      "unmapped": {
+        "protocol": "dns"
+      },
+      "remediation": {
+        "desc": "Publish a CAA record naming the issuers permitted for this zone."
+      },
+      "evidences": [
+        {
+          "url": {
+            "url_string": "billing.example.com"
+          }
+        }
+      ],
+      "resources": [
+        {
+          "uid": "billing.example.com",
+          "name": "billing.example.com",
+          "type": "nuclei"
+        }
+      ]
     }
   ]
 }

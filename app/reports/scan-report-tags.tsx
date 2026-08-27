@@ -201,7 +201,7 @@ function tagBadge(label: string): FindingBadge {
   return badge(label, tagStyle(label));
 }
 
-function matcherBadge(label: string): FindingBadge {
+function statusCodeBadge(label: string): FindingBadge {
   const normalized = normalize(label);
   if (["fail", "failed", "error"].includes(normalized)) {
     return badge(label, style("threat", UiShieldCross));
@@ -212,7 +212,7 @@ function matcherBadge(label: string): FindingBadge {
   return badge(label, style("audit", UiListChecks));
 }
 
-function typeBadge(label: string): FindingBadge {
+function engineBadge(label: string): FindingBadge {
   return badge(label, typeStyle(label));
 }
 
@@ -246,14 +246,14 @@ export function findingBadges(group: FindingGroup): FindingBadge[] {
     seen.add(key);
     badges.push(candidate);
   };
-  group.matcherNames.map(matcherBadge).forEach(push);
-  group.types.map(typeBadge).forEach(push);
+  group.statusCodes.map(statusCodeBadge).forEach(push);
+  group.engines.map(engineBadge).forEach(push);
   group.tags.map(tagBadge).forEach(push);
   return badges;
 }
 
 export function findingTypeIcon(group: FindingGroup): BadgeIcon {
-  return group.types.length > 0 ? typeStyle(group.types[0]).icon : UiScan;
+  return group.engines.length > 0 ? typeStyle(group.engines[0]).icon : UiScan;
 }
 
 export function resourceInstanceIcon(type: string): BadgeIcon {

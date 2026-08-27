@@ -16,13 +16,16 @@ function finding(lineNo: number): ReportFinding {
   return {
     scanId: "scan-1",
     lineNo,
-    templateId: "gcp/iam_service_account_keys",
-    name: "Service account key is exposed",
-    severity: "high",
+    checkId: "gcp/iam_service_account_keys",
+    engine: "prowler",
     host: "example-prod",
     matchedAt: SERVICE_ACCOUNT.name,
-    matcherName: "FAIL",
-    type: "prowler",
+    severity_id: 4,
+    status_code: "FAIL",
+    finding_info: {
+      uid: "gcp/iam_service_account_keys",
+      title: "Service account key is exposed",
+    },
     tags: ["identity", "leaked-secret", "compliance:CIS-1.2"],
     resources: [SERVICE_ACCOUNT],
   };
@@ -56,13 +59,15 @@ describe("grouped finding report sections", () => {
   });
 
   it("renders descriptions and recommended actions as markdown", () => {
-    const richFinding = {
-      ...finding(1),
-      remediation:
-        "1. Rotate the **affected key**.\n2. Follow the [response runbook](https://example.test/runbook).",
-      raw: {
-        info: { description: "The **service account** can access `production` resources." },
-        resources: [SERVICE_ACCOUNT],
+    const base = finding(1);
+    const richFinding: ReportFinding = {
+      ...base,
+      remediation: {
+        desc: "1. Rotate the **affected key**.\n2. Follow the [response runbook](https://example.test/runbook).",
+      },
+      finding_info: {
+        ...base.finding_info,
+        desc: "The **service account** can access `production` resources.",
       },
     };
 
