@@ -1,5 +1,7 @@
 import {
   SEVERITIES,
+  findingTitle,
+  severityOf,
   type FilterSelection,
   type Finding,
   type Scan,
@@ -81,21 +83,38 @@ function pushEvidence(lines: string[], finding: Finding): void {
   const address = `${finding.scanId}#${finding.lineNo}`;
   lines.push("", `### Evidence — ${address}`, "");
   pushField(lines, "Matched at", finding.matchedAt);
-  pushField(lines, "Matcher", finding.matcherName);
-  pushField(lines, "Timestamp", finding.timestamp);
-  pushBlock(lines, { title: "Extracted", value: finding.extracted?.join("\n"), level: 4 });
-  pushBlock(lines, { title: "Reproduce", value: finding.curl, level: 4 });
-  pushBlock(lines, { title: "Request", value: finding.request, level: 4 });
-  pushBlock(lines, { title: "Response", value: finding.response, level: 4 });
+  pushField(lines, "Status", finding.status_code);
+  pushField(lines, "Timestamp", finding.time ? new Date(finding.time).toISOString() : undefined);
+  // Each entry of evidences[], in the order the engine reported it. What used
+  // to be four columns only nuclei ever filled — request, response, curl,
+  // extracted — is one modelled object per engine now, so a control's
+  // assertions and an HTTP exchange render through the same path.
+  (finding.evidences ?? []).forEach((evidence) => {
+    if (evidence.name) pushField(lines, "Matched", evidence.name);
+    // Not the URL when it is the location already stated above: for nuclei they
+    // are the same string, and printing it twice reads as two facts.
+    if (evidence.url?.url_string && evidence.url.url_string !== finding.matchedAt) {
+      pushField(lines, "URL", evidence.url.url_string);
+    }
+    pushBlock(lines, { title: "Request", value: evidence.http_request?.args, level: 4 });
+    pushBlock(lines, { title: "Response", value: evidence.http_response?.message, level: 4 });
+    if (evidence.data !== undefined && evidence.data !== null) {
+      pushBlock(lines, {
+        title: "Details",
+        value: JSON.stringify(evidence.data, null, 2),
+        level: 4,
+      });
+    }
+  });
 }
 
-function pushFindingGroup(lines: string[], templateId: string, findings: Finding[]): void {
+function pushFindingGroup(lines: string[], checkId: string, findings: Finding[]): void {
   const resources: FindingResourceInstance[] = uniqueFindingResourceInstances(findings);
-  const titles = [...new Set(findings.map((finding) => oneLine(finding.name)))];
+  const titles = [...new Set(findings.map((finding) => oneLine(findingTitle(finding))))];
   const severities = SEVERITIES.filter((severity) =>
-    findings.some((finding) => finding.severity === severity),
+    findings.some((finding) => severityOf(finding) === severity),
   );
-  lines.push("", `## ${oneLine(templateId)}`, "");
+  lines.push("", `## ${oneLine(checkId)}`, "");
   pushField(lines, "Title", titles.join("; "));
   pushField(lines, "Severity", severities.map((severity) => severity.toUpperCase()).join(", "));
   pushField(lines, "Instances", String(findings.length));
@@ -104,9 +123,13 @@ function pushFindingGroup(lines: string[], templateId: string, findings: Finding
   resources.forEach((resource) => {
     lines.push(`| ${tableCell(resource.name)} | ${tableCell(resource.region)} | ${tableCell(resource.type)} | ${tableCell(resource.uid)} |`);
   });
-  const remediations = [...new Set(findings.map((finding) => finding.remediation).filter(Boolean))];
+  const remediations = [
+    ...new Set(findings.map((finding) => finding.remediation?.desc).filter(Boolean)),
+  ];
   pushBlock(lines, { title: "Remediation", value: remediations.join("\n\n") });
-  const references = [...new Set(findings.flatMap((finding) => finding.reference ?? []))];
+  const references = [
+    ...new Set(findings.flatMap((finding) => finding.remediation?.references ?? [])),
+  ];
   if (references.length) {
     lines.push("", "### References", "", ...references.map((reference) => `- ${oneLine(reference)}`));
   }
@@ -115,13 +138,20 @@ function pushFindingGroup(lines: string[], templateId: string, findings: Finding
 
 export function findingSearchTokens(finding: Finding): string[] {
   return [
-    finding.name,
-    finding.templateId,
-    finding.matcherName,
-    finding.severity,
+    findingTitle(finding),
+    finding.checkId,
+    finding.status_code,
+    severityOf(finding),
     finding.host,
-    finding.type,
+    finding.engine,
     ...finding.tags,
+    // What each piece of evidence is called. This is where nuclei's matcher and
+    // InSpec's failing assertion live now, so searching for either still finds
+    // the finding — through one field rather than one column per engine.
+    ...(finding.evidences ?? []).map((evidence) => evidence.name),
+    // Last, and last in the table's token list too: a search for the matched
+    // location followed by the host is one contiguous phrase, which is how the
+    // table's own search box is used.
     finding.matchedAt,
   ].filter((value): value is string => Boolean(value));
 }
@@ -129,10 +159,10 @@ export function findingSearchTokens(finding: Finding): string[] {
 export function findingMatchesSearch(finding: Finding, search: string): boolean {
   const needle = search.trim().toLowerCase();
   const tableTokens = [
-    finding.severity,
+    severityOf(finding),
     ...findingSearchTokens(finding),
     finding.host,
-    finding.type,
+    finding.engine ?? "",
     ...finding.tags,
     finding.matchedAt,
   ];
@@ -143,14 +173,14 @@ function groupFindings(findings: Finding[]): Map<string, Finding[]> {
   const rank = new Map(SEVERITIES.map((severity, index) => [severity, index]));
   const sorted = [...findings].sort(
     (left, right) =>
-      (rank.get(left.severity) ?? SEVERITIES.length) -
-        (rank.get(right.severity) ?? SEVERITIES.length) ||
-      left.templateId.localeCompare(right.templateId) ||
+      (rank.get(severityOf(left)) ?? SEVERITIES.length) -
+        (rank.get(severityOf(right)) ?? SEVERITIES.length) ||
+      left.checkId.localeCompare(right.checkId) ||
       left.host.localeCompare(right.host) ||
       left.lineNo - right.lineNo,
   );
   return sorted.reduce((groups, finding) => {
-    groups.set(finding.templateId, [...(groups.get(finding.templateId) ?? []), finding]);
+    groups.set(finding.checkId, [...(groups.get(finding.checkId) ?? []), finding]);
     return groups;
   }, new Map<string, Finding[]>());
 }

@@ -5,16 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FindingDetail } from "./FindingDetail";
 import type { Finding } from "./types";
 
-// A CVE finding as nuclei reports it: the normalised columns carry almost none
-// of what triage needs — description, impact, classification and the template
-// path only exist under `raw.info`.
+// A CVE finding as nuclei reports it, stored as an OCSF Detection Finding.
+//
+// Everything triage needs has a published name now: the description and impact
+// are finding_info.desc and impact, the classification is vulnerabilities[],
+// the template path is finding_info.uid_alt, and the HTTP exchange is one
+// evidences[] entry. All of it used to be reachable only by digging through
+// `raw.info`, differently per engine.
 const HTTP_FINDING: Finding = {
   id: "01JFINDING",
   scanId: "scan-1",
   lineNo: 5,
-  templateId: "CVE-2018-15811",
-  name: "DotNetNuke 9.2 - 9.2.1 - Weak Encryption",
-  severity: "high",
+  checkId: "CVE-2018-15811",
+  engine: "nuclei",
   host: "https://api.example.test",
   matchedAt: "https://api.example.test/dnn",
   resources: [{
@@ -23,33 +26,58 @@ const HTTP_FINDING: Finding = {
     uid: "https://api.example.test/dnn",
     name: "https://api.example.test/dnn",
   }],
-  type: "http",
   tags: ["cve", "rce"],
-  timestamp: "2026-08-11T07:35:45+03:00",
-  remediation: "Update to DotNetNuke 9.2.2 or later.",
-  reference: ["https://wpscan.com/vulnerability/9117"],
-  curl: "curl -X GET https://api.example.test/dnn",
-  request: "GET /dnn HTTP/1.1\nHost: api.example.test",
-  response: "HTTP/1.1 200 OK",
-  raw: {
-    "template-path": "/templates/http/cves/2018/CVE-2018-15811.yaml",
-    "matcher-status": true,
-    ip: "203.0.113.7",
-    port: "443",
-    info: {
-      author: ["pdteam"],
-      description: "DNN uses a weak encryption algorithm to protect input parameters.",
-      impact: "Attackers can decrypt or tamper with input parameters.",
-      classification: {
-        "cve-id": ["cve-2018-15811"],
-        "cwe-id": ["cwe-326"],
-        "cvss-score": 7.5,
-        "cvss-metrics": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
-        "epss-score": 0.74048,
-        "epss-percentile": 0.99431,
-      },
-      metadata: { product: "dotnetnuke", "max-request": 1 },
+
+  class_uid: 2004,
+  category_uid: 2,
+  type_uid: 200401,
+  activity_id: 1,
+  severity_id: 4,
+  status_id: 1,
+  time: Date.parse("2026-08-11T07:35:45+03:00"),
+
+  finding_info: {
+    uid: "CVE-2018-15811",
+    title: "DotNetNuke 9.2 - 9.2.1 - Weak Encryption",
+    desc: "DNN uses a weak encryption algorithm to protect input parameters.",
+    types: ["cve", "rce"],
+    uid_alt: "/templates/http/cves/2018/CVE-2018-15811.yaml",
+  },
+  impact: "Attackers can decrypt or tamper with input parameters.",
+  metadata: {
+    version: "1.5.0",
+    event_code: "CVE-2018-15811",
+    product: { name: "nuclei", vendor_name: "flanksource-recon" },
+  },
+  remediation: {
+    desc: "Update to DotNetNuke 9.2.2 or later.",
+    references: ["https://wpscan.com/vulnerability/9117"],
+  },
+  vulnerabilities: [{
+    title: "DotNetNuke 9.2 - 9.2.1 - Weak Encryption",
+    cve: {
+      uid: "cve-2018-15811",
+      cwe_uid: "cwe-326",
+      cvss: [{
+        base_score: 7.5,
+        vector_string: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+      }],
+      epss: { score: "0.74048", percentile: 0.99431 },
     },
+  }],
+  evidences: [{
+    name: "status",
+    url: { url_string: "https://api.example.test/dnn" },
+    dst_endpoint: { ip: "203.0.113.7", port: 443, hostname: "api.example.test" },
+    http_request: { args: "GET /dnn HTTP/1.1\nHost: api.example.test" },
+    http_response: { message: "HTTP/1.1 200 OK" },
+    data: { curl: "curl -X GET https://api.example.test/dnn" },
+  }],
+  unmapped: {
+    protocol: "http",
+    matcher_name: "status",
+    authors: ["pdteam"],
+    product: "dotnetnuke",
   },
 };
 
@@ -84,7 +112,8 @@ describe("FindingDetail", () => {
     expect(screen.getByText("7.5")).toBeInTheDocument();
     expect(screen.getByText("0.74048 (p0.99431)")).toBeInTheDocument();
 
-    // Template path, address and template metadata exist only in the raw record.
+    // The template path is finding_info.uid_alt, the resolved address is the
+    // evidence's destination endpoint, and what neither names is unmapped.
     expect(screen.getByText("/templates/http/cves/2018/CVE-2018-15811.yaml")).toBeInTheDocument();
     expect(screen.getByText("203.0.113.7:443")).toBeInTheDocument();
     expect(screen.getByText("product")).toBeInTheDocument();
@@ -96,14 +125,12 @@ describe("FindingDetail", () => {
       <FindingDetail
         finding={{
           ...HTTP_FINDING,
-          remediation:
-            "1. Rotate the **affected key**.\n2. Follow the [response runbook](https://example.test/runbook).",
-          raw: {
-            ...HTTP_FINDING.raw,
-            info: {
-              ...(HTTP_FINDING.raw?.info as Record<string, unknown>),
-              description: "The **service account** can access `production` resources.",
-            },
+          remediation: {
+            desc: "1. Rotate the **affected key**.\n2. Follow the [response runbook](https://example.test/runbook).",
+          },
+          finding_info: {
+            ...HTTP_FINDING.finding_info,
+            desc: "The **service account** can access `production` resources.",
           },
         }}
       />,
@@ -121,37 +148,39 @@ describe("FindingDetail", () => {
     expect(screen.getByText("affected key").closest("ol")).not.toBeNull();
   });
 
-  it("keeps curl, request and response on an Evidence tab counted by what the finding carries", () => {
+  it("renders the exchange on an Evidence tab counted by the blocks it produced", () => {
     render(<FindingDetail finding={HTTP_FINDING} />);
 
+    // Request, response and the engine's own payload. The evidence's URL is not
+    // a fourth: it is the location the overview already states.
     const evidence = screen.getByRole("tab", { name: /Evidence/ });
     expect(evidence).toHaveTextContent("3");
     fireEvent.click(evidence);
 
-    expect(screen.getByText("Reproduce (curl)")).toBeInTheDocument();
-    expect(screen.getByText(/curl -X GET/)).toBeInTheDocument();
-    expect(screen.getByText(/GET \/dnn HTTP\/1\.1/)).toBeInTheDocument();
-    expect(screen.getByText(/HTTP\/1\.1 200 OK/)).toBeInTheDocument();
+    expect(screen.getByText("status · Request")).toBeInTheDocument();
+    expect(screen.getByText("status · Response")).toBeInTheDocument();
+    expect(screen.getByText("status · Details")).toBeInTheDocument();
+    expect(screen.queryByText("status · URL")).toBeNull();
   });
 
-  it("drops the Evidence tab when the engine captured no request or response", () => {
-    const bare = { ...HTTP_FINDING };
-    delete bare.curl;
-    delete bare.request;
-    delete bare.response;
+  it("drops the Evidence tab when the engine captured nothing", () => {
+    const bare: Finding = { ...HTTP_FINDING, evidences: [] };
 
     render(<FindingDetail finding={bare} />);
 
     expect(screen.queryByRole("tab", { name: /Evidence/ })).toBeNull();
   });
 
-  it("renders the whole finding — engine record included — on the Raw JSON tab", () => {
+  it("renders the whole OCSF record on the Raw JSON tab", () => {
     render(<FindingDetail finding={HTTP_FINDING} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Raw JSON" }));
 
     expect(screen.getByText(/01JFINDING/)).toBeInTheDocument();
-    expect(screen.getByText("raw")).toBeInTheDocument();
+    // The engine's own payload is inside the record now rather than beside it,
+    // so what a copy of this tab carries is the finding and its evidence both.
+    expect(screen.getByText("evidences")).toBeInTheDocument();
+    expect(screen.queryByText("raw")).toBeNull();
   });
 });
 
@@ -162,31 +191,45 @@ const COMPLIANCE_FINDING: Finding = {
   _id: "scan-2#1",
   scanId: "scan-2",
   lineNo: 1,
-  templateId: "cis-gcp-1.4-iam",
-  name: "[IAM] Ensure that there are only GCP-managed service account keys for each service account",
-  severity: "medium",
+  checkId: "cis-gcp-1.4-iam",
+  engine: "inspec",
   host: "acme-platform-prod",
   matchedAt:
     "[acme-platform-prod] Service Account: builder@acme-platform-prod.iam.gserviceaccount.com should not have user-managed keys",
-  type: "inspec",
   tags: ["profile:inspec-gcp-cis-benchmark", "cis_gcp:1.4", "cis_level:1"],
-  timestamp: "2026-08-20T09:41:02+02:00",
-  remediation: "Anyone who has access to the keys will be able to access resources.",
-  reference: ["https://www.cisecurity.org/benchmark/google_cloud_computing_platform/"],
-  raw: {
-    profile: "inspec-gcp-cis-benchmark",
-    control: {
-      id: "cis-gcp-1.4-iam",
-      impact: 0.5,
-      code: "control 'cis-gcp-1.4-iam' do\n  impact 'medium'\nend",
-    },
-    result: {
-      status: "failed",
-      code_desc:
-        "[acme-platform-prod] Service Account: builder@acme-platform-prod.iam.gserviceaccount.com should not have user-managed keys",
-      message: 'expected ["USER_MANAGED", "SYSTEM_MANAGED"] not to include "USER_MANAGED"',
-    },
+  severity_id: 3,
+  status_id: 1,
+  time: Date.parse("2026-08-20T09:41:02+02:00"),
+  finding_info: {
+    uid: "cis-gcp-1.4-iam",
+    title:
+      "[IAM] Ensure that there are only GCP-managed service account keys for each service account",
   },
+  remediation: {
+    desc: "Anyone who has access to the keys will be able to access resources.",
+    references: ["https://www.cisecurity.org/benchmark/google_cloud_computing_platform/"],
+  },
+  // One entry per assertion the control failed, which is the collapse: the
+  // control is the check, and its N results are its evidence. Then the control's
+  // own source, whose payload is the Ruby itself rather than an object.
+  evidences: [
+    {
+      name:
+        "[acme-platform-prod] Service Account: builder@acme-platform-prod.iam.gserviceaccount.com should not have user-managed keys",
+      data: {
+        status: "failed",
+        profile: "inspec-gcp-cis-benchmark",
+        code_desc:
+          "[acme-platform-prod] Service Account: builder@acme-platform-prod.iam.gserviceaccount.com should not have user-managed keys",
+        message: 'expected ["USER_MANAGED", "SYSTEM_MANAGED"] not to include "USER_MANAGED"',
+      },
+    },
+    {
+      name: "Control source",
+      data:
+        "control 'cis-gcp-1.4-iam' do\n  impact 'medium'\n  describe google_service_account_keys do\n    its('key_types') { should_not include 'USER_MANAGED' }\n  end\nend",
+    },
+  ],
 };
 
 describe("a compliance finding", () => {
@@ -200,24 +243,26 @@ describe("a compliance finding", () => {
     expect(screen.getByRole("tab", { name: /Evidence/ })).toBeInTheDocument();
   });
 
-  it("shows the assertion and the reason it did not hold", () => {
+  it("titles the assertion's evidence with the assertion itself", () => {
     render(<FindingDetail finding={COMPLIANCE_FINDING} />);
 
     fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
 
-    expect(screen.getByText("Assertion")).toBeInTheDocument();
-    expect(screen.getByText("Why it failed")).toBeInTheDocument();
-    expect(screen.getByText(/not to include/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/should not have user-managed keys · Details$/),
+    ).toBeInTheDocument();
   });
 
-  it("shows the control's own source", () => {
+  it("shows the control's own source under its own name", () => {
     // The Ruby says what the control actually asserts, which is the difference
-    // between "this failed" and knowing whether the finding is right.
+    // between "this failed" and knowing whether the finding is right. Its
+    // payload is the source itself, so it is not titled as a wrapper.
     render(<FindingDetail finding={COMPLIANCE_FINDING} />);
 
     fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
 
     expect(screen.getByText("Control source")).toBeInTheDocument();
+    expect(screen.queryByText("Control source · Details")).toBeNull();
   });
 
   it("offers no HTTP evidence panels", () => {
@@ -240,26 +285,22 @@ const SECRET_FINDING: Finding = {
   _id: "scan-3#1",
   scanId: "scan-3",
   lineNo: 1,
-  templateId: "github-pat",
-  name: "GitHub Personal Access Token",
-  severity: "critical",
+  checkId: "github-pat",
+  engine: "trivy",
   host: "ghcr.io/acme/api:1.4",
   matchedAt: "app/config/credentials:4",
-  type: "trivy",
   tags: ["class:secret", "category:GitHub"],
-  remediation: "Rotate the credential and remove it from app/config/credentials",
-  raw: {
-    RuleID: "github-pat",
-    Title: "GitHub Personal Access Token",
-    StartLine: 4,
-    Match: "github_token = ****************",
-    Code: {
-      Lines: [
-        { Number: 3, Content: "[github]", IsCause: false },
-        { Number: 4, Content: "github_token = ****************", IsCause: true },
-      ],
-    },
+  severity_id: 5,
+  status_id: 1,
+  finding_info: {
+    uid: "github-pat",
+    title: "GitHub Personal Access Token",
+    types: ["secret", "class:secret", "category:GitHub"],
   },
+  remediation: { desc: "Rotate the credential and remove it from app/config/credentials" },
+  // The line number and nothing else. The matched text is masked in trivy's own
+  // report and is not carried at all, so there is nowhere for it to leak from.
+  evidences: [{ name: "secret", data: { start_line: 4 } }],
 };
 
 // A vulnerability has no code block: the package inventory is the evidence, and
@@ -268,31 +309,38 @@ const VULNERABILITY_FINDING: Finding = {
   _id: "scan-3#2",
   scanId: "scan-3",
   lineNo: 2,
-  templateId: "CVE-2019-19844",
-  name: "Django: crafted email address allows account takeover",
-  severity: "critical",
+  checkId: "CVE-2019-19844",
+  engine: "trivy",
   host: "ghcr.io/acme/api:1.4",
   matchedAt: "requirements.txt: Django@2.0.1",
-  type: "trivy",
   tags: ["class:lang-pkgs", "package:Django"],
-  raw: {
-    VulnerabilityID: "CVE-2019-19844",
-    PkgName: "Django",
-    Description: "Django before 1.11.27 allows account takeover.",
+  severity_id: 5,
+  status_id: 1,
+  finding_info: {
+    uid: "CVE-2019-19844",
+    title: "Django: crafted email address allows account takeover",
+    desc: "Django before 1.11.27 allows account takeover.",
   },
+  vulnerabilities: [{
+    title: "Django: crafted email address allows account takeover",
+    desc: "Django before 1.11.27 allows account takeover.",
+    is_fix_available: true,
+    cve: { uid: "CVE-2019-19844" },
+    affected_packages: [{ name: "Django", version: "2.0.1", fixed_in_version: "1.11.27" }],
+  }],
 };
 
 describe("an artifact finding", () => {
   afterEach(cleanup);
 
-  it("renders top-level engine descriptions as markdown", async () => {
+  it("renders the engine's description as markdown", async () => {
     render(
       <FindingDetail
         finding={{
           ...VULNERABILITY_FINDING,
-          raw: {
-            ...VULNERABILITY_FINDING.raw,
-            Description: "The **affected package** is vulnerable.",
+          finding_info: {
+            ...VULNERABILITY_FINDING.finding_info,
+            desc: "The **affected package** is vulnerable.",
           },
         }}
       />,
@@ -303,30 +351,30 @@ describe("an artifact finding", () => {
     });
   });
 
-  it("shows the lines of the file the secret is in", () => {
+  it("says where in the file the secret is and nothing of its value", () => {
+    // Trivy masks the matched text before it writes the report, and recon does
+    // not carry even the masked form: the line number is the whole of the
+    // evidence, so there is nowhere for the token to leak from.
     render(<FindingDetail finding={SECRET_FINDING} />);
 
     fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
 
-    expect(screen.getByText("Code")).toBeInTheDocument();
-    expect(screen.getByText(/github_token/)).toBeInTheDocument();
+    expect(screen.getByText("secret · Details")).toBeInTheDocument();
+    // The JSON renders as a collapsible tree, so the rendered text is read off
+    // the whole tree rather than matched as one node.
+    expect(document.body.textContent).toMatch(/start_line:\s*4/);
+    expect(document.body.textContent).not.toMatch(/\*{4}/);
   });
 
-  it("keeps the value masked, exactly as the engine wrote it", () => {
-    render(<FindingDetail finding={SECRET_FINDING} />);
-
-    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
-
-    expect(screen.getByText(/\*{4}/)).toBeInTheDocument();
-  });
-
-  it("falls back to the description when there is no code to show", () => {
+  it("shows a vulnerability's package and description without an Evidence tab", () => {
+    // Nothing was captured: trivy read a package inventory. The affected
+    // package and the description are the finding, and both are the overview.
     render(<FindingDetail finding={VULNERABILITY_FINDING} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
-
+    expect(screen.queryByRole("tab", { name: /Evidence/ })).toBeNull();
     expect(screen.getByText("Description")).toBeInTheDocument();
     expect(screen.getByText(/account takeover/)).toBeInTheDocument();
+    expect(screen.getByText("Django@2.0.1")).toBeInTheDocument();
   });
 
   it("offers no HTTP evidence panels", () => {

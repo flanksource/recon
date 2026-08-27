@@ -33,37 +33,42 @@ const SCAN: Scan = {
 const HIGH_FINDING: Finding = {
   scanId: "scan-1",
   lineNo: 7,
-  templateId: "tls-version",
-  name: "Exposed TLS service",
-  severity: "high",
+  checkId: "tls-version",
+  engine: "nuclei",
   host: "app.acme.test",
   matchedAt: "https://app.acme.test",
-  matcherName: "protocol",
-  type: "ssl",
   tags: ["tls", "exposure"],
-  timestamp: "2026-08-21T08:00:30Z",
-  extracted: ["TLS 1.0", "TLS 1.1"],
-  remediation: "Disable deprecated TLS versions.",
-  reference: ["https://example.test/tls-guidance"],
-  curl: "curl -vk https://app.acme.test",
-  request: "GET / HTTP/1.1\nHost: app.acme.test",
-  response: "HTTP/1.1 200 OK\nServer: example",
+  severity_id: 4,
+  status_id: 1,
+  time: Date.parse("2026-08-21T08:00:30Z"),
+  finding_info: { uid: "tls-version", title: "Exposed TLS service" },
+  remediation: {
+    desc: "Disable deprecated TLS versions.",
+    references: ["https://example.test/tls-guidance"],
+  },
+  evidences: [{
+    name: "protocol",
+    url: { url_string: "https://app.acme.test" },
+    http_request: { args: "GET / HTTP/1.1\nHost: app.acme.test" },
+    http_response: { message: "HTTP/1.1 200 OK\nServer: example" },
+    data: { curl: "curl -vk https://app.acme.test", extracted: ["TLS 1.0", "TLS 1.1"] },
+  }],
   // What the server synthesises for an engine that names no resource of its
   // own: the host is the identity and the matched URL is the label.
   resources: [{ provider: "network", uid: "app.acme.test", name: "https://app.acme.test", type: "ssl" }],
-  raw: { secretEngineField: "must-not-be-copied" },
+  unmapped: { protocol: "ssl", secretEngineField: "must-not-be-copied" },
 };
 
 const LOW_FINDING: Finding = {
   scanId: "scan-1",
   lineNo: 2,
-  templateId: "header-check",
-  name: "Informational response header",
-  severity: "low",
+  checkId: "header-check",
+  engine: "nuclei",
   host: "app.acme.test",
   matchedAt: "https://app.acme.test/health",
-  type: "http",
   tags: [],
+  severity_id: 2,
+  finding_info: { uid: "header-check", title: "Informational response header" },
   resources: [{ provider: "network", uid: "app.acme.test", name: "https://app.acme.test/health", type: "http" }],
 };
 
@@ -107,7 +112,7 @@ describe("finding Markdown export", () => {
       (lineNo): Finding => ({
         ...HIGH_FINDING,
         lineNo,
-        templateId: "gcp/iam_service_account_keys",
+        checkId: "gcp/iam_service_account_keys",
         resources: [{ provider: "gcp", ...serviceAccount }],
       }),
     );
@@ -184,17 +189,8 @@ Parameters unavailable for this legacy scan.
 ### Evidence — scan-1#7
 
 - Matched at: https://app.acme.test
-- Matcher: protocol
-- Timestamp: 2026-08-21T08:00:30Z
-
-#### Extracted
-
-    TLS 1.0
-    TLS 1.1
-
-#### Reproduce
-
-    curl -vk https://app.acme.test
+- Timestamp: 2026-08-21T08:00:30.000Z
+- Matched: protocol
 
 #### Request
 
@@ -205,6 +201,16 @@ Parameters unavailable for this legacy scan.
 
     HTTP/1.1 200 OK
     Server: example
+
+#### Details
+
+    {
+      "curl": "curl -vk https://app.acme.test",
+      "extracted": [
+        "TLS 1.0",
+        "TLS 1.1"
+      ]
+    }
 
 ## header-check
 

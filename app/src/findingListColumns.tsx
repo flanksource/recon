@@ -1,6 +1,6 @@
 import type { DataTableColumn } from "@flanksource/clicky-ui/data";
 import { severityBadge } from "./scanColumns";
-import { resourceLabel, type Finding } from "./types";
+import { findingTitle, resourceLabel, severityOf, type Finding } from "./types";
 
 export function typeTail(type: string | undefined): string {
   if (!type) return "";
@@ -16,9 +16,9 @@ export function findingService(finding: Finding): string {
 function checkCell(finding: Finding) {
   return (
     <div className="flex min-w-0 items-baseline gap-2">
-      <span className="truncate font-medium">{finding.name}</span>
-      <code className="truncate text-xs text-muted-foreground" title={finding.templateId}>
-        {finding.templateId}
+      <span className="truncate font-medium">{findingTitle(finding)}</span>
+      <code className="truncate text-xs text-muted-foreground" title={finding.checkId}>
+        {finding.checkId}
       </code>
     </div>
   );
@@ -69,10 +69,12 @@ export const findingListColumns: DataTableColumn<Finding>[] = [
     label: "Severity",
     sortable: true,
     shrink: true,
-    render: (value) => severityBadge(value as Finding["severity"]),
+    // From severity_id rather than the column: the record carries OCSF's
+    // integer scale, and the ladder the UI groups by is derived from it.
+    render: (_value, row) => severityBadge(severityOf(row)),
   },
   {
-    key: "name",
+    key: "checkId",
     label: "Check",
     sortable: true,
     grow: true,

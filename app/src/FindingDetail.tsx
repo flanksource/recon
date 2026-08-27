@@ -3,12 +3,18 @@ import { DropdownMenu, Tabs, type TabItem } from "@flanksource/clicky-ui/compone
 import { Badge, CodeBlock, Markdown, Properties } from "@flanksource/clicky-ui/data";
 import { muteScopeOptions } from "./mute-prefill";
 import { severityBadge } from "./scanColumns";
-import { resourceLabel, type Finding } from "./types";
+import {
+  resourceLabel,
+  severityOf,
+  type Evidence as EvidenceEntry,
+  type Finding,
+  type OcsfVulnerability,
+} from "./types";
 
-// The engine's own record. Nuclei nests most of what an operator needs to
-// triage — description, impact, CVE classification, template path — under
-// `info`, and none of it survives the normalised columns, so the detail view
-// reads the raw record rather than asking the API for a second shape.
+// Whatever the engine reported that OCSF has no name for. This used to be the
+// whole record: description, impact, CVE classification and template path were
+// reachable only by digging through it, differently per engine. They are
+// modelled attributes now, and what is left here is genuinely unnamed.
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -21,12 +27,9 @@ function text(value: unknown): string | undefined {
   return undefined;
 }
 
-function list(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map(text).filter((entry): entry is string => entry !== undefined);
-  }
-  const single = text(value);
-  return single ? [single] : [];
+
+function unique(values: (string | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 /**
@@ -93,14 +96,22 @@ const NVD = "https://nvd.nist.gov/vuln/detail/";
 
 // CVE, CVSS, CWE and EPSS read as one risk statement, so they sit together as
 // badges rather than as four more rows in the property list.
-function Classification({ classification }: { classification: Record<string, unknown> }) {
-  const cves = list(classification["cve-id"]);
-  const cwes = list(classification["cwe-id"]);
-  const score = text(classification["cvss-score"]);
-  const metrics = text(classification["cvss-metrics"]);
-  const epss = text(classification["epss-score"]);
-  const percentile = text(classification["epss-percentile"]);
-  const cpe = text(classification.cpe);
+//
+// Read off `vulnerabilities[]`, which is the object OCSF defines for exactly
+// this. It used to come from nuclei's `raw.info.classification` — so a trivy
+// CVE, which is the same fact from a different engine, rendered nothing here.
+function Classification({ vulnerabilities }: { vulnerabilities: OcsfVulnerability[] }) {
+  const cves = unique(vulnerabilities.map((entry) => entry.cve?.uid));
+  const cwes = unique(
+    vulnerabilities.flatMap((entry) => [entry.cwe?.uid, text(record(entry.cve).cwe_uid)]),
+  );
+  const cvss = vulnerabilities.flatMap((entry) => entry.cve?.cvss ?? []).map(record);
+  const score = text(cvss[0]?.base_score);
+  const metrics = text(cvss[0]?.vector_string);
+  const scoring = record(record(vulnerabilities[0]?.cve).epss);
+  const epss = text(scoring.score);
+  const percentile = text(scoring.percentile);
+  const cpe = text(record(vulnerabilities[0]?.affected_packages?.[0]).cpe_name);
 
   if (!cves.length && !cwes.length && !score && !epss && !cpe) return null;
 
@@ -140,43 +151,103 @@ function Mono({ children }: { children: ReactNode }) {
   return <code className="break-all text-xs">{children}</code>;
 }
 
+/**
+ * Which package is affected and what fixes it.
+ *
+ * The one thing a vulnerability finding is actually about, and until the record
+ * modelled it the answer lived in the title and a tag — so "upgrade Django to
+ * 2.2.9" had to be read out of prose rather than shown.
+ */
+function AffectedPackages({ vulnerabilities }: { vulnerabilities: OcsfVulnerability[] }) {
+  const packages = vulnerabilities.flatMap((entry) => entry.affected_packages ?? []);
+  if (packages.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold uppercase text-muted-foreground">Affected</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {packages.map((entry) => (
+          <span key={`${entry.name}@${entry.version}`} className="flex items-center gap-1">
+            <Badge size="sm">{`${entry.name ?? "—"}@${entry.version ?? "—"}`}</Badge>
+            {entry.fixed_in_version && (
+              <Badge variant="metric" tone="success" label="fixed in" value={entry.fixed_in_version} />
+            )}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The address that answered, as `ip:port`.
+ *
+ * OCSF's home for it is the evidence's destination endpoint, which is where an
+ * engine that resolved a name writes what it resolved to. A URL alone does not
+ * say it: behind a load balancer or a wildcard DNS record, which host served the
+ * request is the fact that makes a finding reproducible.
+ */
+function resolvedAddress(finding: Finding): string | undefined {
+  const endpoint = (finding.evidences ?? []).map((entry) => entry.dst_endpoint).find(Boolean);
+  if (!endpoint) return undefined;
+  return [endpoint.ip || endpoint.hostname, endpoint.port].filter(Boolean).join(":") || undefined;
+}
+
 function overviewProperties(
   finding: Finding,
-  raw: Record<string, unknown>,
-  info: Record<string, unknown>,
+  unmapped: Record<string, unknown>,
 ): { key: string; value: ReactNode; hidden?: boolean }[] {
-  const metadata = record(info.metadata);
-  const authors = list(info.author);
-  const matchedAt = finding.matchedAt || text(raw["matched-at"]);
-  const templatePath = text(raw["template-path"]);
-  const url = text(raw.url);
-  const ip = text(raw.ip);
-  const port = text(raw.port);
-  const matcherStatus = raw["matcher-status"];
+  const info = finding.finding_info ?? {};
+  const matchedAt = finding.matchedAt;
+  // The template path, which nuclei reports and OCSF models as the alternate
+  // identifier of the thing that found this.
+  const templatePath = info.uid_alt;
+  const account = finding.cloud?.account;
+  const stamped = finding.time ? new Date(finding.time).toISOString() : undefined;
+  const address = resolvedAddress(finding);
 
   return [
-    { key: "Severity", value: severityBadge(finding.severity) },
+    { key: "Severity", value: severityBadge(severityOf(finding)) },
     {
-      key: "Template",
+      key: "Check",
       value: (
         <div className="flex flex-col">
-          <Mono>{finding.templateId}</Mono>
+          <Mono>{finding.checkId}</Mono>
           {templatePath && <span className="text-[11px] text-muted-foreground">{templatePath}</span>}
         </div>
       ),
     },
-    { key: "Type", value: <Mono>{finding.type ?? text(raw.type) ?? "—"}</Mono> },
-    { key: "Matcher", value: <Mono>{finding.matcherName}</Mono>, hidden: !finding.matcherName },
+    { key: "Engine", value: <Mono>{finding.engine ?? "—"}</Mono> },
     {
-      key: "Matcher status",
-      value: <Mono>{String(matcherStatus)}</Mono>,
-      hidden: typeof matcherStatus !== "boolean",
+      key: "Status",
+      value: <Mono>{finding.status_code}</Mono>,
+      hidden: !finding.status_code,
     },
-    { key: "Host", value: <Mono>{finding.host || text(raw.host) || "—"}</Mono> },
     {
-      key: "Address",
-      value: <Mono>{[ip, port].filter(Boolean).join(":")}</Mono>,
-      hidden: !ip && !port,
+      key: "Detail",
+      value: <Mono>{finding.status_detail}</Mono>,
+      hidden: !finding.status_detail,
+    },
+    {
+      key: "Verdict",
+      value: <Mono>{finding.verdict}</Mono>,
+      // Every finding is a failure unless it says otherwise, so the default
+      // carries no information worth a row.
+      hidden: !finding.verdict || finding.verdict === "fail",
+    },
+    { key: "Host", value: <Mono>{finding.host || "—"}</Mono> },
+    {
+      key: "Account",
+      value: (
+        <Mono>
+          {[finding.cloud?.provider, account?.name || account?.uid].filter(Boolean).join(" · ")}
+        </Mono>
+      ),
+      hidden: !finding.cloud?.provider && !account?.uid,
+    },
+    {
+      key: "Region",
+      value: <Mono>{finding.cloud?.region}</Mono>,
+      hidden: !finding.cloud?.region,
     },
     {
       key: finding.resources && finding.resources.length > 1 ? "Resources" : "Resource",
@@ -191,13 +262,24 @@ function overviewProperties(
       // the resource uid, already above.
       hidden: !matchedAt || finding.resources?.some((r) => r.uid === matchedAt) === true,
     },
-    { key: "URL", value: <Mono>{url}</Mono>, hidden: !url || url === matchedAt },
+    {
+      key: "Address",
+      value: <Mono>{address}</Mono>,
+      hidden: !address,
+    },
+    {
+      key: "Reference",
+      value: <Mono>{info.src_url}</Mono>,
+      // Only when it is not already in the References list above. Engines that
+      // report one link report it as both, and printing it twice reads as two
+      // sources rather than one.
+      hidden: !info.src_url || (finding.remediation?.references ?? []).includes(info.src_url),
+    },
     { key: "Tags", value: <Mono>{finding.tags.join(", ")}</Mono>, hidden: !finding.tags.length },
-    { key: "Authors", value: <Mono>{authors.join(", ")}</Mono>, hidden: !authors.length },
     {
       key: "Timestamp",
-      value: <Mono>{finding.timestamp ?? text(raw.timestamp)}</Mono>,
-      hidden: !finding.timestamp && !text(raw.timestamp),
+      value: <Mono>{stamped}</Mono>,
+      hidden: !stamped,
     },
     {
       key: "Scan",
@@ -207,40 +289,37 @@ function overviewProperties(
         </Mono>
       ),
     },
-    ...Object.entries(metadata).map(([key, value]) => ({
-      key: `metadata.${key}`,
+    // Whatever the engine reported that the schema has no name for. It is the
+    // last section rather than the first because everything above it now has a
+    // published name, which is the whole point of the record being OCSF.
+    ...Object.entries(unmapped).map(([key, value]) => ({
+      key: `unmapped.${key}`,
       value: <Mono>{text(value) ?? JSON.stringify(value)}</Mono>,
     })),
   ];
 }
 
-function Overview({ finding, raw }: { finding: Finding; raw: Record<string, unknown> }) {
-  const info = record(raw.info);
-  const description = text(info.description) ?? text(raw.description) ?? text(raw.Description);
-  const impact = text(info.impact);
-  const remediation = finding.remediation ?? text(info.remediation);
-  const references = finding.reference?.length ? finding.reference : list(info.reference);
-  const error = text(raw.error);
+function Overview({ finding }: { finding: Finding }) {
+  const info = finding.finding_info ?? {};
+  const description = info.desc;
+  const impact = finding.risk_details || finding.impact;
+  const remediation = finding.remediation?.desc;
+  const references = finding.remediation?.references ?? [];
+  const unmapped = record(finding.unmapped);
+  const error = text(unmapped.error);
 
   return (
     <div className="flex flex-col gap-3">
-      <Classification classification={record(info.classification)} />
+      <Classification vulnerabilities={finding.vulnerabilities ?? []} />
       {error && (
         <p role="alert" className="rounded border border-destructive/40 bg-destructive/5 p-2 text-sm text-destructive">
-          {error}
+          {String(error)}
         </p>
       )}
       {description && <Prose title="Description" body={description} />}
       {impact && <Prose title="Impact" body={impact} />}
       {remediation && <Prose title="Recommended action" body={remediation} />}
-      {finding.extracted?.length ? (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-semibold uppercase text-muted-foreground">Extracted</span>
-          <pre className="overflow-x-auto rounded bg-muted/50 p-2 text-xs">
-            {finding.extracted.join("\n")}
-          </pre>
-        </div>
-      ) : null}
+      <AffectedPackages vulnerabilities={finding.vulnerabilities ?? []} />
       {references.length ? (
         <div className="flex flex-col gap-1">
           <span className="text-xs font-semibold uppercase text-muted-foreground">References</span>
@@ -256,9 +335,9 @@ function Overview({ finding, raw }: { finding: Finding; raw: Record<string, unkn
         </div>
       ) : null}
       <Properties<ReactNode>
-        items={overviewProperties(finding, raw, info)}
+        items={overviewProperties(finding, record(finding.unmapped))}
         renderValue={(_key, value) => value}
-        renderLabel={(key) => key.replace(/^metadata\./, "")}
+        renderLabel={(key) => key.replace(/^unmapped\./, "")}
         density="compact"
         showDensityMenu={false}
       />
@@ -266,63 +345,74 @@ function Overview({ finding, raw }: { finding: Finding; raw: Record<string, unkn
   );
 }
 
-// `request` and `response` are HTTP wire text only for http-family templates.
-// A javascript or code template puts its own source in `request` and whatever
-// it exported in `response`, so highlighting either as HTTP misreads it.
+type EvidenceBlock = { title: string; language: string; source: string };
+
+// `request` and `response` are HTTP wire text only for http-family templates. A
+// javascript or code template puts its own source in the request and whatever it
+// exported in the response, so highlighting either as HTTP misreads it. The
+// protocol is nuclei's own fact, which is why it lives in `unmapped`.
 const REQUEST_LANGUAGE: Record<string, string> = { javascript: "javascript", code: "bash" };
 
-// complianceEvidence is what a benchmark control leaves behind.
-//
-// A compliance finding has no request, response or curl — nothing was sent. Its
-// evidence is the assertion that failed and the reason it did, which InSpec
-// reports as code_desc and message on the result. Without this the Evidence tab
-// disappears and the only way to see why a control failed is the raw JSON.
-function complianceEvidence(raw: Record<string, unknown>) {
-  const result = record(raw.result);
-  const codeDesc = text(result.code_desc);
-  const message = text(result.message);
-  const skip = text(result.skip_message);
-  const detail = message || skip;
+/**
+ * What a finding leaves behind, from the one place every engine now writes it.
+ *
+ * There used to be three of these — one reading nuclei's request/response/curl
+ * columns, one digging InSpec's assertion out of `raw.result`, one digging
+ * trivy's code lines out of `raw.Code` or `raw.CauseMetadata` — and an engine
+ * the list did not name showed an empty tab however much it had reported.
+ * `evidences[]` is the same shape for all four, so this is one function.
+ *
+ * `data` is OCSF's json_t: the engine's own shape, which the schema has no
+ * names for. It renders as JSON rather than being picked apart by key, because
+ * picking it apart by key is exactly what this replaced.
+ */
+function evidenceBlocks({
+  entry,
+  protocol,
+  matchedAt,
+}: {
+  entry: EvidenceEntry;
+  protocol: string;
+  // Where the finding says it is. The evidence names the same location for
+  // every HTTP engine, and a block repeating it reads as a second fact.
+  matchedAt: string;
+}): EvidenceBlock[] {
+  const language = REQUEST_LANGUAGE[protocol] ?? "http";
+  const label = entry.name ? `${entry.name} · ` : "";
+  const prose = typeof entry.data === "string";
+  const details =
+    entry.data === undefined || entry.data === null
+      ? undefined
+      : prose
+        ? (entry.data as string)
+        : JSON.stringify(entry.data, null, 2);
 
   return [
-    codeDesc && { title: "Assertion", language: "text", source: codeDesc },
-    detail && { title: "Why it failed", language: "text", source: detail },
-    text(record(raw.control).code) && {
-      title: "Control source",
-      language: "ruby",
-      source: text(record(raw.control).code) as string,
+    entry.http_request?.args && {
+      title: `${label}Request`,
+      language,
+      source: entry.http_request.args,
     },
-  ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
-}
-
-// artifactEvidence is what a trivy finding leaves behind.
-//
-// Nothing was sent here either: the evidence is the lines of the file the
-// finding is in, which trivy reports as a Code block on a secret and under
-// CauseMetadata on a misconfiguration. A vulnerability has no such block — the
-// package inventory is the evidence — so its description stands in, which is
-// otherwise only reachable through the raw JSON.
-function artifactEvidence(raw: Record<string, unknown>) {
-  const code = record(raw.Code).Lines ?? record(record(raw.CauseMetadata).Code).Lines;
-  const lines = Array.isArray(code)
-    ? code
-        .map((line) => {
-          const entry = record(line);
-          const number = text(entry.Number);
-          return number ? `${number.padStart(4)}  ${text(entry.Content) ?? ""}` : undefined;
-        })
-        .filter((line): line is string => line !== undefined)
-    : [];
-
-  return [
-    lines.length && { title: "Code", language: "text", source: lines.join("\n") },
-    !lines.length &&
-      text(raw.Description) && {
-        title: "Description",
+    entry.http_response?.message && {
+      title: `${label}Response`,
+      language: language === "http" ? "http" : "text",
+      source: entry.http_response.message,
+    },
+    details && {
+      // A string payload is the whole of what the entry carries — InSpec's
+      // control source is the case — so the entry's own name titles it rather
+      // than being suffixed with a word for a wrapper that is not there.
+      title: prose ? entry.name || "Details" : `${label}Details`,
+      language: prose ? "text" : "json",
+      source: details,
+    },
+    entry.url?.url_string !== matchedAt &&
+      entry.url?.url_string && {
+        title: `${label}URL`,
         language: "text",
-        source: text(raw.Description) as string,
+        source: entry.url.url_string,
       },
-  ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
+  ].filter((block): block is EvidenceBlock => Boolean(block));
 }
 
 export function FindingDetail({
@@ -338,25 +428,14 @@ export function FindingDetail({
   // places can navigate to the rule editor.
   onMute?: (path: string) => void;
 }) {
-  const raw = record(finding.raw);
-  const requestLanguage = REQUEST_LANGUAGE[finding.type ?? ""] ?? "http";
-  const evidence = finding.type === "inspec"
-    ? complianceEvidence(raw)
-    : finding.type === "trivy"
-    ? artifactEvidence(raw)
-    : [
-        finding.curl && { title: "Reproduce (curl)", language: "bash", source: finding.curl },
-        finding.request && { title: "Request", language: requestLanguage, source: finding.request },
-        finding.response && {
-          title: "Response",
-          language: requestLanguage === "http" ? "http" : "text",
-          source: finding.response,
-        },
-      ].filter((entry): entry is { title: string; language: string; source: string } => Boolean(entry));
+  const protocol = text(record(finding.unmapped).protocol) ?? "";
+  const evidence = (finding.evidences ?? []).flatMap((entry) =>
+    evidenceBlocks({ entry, protocol, matchedAt: finding.matchedAt }),
+  );
 
   // Engines that match on a parsed document rather than a transaction (dns,
-  // ssl, file) carry no request or response at all — an empty Evidence tab
-  // would say "look here" about nothing.
+  // ssl, file) carry no evidence at all — an empty Evidence tab would say
+  // "look here" about nothing.
   const tabs: TabItem[] = [
     { id: "overview", label: "Overview" },
     ...(evidence.length ? [{ id: "evidence", label: "Evidence", count: evidence.length }] : []),
@@ -394,7 +473,7 @@ export function FindingDetail({
           />
         )}
       </div>
-      {tab === "overview" && <Overview finding={finding} raw={raw} />}
+      {tab === "overview" && <Overview finding={finding} />}
       {tab === "evidence" && (
         <div className="flex flex-col gap-3">
           {evidence.map((entry) => (

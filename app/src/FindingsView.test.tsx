@@ -61,7 +61,7 @@ function state(): FindingState {
       scanId: "01JSCAN",
       lineNo: 7,
       targetId: "gcp-prod",
-      templateId: "cloudstorage_bucket_public_access",
+      checkId: "cloudstorage_bucket_public_access",
       name: "Cloud Storage bucket is not publicly accessible",
       severity: "critical",
       host: "acme-platform",
@@ -104,8 +104,8 @@ describe("FindingsView", () => {
     });
     vi.mocked(syncFindings).mockResolvedValue({
       agent: "recon", matchedResources: 1, matchedStates: 1, eligible: 1, skipped: 0,
-      open: 1, resolved: 0, silenced: 0, direct: 1, rolledUp: 0, pushed: 0,
-      configs: [], unresolved: [],
+      open: 1, resolved: 0, silenced: 0, direct: 1, rolledUp: 0, pinned: 0, pushed: 0,
+      configs: [], unresolved: [], ambiguous: [],
     });
   });
   afterEach(cleanup);
@@ -123,37 +123,28 @@ describe("FindingsView", () => {
     });
   });
 
-  it("expands a check into its affected resources", async () => {
+  it("links a check to its own page instead of expanding it", async () => {
     render(<FindingsView />);
 
-    const check = await screen.findByText("Cloud Storage bucket is not publicly accessible");
-    const checkID = screen.getByText("cloudstorage_bucket_public_access");
-    expect(check.parentElement).toContainElement(checkID);
+    const checkID = await screen.findByText("cloudstorage_bucket_public_access");
+    expect(checkID.parentElement).toHaveTextContent("Cloud Storage bucket is not publicly accessible");
 
-    fireEvent.click(check.closest("tr")!);
-    expect(await screen.findByText("audit-logs")).toBeInTheDocument();
-    expect(fetchFindingStatesMock).toHaveBeenCalledWith(expect.objectContaining({
-      engine: "prowler",
-      check: "cloudstorage_bucket_public_access",
-      status: "open",
-    }));
-    expect(screen.getByRole("link", { name: "View finding" })).toHaveAttribute(
-      "href",
-      "/findings/01JFINDING",
-    );
-    expect(screen.getByRole("img", { name: "open" })).toBeInTheDocument();
+    // The engine and the check id, in a path someone can send. The link names
+    // the check it opens rather than only its severity.
+    expect(
+      screen.getByRole("link", { name: "critical: Cloud Storage bucket is not publicly accessible" }),
+    ).toHaveAttribute("href", "/findings/prowler/cloudstorage_bucket_public_access");
   });
 
-  it("does not link a state without persisted finding evidence", async () => {
-    fetchFindingStatesMock.mockResolvedValue({
-      data: [{ ...state(), findingId: undefined, finding: undefined }],
-      page: { limit: 100, offset: 0, total: 1 },
-    });
+  it("does not query affected resources from the listing", async () => {
     render(<FindingsView />);
 
-    fireEvent.click((await screen.findByText("Cloud Storage bucket is not publicly accessible")).closest("tr")!);
-    expect(await screen.findByText("Finding unavailable")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "View finding" })).not.toBeInTheDocument();
+    await waitFor(() => expect(fetchFindingGroupsMock).toHaveBeenCalled());
+    fireEvent.click((await screen.findByText("cloudstorage_bucket_public_access")).closest("tr")!);
+
+    // The states belong to the check's page now; fetching them per row was what
+    // put a second table inside the first one's scroll container.
+    expect(fetchFindingStatesMock).not.toHaveBeenCalled();
   });
 
   it("adds resolved and muted states only when their toggles are selected", async () => {

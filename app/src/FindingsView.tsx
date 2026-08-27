@@ -1,20 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@flanksource/clicky-ui/components";
-import { DataTable, type BadgeStatus, type DataTableColumn } from "@flanksource/clicky-ui/data";
-import { fetchFindingGroups, fetchFindingStates, syncFindings } from "./api-insights";
+import { DataTable, type DataTableColumn } from "@flanksource/clicky-ui/data";
+import { fetchFindingGroups, syncFindings, type SyncRequest } from "./api-insights";
 import { selectionQuery, useEntityFilters } from "./filters";
+import { findingGroupHref } from "./finding-routes";
 import { severityBadge } from "./scanColumns";
 import { SyncInsightsButton } from "./SyncInsightsButton";
-import type { FindingGroup, FindingGroupPage, FindingState, FindingStatePage } from "./types";
+import type { FindingGroup, FindingGroupPage } from "./types";
 
 const PAGE_SIZE = 100;
-const FINDING_STATUSES: Record<string, BadgeStatus> = {
-  open: "error",
-  resolved: "success",
-  muted: "warning",
-  manual: "info",
-};
-const findingStatus = (raw: unknown): BadgeStatus | null => FINDING_STATUSES[String(raw)] ?? null;
 const FINDING_SORT_KEYS: Record<string, string> = {
   severity: "severity",
   name: "check",
@@ -28,7 +22,19 @@ const findingGroupColumns: DataTableColumn<FindingGroup>[] = [
     label: "Severity",
     sortable: true,
     shrink: true,
-    render: (value) => severityBadge(value as FindingGroup["severity"]),
+    // The row's link is anchored in the first column, so this cell's text is
+    // the link's accessible name. Severity alone would announce a table of
+    // links all called "high"; the check name says where the link goes without
+    // disturbing a layout that is deliberately severity-first.
+    // The separator is inside the string rather than between the elements:
+    // accessible-name computation trims each node's own edge whitespace, so a
+    // bare space between them concatenates to "criticalCloud Storage…".
+    render: (value, row) => (
+      <>
+        {severityBadge(value as FindingGroup["severity"])}
+        <span className="sr-only">{`: ${row.name}`}</span>
+      </>
+    ),
   },
   {
     key: "name",
@@ -53,39 +59,6 @@ const findingGroupColumns: DataTableColumn<FindingGroup>[] = [
       .join(" · "),
   },
   { key: "lastSeen", label: "Last seen", kind: "timestamp", sortable: true },
-];
-
-const findingStateColumns: DataTableColumn<FindingState>[] = [
-  {
-    key: "resource",
-    label: "Resource",
-    grow: true,
-    render: (_value, row) => row.resource ? (
-      <a className="font-medium hover:underline" href={`/resources/${encodeURIComponent(row.resource.id ?? row.resourceId)}`}>
-        {row.resource.name || row.resource.uid}
-      </a>
-    ) : row.resourceId,
-  },
-  { key: "account", label: "Account", accessor: (row) => row.resource?.scope },
-  {
-    key: "finding",
-    label: "Finding",
-    shrink: true,
-    render: (_value, row) => row.finding?.id ? (
-      <a className="font-medium text-primary hover:underline" href={`/findings/${encodeURIComponent(row.finding.id)}`}>
-        View finding
-      </a>
-    ) : <span className="text-muted-foreground">Finding unavailable</span>,
-  },
-  {
-    key: "status",
-    label: "Status",
-    kind: "status",
-    status: { map: findingStatus, showLabel: true },
-    shrink: true,
-  },
-  { key: "lastSeen", label: "Last seen", kind: "timestamp" },
-  { key: "occurrences", label: "Occurrences", shrink: true },
 ];
 
 export function FindingsView() {
@@ -126,7 +99,7 @@ export function FindingsView() {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setOffset(0); }, [selector]);
-  const sync = useCallback((dryRun: boolean) => syncFindings(selector, dryRun), [selector]);
+  const sync = useCallback((request: SyncRequest) => syncFindings(selector, request), [selector]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -141,7 +114,10 @@ export function FindingsView() {
         columns={findingGroupColumns}
         loading={busy}
         getRowId={(row) => `${row.engine}/${row.checkId}`}
-        renderExpandedRow={(row) => <AffectedResources group={row} selector={selector} />}
+        // A real <a> per row rather than an onClick: the check a row stands for
+        // is a page someone can link to, open in a new tab, and reach by
+        // keyboard — none of which an expanding row offered.
+        getRowHref={(row) => findingGroupHref(row.engine, row.checkId)}
         externalFilters={filters}
         showGlobalFilter
         globalFilter={query}
@@ -188,48 +164,3 @@ function StatusToggle({ label, selected, onClick }: { label: string; selected: b
   );
 }
 
-function AffectedResources({ group, selector }: { group: FindingGroup; selector: Record<string, string> }) {
-  const [page, setPage] = useState<FindingStatePage | null>(null);
-  const [offset, setOffset] = useState(0);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [error, setError] = useState<string | null>(null);
-  const selectorKey = JSON.stringify(selector);
-
-  useEffect(() => {
-    let live = true;
-    setError(null);
-    fetchFindingStates({
-      ...JSON.parse(selectorKey) as Record<string, string>,
-      engine: group.engine,
-      check: group.checkId,
-      limit: pageSize,
-      offset,
-    })
-      .then((result) => { if (live) setPage(result); })
-      .catch((cause: Error) => { if (live) setError(cause.message); });
-    return () => { live = false; };
-  }, [group.checkId, group.engine, offset, pageSize, selectorKey]);
-
-  if (error) return <p role="alert" className="p-3 text-sm text-destructive">{error}</p>;
-  return (
-    <div className="bg-muted/20 p-3">
-      <DataTable<FindingState>
-        data={page?.data ?? []}
-        columns={findingStateColumns}
-        getRowId={(row) => row.id}
-        emptyMessage="No affected resources match these filters."
-        pagination={{
-          page: Math.floor(offset / pageSize),
-          pageSize,
-          total: page?.page.total ?? 0,
-          totalRelation: "eq",
-          onPageChange: (next) => setOffset(next * pageSize),
-          onPageSizeChange: (next) => {
-            setPageSize(next);
-            setOffset(0);
-          },
-        }}
-      />
-    </div>
-  );
-}

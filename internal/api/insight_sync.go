@@ -42,11 +42,17 @@ type InsightSync struct {
 	Silenced         int `json:"silenced"`
 	Direct           int `json:"direct"`
 	RolledUp         int `json:"rolledUp"`
-	Pushed           int `json:"pushed"`
+	// Pinned counts the states attached through a choice a previous sync
+	// remembered against their resource, rather than through the ladder.
+	Pinned int `json:"pinned"`
+	Pushed int `json:"pushed"`
 
 	Configs    []InsightConfig     `json:"configs"`
 	Unresolved []InsightUnresolved `json:"unresolved"`
-	Notes      []string            `json:"notes,omitempty"`
+	// Ambiguous are the identities more than one config item carried. They are
+	// reported whether or not a lower rung then resolved the state, because the
+	// finer identity is the one a person would want the insight attached to.
+	Ambiguous []InsightAmbiguity `json:"ambiguous"`
 }
 
 type InsightConfig struct {
@@ -55,6 +61,8 @@ type InsightConfig struct {
 	Type     string `json:"type,omitempty"`
 	Insights int    `json:"insights"`
 	RolledUp bool   `json:"rolledUp,omitempty"`
+	// Pinned marks a config item chosen by hand rather than found by the ladder.
+	Pinned bool `json:"pinned,omitempty"`
 }
 
 type InsightUnresolved struct {
@@ -65,6 +73,50 @@ type InsightUnresolved struct {
 	Reason   string   `json:"reason"`
 }
 
+// InsightAmbiguity is one identity that named more than one config item.
+//
+// Ambiguity is not a miss: the identity is right and the catalog holds several
+// things carrying it, so the only honest resolutions are to pick one or to
+// attach to what contains them. Reporting it structurally rather than as prose
+// is what lets either be offered.
+type InsightAmbiguity struct {
+	Identity string `json:"identity"`
+	Type     string `json:"type,omitempty"`
+	// Scope marks an identity that names the account, project or cluster rather
+	// than the thing the findings are about.
+	Scope bool `json:"scope,omitempty"`
+	// States is every current state that reached this identity; Resources is a
+	// bounded sample of the resources they belong to, for a reader.
+	States    int      `json:"states"`
+	Resources []string `json:"resources,omitempty"`
+	// Chosen is the option this run resolved the identity to, empty when nobody
+	// has chosen yet.
+	Chosen  string          `json:"chosen,omitempty"`
+	Options []InsightChoice `json:"options"`
+}
+
+// InsightChoice is one config item an ambiguous identity could be attached to.
+type InsightChoice struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	Type string `json:"type,omitempty"`
+	// Root marks a config item nothing else contains — the top of its tree.
+	Root bool `json:"root,omitempty"`
+	// Ancestor marks an option offered because it contains one of the matched
+	// items rather than because it carried the identity itself.
+	Ancestor bool `json:"ancestor,omitempty"`
+	Deleted  bool `json:"deleted,omitempty"`
+}
+
+// ConfigPin is the catalog config item a resource's insights hang off, chosen
+// by hand and remembered so later syncs stop asking the same question.
+type ConfigPin struct {
+	ConfigID string `json:"configId"`
+	// RolledUp records that the chosen item contains the resource rather than
+	// being it, so a later sync reports the attachment the same way this one did.
+	RolledUp bool `json:"rolledUp,omitempty"`
+}
+
 func (u InsightSync) MarshalJSON() ([]byte, error) {
 	type alias InsightSync
 	out := alias(u)
@@ -73,6 +125,9 @@ func (u InsightSync) MarshalJSON() ([]byte, error) {
 	}
 	if out.Unresolved == nil {
 		out.Unresolved = []InsightUnresolved{}
+	}
+	if out.Ambiguous == nil {
+		out.Ambiguous = []InsightAmbiguity{}
 	}
 	return json.Marshal(out)
 }

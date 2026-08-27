@@ -10,6 +10,8 @@ import { ReportPlayground } from "./ReportPlayground";
 import { ResourcesView } from "./ResourcesView";
 import { FindingsView } from "./FindingsView";
 import { FindingEntityPage } from "./FindingEntityPage";
+import { FindingGroupView } from "./FindingGroupView";
+import { parseCheckId } from "./finding-routes";
 import { ResourceView } from "./ResourceView";
 import { TargetView } from "./TargetView";
 import { TasksView } from "./TasksView";
@@ -58,6 +60,11 @@ function AppContent() {
   // A resource is addressable so a finding can link to the thing it is about.
   const resourceMatch = router.pathname.match(/^\/resources(?:\/([^/]+))?$/);
   const findingMatch = router.pathname.match(/^\/findings\/([^/]+)$/);
+  // A check is addressable, and its id is itself a path
+  // (gcp/bigquery_dataset_cmk_encryption) — so the group route is everything
+  // after the engine. Two or more segments, which is what keeps it from
+  // colliding with the single-segment finding route above.
+  const findingGroupMatch = router.pathname.match(/^\/findings\/([^/]+)\/(.+)$/);
   const templateEngine = templateMatch
     ? new URLSearchParams(window.location.search).get("engine") ?? undefined
     : undefined;
@@ -73,7 +80,7 @@ function AppContent() {
             ? "/mutes"
             : resourceMatch
               ? "/resources"
-              : findingMatch
+              : findingMatch || findingGroupMatch
                 ? "/findings"
                 : router.pathname;
   // The primary nav, built once so it can go either in the bar below or into
@@ -137,8 +144,19 @@ function AppContent() {
     />
   ) : router.pathname === "/scans" ? (
     <ScansView onOpenScan={(id) => router.navigate(`/scans/${encodeURIComponent(id)}`)} />
+  ) : findingGroupMatch ? (
+    <FindingGroupView
+      engine={decodeURIComponent(findingGroupMatch[1])}
+      checkId={parseCheckId(findingGroupMatch[2])}
+      onBack={() => router.navigate("/findings")}
+      onMuteCheck={(path) => router.navigate(path)}
+    />
   ) : findingMatch ? (
-    <FindingEntityPage id={decodeURIComponent(findingMatch[1])} />
+    <FindingEntityPage
+      id={decodeURIComponent(findingMatch[1])}
+      onBack={() => router.navigate("/findings")}
+      onMuteFinding={(path) => router.navigate(path)}
+    />
   ) : router.pathname === "/findings" ? (
     <FindingsView />
   ) : resourceMatch?.[1] ? (
