@@ -73,6 +73,10 @@ export async function fetchFindings(params?: FindingSelector): Promise<Finding[]
   return (await fetchFindingPage(params)).data;
 }
 
+export function fetchFinding(id: string): Promise<Finding> {
+  return request<Finding>(`${API}/finding/${encodeURIComponent(id)}`);
+}
+
 export function fetchScanStatus(): Promise<ScanStatus> {
   return request<ScanStatus>("/api/scan/current");
 }

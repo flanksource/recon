@@ -72,12 +72,23 @@ BEGIN
   END IF;
 
   -- Identity first: check_id and engine are what the lifecycle, the catalogue
-  -- and every stored mute rule key on, and they simply move.
+  -- and every stored mute rule key on.
+  --
+  -- check_id simply moves. `engine` cannot come from the column named `type`,
+  -- because that column is the conflation this redesign exists to delete: for
+  -- prowler and trivy it held the engine, for nuclei it held the protocol a
+  -- template spoke — so copying it across labels every nuclei finding "dns" or
+  -- "http", or nothing at all when the host never answered. The run knows which
+  -- scanner produced its findings, for all four engines, so it is the source.
+  --
+  -- The protocol is not lost: it moves to unmapped.protocol below, which is the
+  -- key the nuclei adapter writes it under.
   EXECUTE $sql$
-    UPDATE findings SET
-      check_id = template_id,
-      engine   = type
-    WHERE check_id IS NULL
+    UPDATE findings f SET
+      check_id = f.template_id,
+      engine   = COALESCE(NULLIF(s.engine, ''), NULLIF(f.type, ''))
+    FROM scans s
+    WHERE s.id = f.scan_id AND f.check_id IS NULL
   $sql$;
 
   -- matcher_name is the column this whole redesign exists to delete: four
@@ -119,18 +130,38 @@ BEGIN
     WHERE severity_id IS NULL
   $sql$;
 
+  -- What the finding means, which is the half of it triage reads and which had
+  -- no home before: `impact` is nuclei's word and `risk_details` prowler's, and
+  -- the browser dug for both under raw.info on every engine.
+  EXECUTE $sql$
+    UPDATE findings SET
+      impact       = NULLIF(coalesce(raw -> 'info' ->> 'impact', ''), ''),
+      risk_details = NULLIF(coalesce(raw ->> 'risk_details', ''), '')
+    WHERE impact IS NULL AND risk_details IS NULL AND raw IS NOT NULL
+  $sql$;
+
   -- finding_info is OCSF's "what was found". The description used to be
-  -- reachable only as raw.info.description, which is where the browser dug for
-  -- it on every engine; tags become finding_info.types, which is the nearest
+  -- reachable only by digging, and under a different key per engine — prowler
+  -- emits OCSF and spells it finding_info.desc, nuclei spells it
+  -- info.description; tags become finding_info.types, which is the nearest
   -- thing OCSF has to recon's labels.
   EXECUTE $sql$
     UPDATE findings SET finding_info = jsonb_strip_nulls(jsonb_build_object(
       'uid',   template_id,
       'title', name,
-      'desc',  NULLIF(coalesce(raw -> 'info' ->> 'description', raw ->> 'risk_details', ''), ''),
+      'desc',  NULLIF(coalesce(
+                 raw -> 'finding_info' ->> 'desc',
+                 raw -> 'info' ->> 'description', ''), ''),
       'types', CASE WHEN coalesce(array_length(tags, 1), 0) > 0
                     THEN to_jsonb(tags) ELSE NULL END,
-      'src_url', NULLIF(coalesce(raw -> 'info' ->> 'reference', ''), '')
+      -- One URL, not the list: nuclei writes info.reference as an array, and
+      -- ->> on an array renders the whole JSON text into a field the schema
+      -- types as a single link.
+      'src_url', NULLIF(coalesce(
+        CASE jsonb_typeof(raw -> 'info' -> 'reference')
+          WHEN 'array'  THEN raw -> 'info' -> 'reference' ->> 0
+          WHEN 'string' THEN raw -> 'info' ->> 'reference'
+        END, ''), '')
     ))
     WHERE finding_info IS NULL
   $sql$;
@@ -188,6 +219,15 @@ BEGIN
                             THEN jsonb_build_object('message', response) ELSE NULL END,
       'url',           CASE WHEN coalesce(matched_at, '') <> ''
                             THEN jsonb_build_object('url_string', matched_at) ELSE NULL END,
+      -- Which host actually answered, which a URL does not say. The adapter
+      -- writes it here too, from the same two fields of nuclei's record.
+      'dst_endpoint',  CASE WHEN coalesce(raw ->> 'ip', '') <> ''
+                            THEN jsonb_strip_nulls(jsonb_build_object(
+                                   'ip',       raw ->> 'ip',
+                                   'hostname', NULLIF(coalesce(raw ->> 'host', ''), ''),
+                                   'port',     CASE WHEN raw ->> 'port' ~ '^[0-9]+$'
+                                                    THEN (raw ->> 'port')::int END))
+                            ELSE NULL END,
       'data',          CASE WHEN coalesce(curl, '') <> '' OR coalesce(array_length(extracted, 1), 0) > 0
                             THEN jsonb_strip_nulls(jsonb_build_object(
                                    'curl',      NULLIF(coalesce(curl, ''), ''),
@@ -202,14 +242,57 @@ BEGIN
 
   -- Whatever of the engine's record has no modelled home, in OCSF's own escape
   -- hatch rather than a recon-specific column.
+  --
+  -- Named keys rather than "the record minus what was recognised". Copying the
+  -- rest wholesale would move the verbatim payload from `raw` to `unmapped` and
+  -- change nothing: the same unbounded blob, every attribute stored twice
+  -- beside the column that now holds it, and — for trivy — the masked secret
+  -- its adapter deliberately refuses to carry. What the rest of the record said
+  -- is still in the run's retained artifact, which is where it belongs.
+  --
+  -- Each engine's list is its adapter's, so a migrated row and one ingested
+  -- today carry the same keys spelled the same way. nuclei's raw record calls
+  -- the protocol `type` — the word the old column used for the engine — and its
+  -- matcher `matcher-name`; both are renamed to what the adapter writes, since
+  -- one fact spelled two ways is one no expression can read. trivy and inspec
+  -- populate nothing, and so does this.
   EXECUTE $sql$
-    UPDATE findings SET unmapped = raw - 'resources' - 'cloud' - 'info' - 'unmapped'
+    UPDATE findings SET unmapped = NULLIF(
+      CASE engine
+        WHEN 'prowler' THEN
+          -- prowler's own escape hatch. The compliance mappings are the reason
+          -- this is not dropped: its checks are organised by framework, and
+          -- "which CIS control does this fail" is the audit's actual question.
+          jsonb_strip_nulls(jsonb_build_object(
+            'categories', raw -> 'unmapped' -> 'categories',
+            'compliance', raw -> 'unmapped' -> 'compliance'))
+        WHEN 'nuclei' THEN
+          CASE WHEN COALESCE(raw ->> 'type', '') <> ''
+               THEN jsonb_build_object('protocol', raw ->> 'type') ELSE '{}'::jsonb END ||
+          CASE WHEN COALESCE(raw ->> 'matcher-name', '') <> ''
+               THEN jsonb_build_object('matcher_name', raw ->> 'matcher-name') ELSE '{}'::jsonb END ||
+          CASE WHEN jsonb_typeof(raw -> 'info' -> 'author') = 'array'
+               THEN jsonb_build_object('authors', raw -> 'info' -> 'author') ELSE '{}'::jsonb END
+        ELSE '{}'::jsonb
+      END, '{}'::jsonb)
     WHERE unmapped IS NULL AND raw IS NOT NULL
   $sql$;
 
   -- Quoted on both sides: `timestamp` is a type name as well as the old column's
   -- name, and unquoted it parses as the former.
-  EXECUTE $sql$ UPDATE findings SET "time" = "timestamp" WHERE "time" IS NULL $sql$;
+  --
+  -- The record is read when the column has nothing, which is prowler's whole
+  -- population: it spells time_dt without a zone, the old ingest parsed it as
+  -- RFC3339, that refuses a zoneless stamp, and the column was left NULL for
+  -- every prowler finding ever stored. `time` is prowler's epoch field, which is
+  -- seconds however much OCSF says milliseconds — see recordTime.
+  EXECUTE $sql$
+    UPDATE findings SET "time" = COALESCE(
+      "timestamp",
+      CASE WHEN raw ->> 'time_dt' ~ '^\d{4}-' THEN (raw ->> 'time_dt')::timestamptz END,
+      CASE WHEN raw ->> 'time' ~ '^\d+$' THEN to_timestamp((raw ->> 'time')::bigint) END)
+    WHERE "time" IS NULL
+  $sql$;
 END $$;
 
 -- Required by OCSF on every event, so no row may leave this migration without

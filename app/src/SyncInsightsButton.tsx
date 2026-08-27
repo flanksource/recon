@@ -1,23 +1,30 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button, Modal } from "@flanksource/clicky-ui/components";
+import { TaskManager } from "@flanksource/clicky-ui/data";
+import type { SyncRequest } from "./api-insights";
+import { SyncPreflight } from "./SyncPreflight";
 import type { InsightSync } from "./types";
 
+/** The kind the server tags a sync task run with; see internal/entities/sync_tasks.go. */
+const SYNC_TASK_KIND = "insight-sync";
+
 export function SyncInsightsButton({ sync, disabled = false }: {
-  sync: (dryRun: boolean) => Promise<InsightSync>;
+  sync: (request: SyncRequest) => Promise<InsightSync>;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<InsightSync | null>(null);
   const [pushed, setPushed] = useState<InsightSync | null>(null);
+  const [choices, setChoices] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const run = useCallback(async (dryRun: boolean) => {
+  const run = useCallback(async (request: SyncRequest) => {
     setBusy(true);
     setError(null);
     try {
-      const result = await sync(dryRun);
-      if (dryRun) setPreview(result);
+      const result = await sync(request);
+      if (request.dryRun) setPreview(result);
       else setPushed(result);
     } catch (cause) {
       setError((cause as Error).message);
@@ -29,10 +36,15 @@ export function SyncInsightsButton({ sync, disabled = false }: {
   const start = useCallback(() => {
     setPreview(null);
     setPushed(null);
+    setChoices({});
     setError(null);
     setOpen(true);
-    void run(true);
+    void run({ dryRun: true });
   }, [run]);
+
+  const choose = useCallback((identity: string, configId: string) => {
+    setChoices((current) => ({ ...current, [identity]: configId }));
+  }, []);
 
   return (
     <>
@@ -49,7 +61,9 @@ export function SyncInsightsButton({ sync, disabled = false }: {
           error={error}
           preview={preview}
           pushed={pushed}
-          onSync={() => void run(false)}
+          choices={choices}
+          onChoose={choose}
+          onRun={run}
           onClose={() => setOpen(false)}
         />
       </Modal>
@@ -57,14 +71,30 @@ export function SyncInsightsButton({ sync, disabled = false }: {
   );
 }
 
-function SyncBody({ busy, error, preview, pushed, onSync, onClose }: {
+function SyncBody({ busy, error, preview, pushed, choices, onChoose, onRun, onClose }: {
   busy: boolean;
   error: string | null;
   preview: InsightSync | null;
   pushed: InsightSync | null;
-  onSync: () => void;
+  choices: Record<string, string>;
+  onChoose: (identity: string, configId: string) => void;
+  onRun: (request: SyncRequest) => void;
   onClose: () => void;
 }) {
+  const result = pushed ?? preview;
+
+  // What the sync would attach, including the ambiguities this preview has since
+  // been given an answer for. Counted here rather than by re-previewing on every
+  // click: each preview walks the whole catalog again, and the states riding on
+  // each identity are already in the payload.
+  const [attached, pending] = useMemo(() => {
+    if (!result) return [0, 0];
+    const decided = result.ambiguous
+      .filter((item) => choices[item.identity] && choices[item.identity] !== item.chosen)
+      .reduce((total, item) => total + item.states, 0);
+    return [result.direct + result.rolledUp, decided];
+  }, [result, choices]);
+
   if (error) {
     return (
       <div className="flex flex-col gap-3">
@@ -76,48 +106,27 @@ function SyncBody({ busy, error, preview, pushed, onSync, onClose }: {
     );
   }
 
-  const result = pushed ?? preview;
-  if (busy && !result) {
-    return <p className="text-sm text-muted-foreground">Resolving current states against the catalog…</p>;
-  }
+  if (busy && !result) return <SyncProgress />;
   if (!result) return null;
-  const syncable = result.direct + result.rolledUp;
+  const syncable = attached + pending;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap gap-3">
-        <Count label="Resources" value={result.matchedResources} />
-        <Count label="States" value={result.matchedStates} />
-        <Count label="Eligible" value={result.eligible} />
-        <Count label="Skipped" value={result.skipped} />
-      </div>
-      <div className="flex flex-wrap gap-3">
-        <Count label="Open" value={result.open} />
-        <Count label="Resolved" value={result.resolved} />
-        <Count label="Silenced" value={result.silenced} />
-        <Count label="Direct" value={result.direct} />
-        <Count label="Rolled up" value={result.rolledUp} />
-        {pushed && <Count label="Pushed" value={pushed.pushed} />}
-      </div>
-
-      {result.server && (
-        <p className="text-xs text-muted-foreground">
-          {pushed ? "Synced to" : "Would sync to"} {result.server} as agent <code>{result.agent}</code>
-        </p>
-      )}
-      {result.configs.length > 0 && <ConfigList configs={result.configs} />}
-      {result.unresolved.length > 0 && <UnresolvedList unresolved={result.unresolved} />}
+      {busy && <SyncProgress />}
+      <SyncPreflight result={result} pushed={Boolean(pushed)} choices={choices} onChoose={onChoose} />
       {syncable === 0 && (
         <p className="text-sm text-muted-foreground">No resolvable insights match this selection.</p>
       )}
-      {result.notes?.map((note) => (
-        <p key={note} className="text-xs text-amber-600 dark:text-amber-400">{note}</p>
-      ))}
 
       <div className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onClose}>{pushed ? "Close" : "Cancel"}</Button>
+        {!pushed && pending > 0 && (
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => onRun({ dryRun: true, choices })}>
+            Preview with choices
+          </Button>
+        )}
         {!pushed && syncable > 0 && (
-          <Button size="sm" onClick={onSync} disabled={busy}>
+          <Button size="sm" onClick={() => onRun({ dryRun: false, choices })} disabled={busy}>
             {busy ? "Syncing…" : `Sync ${syncable} insights`}
           </Button>
         )}
@@ -126,47 +135,17 @@ function SyncBody({ busy, error, preview, pushed, onSync, onClose }: {
   );
 }
 
-function Count({ label, value }: { label: string; value: number }) {
+/**
+ * A sync spends its time in the catalog, one lookup per identity, and used to
+ * show nothing at all until it finished. The server runs it as a task, so the
+ * shared task view is the progress: same run, same phases, same bar the CLI
+ * draws.
+ */
+function SyncProgress() {
   return (
-    <div className="min-w-24 rounded-md border border-border bg-muted/30 p-3">
-      <div className="text-lg font-semibold">{value}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-    </div>
-  );
-}
-
-function ConfigList({ configs }: { configs: InsightSync["configs"] }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <h3 className="text-xs font-medium text-muted-foreground">Config items</h3>
-      <ul className="max-h-48 overflow-y-auto text-sm">
-        {configs.map((config) => (
-          <li key={config.id} className="flex items-baseline justify-between gap-2 py-0.5">
-            <span className="truncate">
-              {config.name || config.id}
-              {config.type && <span className="text-muted-foreground"> · {config.type}</span>}
-              {config.rolledUp && <span className="text-amber-600 dark:text-amber-400"> · rolled up</span>}
-            </span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">{config.insights}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function UnresolvedList({ unresolved }: { unresolved: InsightSync["unresolved"] }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <h3 className="text-xs font-medium text-muted-foreground">Not synced — no matching catalog item</h3>
-      <ul className="max-h-48 overflow-y-auto text-sm">
-        {unresolved.map((item) => (
-          <li key={item.finding} className="py-0.5">
-            {item.host || item.finding}
-            <span className="text-xs text-muted-foreground"> · tried {item.tried.join(", ")}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="flex flex-col gap-2">
+      <p className="text-sm text-muted-foreground">Resolving current states against the catalog…</p>
+      <TaskManager basePath="/api/v1" kind={SYNC_TASK_KIND} pollMs={1000} className="max-h-48 overflow-y-auto" />
     </div>
   );
 }

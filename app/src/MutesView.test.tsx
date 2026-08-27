@@ -209,11 +209,11 @@ describe("the mutes view", () => {
       examined: 40,
       findings: [
         {
-          scanId: "s1", lineNo: 1, templateId: "open-redirect", name: "Open redirect",
+          scanId: "s1", lineNo: 1, checkId: "open-redirect", name: "Open redirect",
           severity: "low", host: "httpbin.example.test", matchedAt: "", tags: [],
         },
         {
-          scanId: "s1", lineNo: 4, templateId: "open-redirect", name: "Open redirect",
+          scanId: "s1", lineNo: 4, checkId: "open-redirect", name: "Open redirect",
           severity: "low", host: "other.example.test", matchedAt: "", tags: [],
         },
       ],

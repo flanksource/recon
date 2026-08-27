@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Button } from "@flanksource/clicky-ui/components";
 import { MuteTargets } from "./MuteTargets";
-import { SEVERITIES } from "./types";
+import { SEVERITIES, severityOf } from "./types";
 import { MUTE_DIMENSIONS, muteSelects } from "./mute-types";
 import type { MutePreview, MuteRule } from "./mute-types";
 
@@ -203,7 +203,7 @@ export function MuteForm({
 
       <Field
         label="Expression"
-        hint="Optional CEL over a single finding variable, e.g. finding.raw.resources[0].uid.startsWith(&quot;logs-&quot;). It narrows the rows above and can never widen them."
+        hint="Optional CEL over a single finding variable, addressing the OCSF Detection Finding schema — e.g. finding.resources[0].uid.startsWith(&quot;logs-&quot;) or finding.cloud.provider == &quot;gcp&quot;. It narrows the rows above and can never widen them; a path the schema does not define is rejected when the rule is saved."
       >
         <textarea
           className="h-20 w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
@@ -258,8 +258,8 @@ export function MuteForm({
           <ul className="mt-2 max-h-40 overflow-y-auto text-xs">
             {preview.findings.slice(0, 20).map((finding) => (
               <li key={`${finding.scanId}#${finding.lineNo}`} className="flex gap-2 py-0.5">
-                <span className="w-16 shrink-0 text-muted-foreground">{finding.severity}</span>
-                <code className="truncate">{finding.templateId}</code>
+                <span className="w-16 shrink-0 text-muted-foreground">{severityOf(finding)}</span>
+                <code className="truncate">{finding.checkId}</code>
                 <span className="truncate text-muted-foreground">{finding.host}</span>
               </li>
             ))}

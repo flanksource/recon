@@ -149,7 +149,7 @@ func (r ExecJSON) Count() Counts {
 // bury the failures and make every severity count meaningless. The complete
 // report — passes, skips and all — is retained as a run artifact, so nothing is
 // discarded, only classified.
-func (r ExecJSON) Findings(account string) []api.Finding {
+func (r ExecJSON) Findings(account string) ([]api.Finding, error) {
 	var findings []api.Finding
 	for _, profile := range r.Profiles {
 		for _, control := range profile.Controls {
@@ -167,10 +167,14 @@ func (r ExecJSON) Findings(account string) []api.Finding {
 			if len(failed) == 0 {
 				continue
 			}
-			findings = append(findings, finding(account, profile, control, failed))
+			built, err := finding(account, profile, control, failed)
+			if err != nil {
+				return nil, err
+			}
+			findings = append(findings, built)
 		}
 	}
-	return findings
+	return findings, nil
 }
 
 // Resources is the account the report describes, carrying every control's
@@ -242,8 +246,12 @@ func failures(control Control) []Result {
 	return failed
 }
 
-func finding(account string, profile Profile, control Control, failed []Result) api.Finding {
+func finding(account string, profile Profile, control Control, failed []Result) (api.Finding, error) {
 	tags := tagsOf(profile, control)
+	evidences, err := assertionEvidence(profile, control, failed)
+	if err != nil {
+		return api.Finding{}, err
+	}
 	built := api.Finding{
 		DetectionFinding: ocsf.DetectionFinding{
 			ClassUID:    ocsf.ClassUID,
@@ -271,7 +279,7 @@ func finding(account string, profile Profile, control Control, failed []Result) 
 					Version:    profile.Version,
 				},
 			},
-			Evidences: assertionEvidence(profile, failed),
+			Evidences: evidences,
 		},
 		CheckID: control.ID,
 		Engine:  EngineName,
@@ -285,17 +293,23 @@ func finding(account string, profile Profile, control Control, failed []Result) 
 	if desc := remediation(control); desc != "" || len(references(control)) > 0 {
 		built.Remediation = &ocsf.Remediation{Desc: desc, References: references(control)}
 	}
-	return built
+	return built, nil
 }
 
-// assertionEvidence records every assertion the control failed.
+// ControlSource is what the control-source evidence entry is called. The Ruby
+// says what the control actually asserts, which is the difference between
+// knowing that something failed and knowing whether the finding is right.
+const ControlSource = "Control source"
+
+// assertionEvidence records every assertion the control failed, then the source
+// of the control that made them.
 //
 // `data` rather than `name` alone: OCSF's evidences object requires at least one
 // of a named set of attributes, and `name` is not in it — an entry carrying only
 // the assertion's prose would be invalid, which is exactly the shape this would
 // otherwise take.
-func assertionEvidence(profile Profile, failed []Result) []ocsf.Evidences {
-	evidences := make([]ocsf.Evidences, 0, len(failed))
+func assertionEvidence(profile Profile, control Control, failed []Result) ([]ocsf.Evidences, error) {
+	evidences := make([]ocsf.Evidences, 0, len(failed)+1)
 	for _, result := range failed {
 		data := map[string]any{"status": result.Status}
 		if result.CodeDesc != "" {
@@ -309,14 +323,23 @@ func assertionEvidence(profile Profile, failed []Result) []ocsf.Evidences {
 		}
 		encoded, err := json.Marshal(data)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("encode inspec assertion %q of control %s: %w", result.CodeDesc, control.ID, err)
 		}
 		evidences = append(evidences, ocsf.Evidences{Name: result.CodeDesc, Data: encoded})
 	}
-	if len(evidences) == 0 {
-		return nil
+	if control.Code != "" {
+		// A json_t string rather than an object: the Ruby is the payload, and
+		// wrapping it in a key would only make it something to unwrap again.
+		encoded, err := json.Marshal(control.Code)
+		if err != nil {
+			return nil, fmt.Errorf("encode inspec source of control %s: %w", control.ID, err)
+		}
+		evidences = append(evidences, ocsf.Evidences{Name: ControlSource, Data: encoded})
 	}
-	return evidences
+	if len(evidences) == 0 {
+		return nil, nil
+	}
+	return evidences, nil
 }
 
 // epochMillis reads the timestamps inspec writes, which are RFC3339. A stamp

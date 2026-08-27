@@ -39,12 +39,15 @@ function finding(lineNo: number, values: Partial<Finding> = {}): Finding {
   return {
     scanId: "scan-1",
     lineNo,
-    templateId: `shared-template-${lineNo}`,
-    name: `Shared finding ${lineNo}`,
-    severity: "high",
+    checkId: `shared-template-${lineNo}`,
+    finding_info: {
+      uid: `shared-template-${lineNo}`,
+      title: `Shared finding ${lineNo}`,
+    },
+    severity_id: 4,
     host: "app.acme.test",
     matchedAt: `https://app.acme.test/${lineNo}`,
-    type: "http",
+    engine: "nuclei",
     tags: ["internet-facing"],
     ...values,
   };
@@ -108,8 +111,8 @@ describe("ScanDetailView finding copy action", () => {
       finding(index + 1),
     );
     findings[100] = finding(101, {
-      templateId: "tail-only-template",
-      name: "Tail-only finding",
+      checkId: "tail-only-template",
+      finding_info: { uid: "tail-only-template", title: "Tail-only finding" },
     });
     mockRequests(findings);
     const writeText = vi.fn().mockResolvedValue(undefined);

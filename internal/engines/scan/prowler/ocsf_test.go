@@ -124,7 +124,7 @@ var _ = Describe("Prowler OCSF output", func() {
 	It("counts a passing check rather than only dropping it", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "passes.ocsf.json")
 		record := func(code, check string) string {
-			return `{"status":"New","status_code":"` + code + `","metadata":{"event_code":"` + check + `"},` +
+			return `{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"` + code + `","metadata":{"event_code":"` + check + `"},` +
 				`"finding_info":{"title":"Check"},"unmapped":{"provider":"gcp","provider_uid":"example"}}`
 		}
 		body := []byte("[" + record("PASS", "a") + "," + record("PASS", "b") + "," + record("FAIL", "c") + "]")
@@ -142,7 +142,7 @@ var _ = Describe("Prowler OCSF output", func() {
 	// alone would be reporting on the engine rather than on the account.
 	It("records that passes were counted even when none passed", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "none.ocsf.json")
-		body := []byte(`[{"status":"New","status_code":"FAIL","metadata":{"event_code":"a"},` +
+		body := []byte(`[{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"FAIL","metadata":{"event_code":"a"},` +
 			`"finding_info":{"title":"Check"},"unmapped":{"provider":"gcp","provider_uid":"example"}}]`)
 		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
 
@@ -152,11 +152,54 @@ var _ = Describe("Prowler OCSF output", func() {
 		Expect(report.Stats.PassRecorded).To(BeTrue())
 	})
 
+	// Prowler is not conformant on `time`: OCSF defines it as epoch milliseconds
+	// and prowler writes epoch seconds, so a reader that trusts it dates every
+	// finding to January 1970 — and a stamp wrong by a factor of a thousand
+	// still sorts and renders, so nothing complains.
+	Describe("the timestamp prowler writes", func() {
+		read := func(fields string) api.Finding {
+			path := filepath.Join(GinkgoT().TempDir(), "time.ocsf.json")
+			body := []byte(`[{` + fields + `,"status":"New","status_code":"FAIL",` +
+				`"metadata":{"event_code":"bucket_public"},"finding_info":{"title":"Bucket is public"},` +
+				`"unmapped":{"provider":"gcp","provider_uid":"example"}}]`)
+			Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
+			report, err := readOCSF(path, "target", "gcp")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(report.Findings).To(HaveLen(1))
+			return report.Findings[0]
+		}
+		stamped := func(value string) int64 {
+			parsed, err := time.ParseInLocation("2006-01-02T15:04:05.999999", value, time.Local)
+			Expect(err).ToNot(HaveOccurred())
+			return parsed.UnixMilli()
+		}
+
+		It("reads the spelled-out stamp, which carries no zone", func() {
+			Expect(read(`"time_dt":"2026-08-24T13:27:16.068431","time":1787567236`).Time).
+				To(Equal(stamped("2026-08-24T13:27:16.068431")))
+		})
+
+		It("reads the epoch field as the seconds prowler means by it", func() {
+			Expect(read(`"time":1787567236`).Time).To(Equal(int64(1787567236000)))
+		})
+
+		It("refuses a record with no readable stamp rather than storing 1970", func() {
+			path := filepath.Join(GinkgoT().TempDir(), "undated.ocsf.json")
+			Expect(os.WriteFile(path, []byte(
+				`[{"status":"New","status_code":"FAIL","metadata":{"event_code":"undated"},`+
+					`"finding_info":{"title":"Undated"},`+
+					`"unmapped":{"provider":"gcp","provider_uid":"example"}}]`), 0o644)).To(Succeed())
+
+			_, err := readOCSF(path, "target", "gcp")
+			Expect(err).To(MatchError(ContainSubstring("no readable timestamp")))
+		})
+	})
+
 	// A check that fails against several resources names all of them. Only the
 	// first used to survive, so the rest left no trace anywhere in recon.
 	It("keeps every resource a record names, not only the first", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "many.ocsf.json")
-		body := []byte(`[{"status":"New","status_code":"FAIL","metadata":{"event_code":"bucket_public"},` +
+		body := []byte(`[{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"FAIL","metadata":{"event_code":"bucket_public"},` +
 			`"finding_info":{"title":"Bucket is public"},"unmapped":{"provider":"gcp","provider_uid":"example"},` +
 			`"resources":[` +
 			`{"uid":"bucket-a","name":"logs","type":"storage.googleapis.com/Bucket","region":"eu","group":{"name":"storage"}},` +
@@ -180,7 +223,7 @@ var _ = Describe("Prowler OCSF output", func() {
 	// bucket clean" had no answer.
 	It("records a resource for a check that passed", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "passing.ocsf.json")
-		body := []byte(`[{"status":"New","status_code":"PASS","metadata":{"event_code":"bucket_public"},` +
+		body := []byte(`[{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"PASS","metadata":{"event_code":"bucket_public"},` +
 			`"finding_info":{"title":"Bucket is not public"},"unmapped":{"provider":"gcp"},` +
 			`"cloud":{"provider":"gcp","account":{"uid":"example-project","name":"Example"}},` +
 			`"resources":[{"uid":"logs","name":"logs","type":"storage.googleapis.com/Bucket",` +
@@ -211,10 +254,10 @@ var _ = Describe("Prowler OCSF output", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "account.ocsf.json")
 		account := `"cloud":{"provider":"gcp","account":{"uid":"example-project","name":"Example","type":"GCP Account"}}`
 		body := []byte(`[` +
-			`{"status":"New","status_code":"PASS","metadata":{"event_code":"apikeys_key_exists"},` +
+			`{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"PASS","metadata":{"event_code":"apikeys_key_exists"},` +
 			`"finding_info":{"title":"A"},` + account + `,` +
 			`"resources":[{"uid":"example-project","name":"example-project","type":"apikeys.googleapis.com/Key"}]},` +
-			`{"status":"New","status_code":"FAIL","metadata":{"event_code":"project_labels"},` +
+			`{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"FAIL","metadata":{"event_code":"project_labels"},` +
 			`"finding_info":{"title":"B"},` + account + `,` +
 			`"resources":[{"uid":"example-project","name":"example-project","type":"compute.googleapis.com/Project"}]}` +
 			`]`)
@@ -234,7 +277,7 @@ var _ = Describe("Prowler OCSF output", func() {
 
 	It("rejects an unknown status instead of silently dropping it", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "unknown.ocsf.json")
-		body := []byte(`[{"status":"New","status_code":"ERROR","metadata":{"event_code":"check"},"finding_info":{"title":"Check"},"unmapped":{"provider":"gcp","provider_uid":"example"},"resources":[{"uid":"example"}]}]`)
+		body := []byte(`[{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"ERROR","metadata":{"event_code":"check"},"finding_info":{"title":"Check"},"unmapped":{"provider":"gcp","provider_uid":"example"},"resources":[{"uid":"example"}]}]`)
 		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
 
 		_, err := readOCSF(path, "target", "gcp")
@@ -243,7 +286,7 @@ var _ = Describe("Prowler OCSF output", func() {
 
 	It("rejects a report that cannot identify its check", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "invalid.ocsf.json")
-		body := []byte(`[{"status":"New","status_code":"FAIL","finding_info":{"title":"Untyped"},"unmapped":{"provider":"gcp","provider_uid":"example"}}]`)
+		body := []byte(`[{"time_dt":"2026-08-20T09:41:02.500000","status":"New","status_code":"FAIL","finding_info":{"title":"Untyped"},"unmapped":{"provider":"gcp","provider_uid":"example"}}]`)
 		Expect(os.WriteFile(path, body, 0o644)).To(Succeed())
 
 		_, err := readOCSF(path, "target", "gcp")

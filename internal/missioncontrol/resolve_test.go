@@ -22,12 +22,13 @@ import (
 )
 
 type catalog struct {
-	server    *httptest.Server
-	items     []dutymodels.ConfigItem
-	searches  []string
-	pushes    [][]dutymodels.ConfigAnalysis
-	pushAgent string
-	pushFails bool
+	server       *httptest.Server
+	items        []dutymodels.ConfigItem
+	searches     []string
+	searchAgents []string
+	pushes       [][]dutymodels.ConfigAnalysis
+	pushAgent    string
+	pushFails    bool
 }
 
 func newCatalog(items ...dutymodels.ConfigItem) *catalog {
@@ -39,6 +40,7 @@ func newCatalog(items ...dutymodels.ConfigItem) *catalog {
 			Expect(json.NewDecoder(r.Body).Decode(&request)).To(Succeed())
 			search := request.Configs[0].Search
 			c.searches = append(c.searches, search)
+			c.searchAgents = append(c.searchAgents, request.Configs[0].Agent)
 			selected := make([]query.SelectedResource, 0, len(c.items))
 			for _, item := range c.items {
 				selected = append(selected, query.SelectedResource{
@@ -90,10 +92,20 @@ func configItem(id, name, configType string, externalIDs ...string) dutymodels.C
 	}
 }
 
+// under nests an item beneath a root, the way the catalog's materialised path
+// records containment: a dot-separated chain of ids from the root down.
+func under(item dutymodels.ConfigItem, root string) dutymodels.ConfigItem {
+	item.ParentID = lo.ToPtr(uuid.MustParse(root))
+	item.Path = root + "." + item.ID.String()
+	return item
+}
+
 const (
 	instanceID = "3f2a1c4e-0000-4000-8000-00000000000a"
 	accountID  = "3f2a1c4e-0000-4000-8000-00000000000b"
 	clusterID  = "3f2a1c4e-0000-4000-8000-00000000000c"
+	twinID     = "3f2a1c4e-0000-4000-8000-00000000000d"
+	projectID  = "3f2a1c4e-0000-4000-8000-00000000000e"
 )
 
 func resolvedState(resource api.Resource) api.InsightState {
@@ -121,13 +133,13 @@ var _ = Describe("resolving a current resource state", func() {
 			ExternalIDs: []string{"arn:aws:ec2:eu-west-1:1:instance/i-1"},
 		})
 
-		match, unresolved, err := missioncontrol.NewResolver(catalog.client()).Resolve(
+		resolution, err := missioncontrol.NewResolver(catalog.client()).Resolve(
 			context.Background(), missioncontrol.ResolveOptions{State: state})
 
 		Expect(err).ToNot(HaveOccurred())
-		Expect(unresolved).To(BeNil())
-		Expect(match.ConfigID.String()).To(Equal(instanceID))
-		Expect(match.RolledUp).To(BeFalse())
+		Expect(resolution.Unresolved).To(BeNil())
+		Expect(resolution.Match.ConfigID.String()).To(Equal(instanceID))
+		Expect(resolution.Match.RolledUp).To(BeFalse())
 		Expect(catalog.searches[0]).To(ContainSubstring(`type="AWS::EC2::Instance"`))
 	})
 
@@ -137,12 +149,12 @@ var _ = Describe("resolving a current resource state", func() {
 		state := resolvedState(api.Resource{Provider: "nuclei", Scope: "api.example.test", UID: "input"})
 		state.Finding.MatchedAt = "https://api.example.test/tls"
 
-		match, unresolved, err := missioncontrol.NewResolver(catalog.client()).Resolve(
+		resolution, err := missioncontrol.NewResolver(catalog.client()).Resolve(
 			context.Background(), missioncontrol.ResolveOptions{State: state})
 
 		Expect(err).ToNot(HaveOccurred())
-		Expect(match).To(BeNil())
-		Expect(unresolved).ToNot(BeNil())
+		Expect(resolution.Match).To(BeNil())
+		Expect(resolution.Unresolved).ToNot(BeNil())
 		Expect(catalog.searches).To(BeEmpty())
 	})
 
@@ -155,13 +167,13 @@ var _ = Describe("resolving a current resource state", func() {
 		}
 		state.Parent = &parent
 
-		match, unresolved, err := missioncontrol.NewResolver(catalog.client()).Resolve(
+		resolution, err := missioncontrol.NewResolver(catalog.client()).Resolve(
 			context.Background(), missioncontrol.ResolveOptions{State: state, Target: api.TargetDocument{ID: "fallback"}})
 
 		Expect(err).ToNot(HaveOccurred())
-		Expect(unresolved).To(BeNil())
-		Expect(match.ConfigID.String()).To(Equal(accountID))
-		Expect(match.RolledUp).To(BeTrue())
+		Expect(resolution.Unresolved).To(BeNil())
+		Expect(resolution.Match.ConfigID.String()).To(Equal(accountID))
+		Expect(resolution.Match.RolledUp).To(BeTrue())
 	})
 
 	It("uses the target only as the final rollup", func() {
@@ -169,14 +181,118 @@ var _ = Describe("resolving a current resource state", func() {
 		defer catalog.server.Close()
 		state := resolvedState(api.Resource{Provider: "nuclei", Scope: "api.example.test", UID: "input"})
 
-		match, unresolved, err := missioncontrol.NewResolver(catalog.client()).Resolve(
+		resolution, err := missioncontrol.NewResolver(catalog.client()).Resolve(
 			context.Background(), missioncontrol.ResolveOptions{
 				State: state, Target: api.TargetDocument{ID: "target", Cluster: "prod-euw1"},
 			})
 
 		Expect(err).ToNot(HaveOccurred())
-		Expect(unresolved).To(BeNil())
-		Expect(match.ConfigID.String()).To(Equal(clusterID))
-		Expect(match.RolledUp).To(BeTrue())
+		Expect(resolution.Unresolved).To(BeNil())
+		Expect(resolution.Match.ConfigID.String()).To(Equal(clusterID))
+		Expect(resolution.Match.RolledUp).To(BeTrue())
+	})
+})
+
+// The catalog fixture answers every search with every item it holds and lets
+// the resolver's own confirmation do the filtering, so two items carrying one
+// name is all it takes to reproduce the ambiguity a real estate produces when
+// two scrapers describe the same project.
+var _ = Describe("an identity several config items carry", func() {
+	It("attaches nothing and offers the matches beside what contains them", func() {
+		catalog := ambiguousCatalog()
+		defer catalog.server.Close()
+
+		resolution, err := missioncontrol.NewResolver(catalog.client()).Resolve(
+			context.Background(), missioncontrol.ResolveOptions{State: projectState("web-1")})
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(resolution.Match).To(BeNil())
+		Expect(resolution.Unresolved.Reason).To(Equal("workload-prod-eu-02 matched 2 config items; choose one"))
+		Expect(resolution.Ambiguous).To(HaveLen(1))
+		Expect(resolution.Ambiguous[0].Identity).To(Equal("workload-prod-eu-02"))
+		Expect(resolution.Ambiguous[0].Scope).To(BeTrue())
+		Expect(resolution.Ambiguous[0].Options).To(Equal([]api.InsightChoice{
+			{ID: accountID, Name: "workload-prod-eu-02", Type: "GCP::Project"},
+			{ID: twinID, Name: "workload-prod-eu-02", Type: "GCP::Project"},
+			{ID: projectID, Name: "acme-root", Type: "GCP::Organization", Root: true, Ancestor: true},
+		}))
+	})
+
+	It("attaches to the config item chosen for that identity", func() {
+		catalog := ambiguousCatalog()
+		defer catalog.server.Close()
+		resolver := missioncontrol.NewResolver(catalog.client())
+		resolver.Choices = map[string]uuid.UUID{"workload-prod-eu-02": uuid.MustParse(twinID)}
+
+		resolution, err := resolver.Resolve(context.Background(),
+			missioncontrol.ResolveOptions{State: projectState("web-1")})
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(resolution.Unresolved).To(BeNil())
+		Expect(resolution.Match.ConfigID.String()).To(Equal(twinID))
+		Expect(resolution.Match.Chosen).To(BeTrue())
+		Expect(resolution.Match.RolledUp).To(BeTrue())
+		// Still reported: the choice is what a real sync then remembers, and the
+		// preview has to show what it would remember it against.
+		Expect(resolution.Ambiguous).To(HaveLen(1))
+	})
+
+	It("rolls a choice of the containing item up, whatever rung it was made on", func() {
+		catalog := newCatalog(
+			under(configItem(instanceID, "web-1", "GCP::Instance", "i-1"), projectID),
+			under(configItem(twinID, "web-1", "GCP::Instance", "i-1"), projectID),
+			configItem(projectID, "acme-root", "GCP::Organization"),
+		)
+		defer catalog.server.Close()
+		resolver := missioncontrol.NewResolver(catalog.client())
+		resolver.Choices = map[string]uuid.UUID{"i-1": uuid.MustParse(projectID)}
+
+		resolution, err := resolver.Resolve(context.Background(), missioncontrol.ResolveOptions{
+			State: resolvedState(api.Resource{
+				Provider: "gcp", Scope: "1", UID: "i-1", ExternalIDs: []string{"i-1"},
+			}),
+		})
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(resolution.Match.ConfigID.String()).To(Equal(projectID))
+		Expect(resolution.Match.RolledUp).To(BeTrue())
+	})
+})
+
+var _ = Describe("a choice a previous sync remembered", func() {
+	It("attaches to it without searching the catalog at all", func() {
+		catalog := newCatalog(configItem(accountID, "workload-prod-eu-02", "GCP::Project"))
+		defer catalog.server.Close()
+
+		resolution, err := missioncontrol.NewResolver(catalog.client()).Resolve(
+			context.Background(), missioncontrol.ResolveOptions{
+				State: resolvedState(api.Resource{
+					Provider: "gcp", Scope: "1", UID: "i-1", ExternalIDs: []string{"i-1"},
+				}),
+				Pin: &api.ConfigPin{ConfigID: accountID, RolledUp: true},
+			})
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(catalog.searches).To(BeEmpty())
+		Expect(resolution.Match.ConfigID.String()).To(Equal(accountID))
+		Expect(resolution.Match.ConfigName).To(Equal("workload-prod-eu-02"))
+		Expect(resolution.Match.Pinned).To(BeTrue())
+		Expect(resolution.Match.RolledUp).To(BeTrue())
+	})
+
+	It("reports one that has left the catalog rather than pushing against it", func() {
+		catalog := newCatalog()
+		defer catalog.server.Close()
+
+		resolution, err := missioncontrol.NewResolver(catalog.client()).Resolve(
+			context.Background(), missioncontrol.ResolveOptions{
+				State: resolvedState(api.Resource{Provider: "gcp", Scope: "1", UID: "i-1"}),
+				Pin:   &api.ConfigPin{ConfigID: accountID},
+			})
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(resolution.Match).To(BeNil())
+		Expect(resolution.Unresolved.Reason).To(ContainSubstring("no longer in the catalog"))
+		Expect(resolution.Unresolved.Reason).To(ContainSubstring("--repin"))
 	})
 })

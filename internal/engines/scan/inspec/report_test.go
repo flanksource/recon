@@ -101,7 +101,11 @@ var _ = Describe("an InSpec report", func() {
 	Describe("Findings", func() {
 		var findings []api.Finding
 
-		BeforeEach(func() { findings = report.Findings(account) })
+		BeforeEach(func() {
+			var err error
+			findings, err = report.Findings(account)
+			Expect(err).ToNot(HaveOccurred())
+		})
 
 		It("reports only the results that need acting on", func() {
 			// Three failures and one error. The pass and the skip are counted
@@ -186,16 +190,31 @@ var _ = Describe("an InSpec report", func() {
 		// fork into as many identities as it had describe blocks.
 		It("collapses a control's failing assertions into one finding", func() {
 			// The fixture's first control asserts twice and fails once, so a
-			// collapse that kept the passing assertion would show two.
+			// collapse that kept the passing assertion would show two — plus the
+			// control's own source, which every control carries.
 			finding := find(findings, "cis-gcp-1.4-iam")
 
-			Expect(finding.Evidences).To(HaveLen(1))
+			Expect(finding.Evidences).To(HaveLen(2))
 			Expect(assertion(finding.Evidences[0])).To(Equal(map[string]any{
 				"status":    StatusFailed,
 				"profile":   "inspec-gcp-cis-benchmark",
 				"code_desc": "[example-project] Service Account: builder@example-project.iam.gserviceaccount.com should not have user-managed keys",
 				"message":   `expected ["USER_MANAGED", "SYSTEM_MANAGED"] not to include "USER_MANAGED"`,
 			}))
+		})
+
+		// What the control actually asserts, which is the difference between
+		// knowing that something failed and knowing whether the finding is
+		// right. Carried as a json_t string rather than an object, so it renders
+		// as the Ruby it is instead of as one key to unwrap.
+		It("carries the control's own source as evidence", func() {
+			finding := find(findings, "cis-gcp-1.4-iam")
+			source := finding.Evidences[len(finding.Evidences)-1]
+
+			Expect(source.Name).To(Equal(ControlSource))
+			var ruby string
+			Expect(json.Unmarshal(source.Data, &ruby)).To(Succeed())
+			Expect(ruby).To(ContainSubstring("control 'cis-gcp-1.4-iam' do"))
 		})
 
 		// OCSF's evidences object requires at least one of a named set of
@@ -308,6 +327,7 @@ var _ = Describe("an InSpec report", func() {
 				Controls: []Control{{ID: "cis-gcp-1.4-iam", Impact: 0.5}},
 			}}}
 
+			// Gomega asserts the trailing error is nil as part of this.
 			Expect(empty.Findings(account)).To(BeEmpty())
 			Expect(empty.Count()).To(Equal(Counts{Controls: 1}))
 		})
@@ -326,7 +346,9 @@ var _ = Describe("an InSpec report", func() {
 				}},
 			}}}
 
-			Expect(untitled.Findings(account)[0].FindingInfo.Title).To(Equal("cis-gcp-9.9-custom"))
+			built, err := untitled.Findings(account)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(built[0].FindingInfo.Title).To(Equal("cis-gcp-9.9-custom"))
 		})
 	})
 })

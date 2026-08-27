@@ -419,4 +419,42 @@ var _ = Describe("the resource inventory", Ordered, Label("db"), func() {
 			Entry("failing: nothing is", store.ResourceFailing),
 		)
 	})
+
+	// Which Mission Control config item a resource's insights hang off, once
+	// somebody has answered that question for an identity the catalog gave more
+	// than one answer to.
+	Describe("the config item chosen for a resource", func() {
+		const chosen = "3f2a1c4e-0000-4000-8000-00000000000d"
+
+		It("survives the runs that keep re-reporting the resource", func() {
+			at := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+			record(at, bucket)
+			stored, err := st.GetResource(ctx, "gcp/"+account+"/logs")
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(st.SetConfigPins(ctx, map[string]api.ConfigPin{
+				stored.ID: {ConfigID: chosen, RolledUp: true},
+			})).To(Succeed())
+			record(at.Add(time.Hour), bucket)
+
+			Expect(st.ConfigPins(ctx, []string{stored.ID})).To(Equal(map[string]api.ConfigPin{
+				stored.ID: {ConfigID: chosen, RolledUp: true},
+			}))
+			reread, err := st.GetResource(ctx, stored.ID)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(reread.ConfigID).To(Equal(chosen))
+		})
+
+		// Absent rather than zero: a sync has to tell "attach here" from "nobody
+		// has decided", and a zero uuid would resolve to a config item that does
+		// not exist.
+		It("reports nothing for a resource nobody has chosen for", func() {
+			record(time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC), bucket)
+			stored, err := st.GetResource(ctx, "gcp/"+account+"/logs")
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(st.ConfigPins(ctx, []string{stored.ID})).To(BeEmpty())
+			Expect(stored.ConfigID).To(BeEmpty())
+		})
+	})
 })

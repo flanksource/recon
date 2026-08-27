@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResourcesView } from "./ResourcesView";
@@ -59,8 +60,8 @@ describe("ResourcesView", () => {
     vi.mocked(fetchFilterOptions).mockResolvedValue([]);
     vi.mocked(syncResources).mockResolvedValue({
       agent: "recon", matchedResources: 1, matchedStates: 1, eligible: 1, skipped: 0,
-      open: 1, resolved: 0, silenced: 0, direct: 1, rolledUp: 0, pushed: 0,
-      configs: [], unresolved: [],
+      open: 1, resolved: 0, silenced: 0, direct: 1, rolledUp: 0, pinned: 0, pushed: 0,
+      configs: [], unresolved: [], ambiguous: [],
     });
   });
   afterEach(cleanup);
@@ -122,9 +123,18 @@ describe("ResourcesView", () => {
     });
   });
 
+  // Wrapped the way App wraps every route: the sync modal follows the server's
+  // task run while it resolves, and that view reads through react-query.
   it("previews a sync of the filtered set without carrying page controls", async () => {
     fetchResourcesMock.mockResolvedValue(page([resource()]));
-    render(<ResourcesView onOpenResource={() => {}} />);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("[]", { headers: { "content-type": "application/json" } }),
+    );
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ResourcesView onOpenResource={() => {}} />
+      </QueryClientProvider>,
+    );
 
     fireEvent.change(await screen.findByRole("searchbox"), { target: { value: "tailscale" } });
     await waitFor(() => expect(fetchResourcesMock).toHaveBeenLastCalledWith(
@@ -132,7 +142,9 @@ describe("ResourcesView", () => {
     ));
     fireEvent.click(screen.getByRole("button", { name: "Sync insights" }));
 
-    await waitFor(() => expect(syncResources).toHaveBeenCalledWith({ search: "tailscale" }, true));
+    await waitFor(() => expect(syncResources).toHaveBeenCalledWith(
+      { search: "tailscale" }, { dryRun: true },
+    ));
   });
 
   it("renders a compact severity bar and total", async () => {

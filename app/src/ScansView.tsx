@@ -22,7 +22,14 @@ import {
 import { FindingDetail } from "./FindingDetail";
 import { FindingCopyButton } from "./FindingCopyButton";
 import { ScanExportMenu } from "./ScanExportMenu";
-import { SEVERITIES, type Finding, type Scan, type Severity } from "./types";
+import {
+  SEVERITIES,
+  findingTitle,
+  severityOf,
+  type Finding,
+  type Scan,
+  type Severity,
+} from "./types";
 import { ScanExecutionDetails } from "./ScanExecutionDetails";
 
 function uniqueHosts(findings: Finding[]): string[] {
@@ -60,11 +67,11 @@ const FINDING_GROUPING_MODES: Array<DataTableGroupingMode<Finding>> = [
     type: "custom",
     value: "type",
     label: "By result type",
-    getGroupKey: (row) => row.templateId,
+    getGroupKey: (row) => row.checkId,
     getGroupLabel: (key, rows) => (
       <span className="flex items-center gap-2">
         {severityBadge(worstSeverity(rows))}
-        <span className="font-medium">{rows[0]?.name ?? key}</span>
+        <span className="font-medium">{rows[0] ? findingTitle(rows[0]) : key}</span>
         <code className="text-xs text-muted-foreground">{key}</code>
       </span>
     ),
@@ -77,7 +84,7 @@ const FINDING_GROUPING_MODES: Array<DataTableGroupingMode<Finding>> = [
     type: "custom",
     value: "severity",
     label: "By severity",
-    getGroupKey: (row) => row.severity,
+    getGroupKey: (row) => severityOf(row),
     getGroupLabel: (key) => severityBadge(key as Severity),
     getGroupMeta: (_key, rows) => <DomainChips hosts={uniqueHosts(rows)} />,
     compareGroups: (a, b) =>

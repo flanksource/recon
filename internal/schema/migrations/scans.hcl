@@ -284,6 +284,20 @@ table "findings" {
     type = timestamptz
   }
 
+  // What it means for this to be true, which is a different question from what
+  // was found and is the half of a finding triage actually reads. OCSF puts
+  // both at the event level rather than inside finding_info: `impact` is the
+  // consequence and `risk_details` the reasoning, and different engines fill
+  // different ones — nuclei writes the first, prowler the second.
+  column "impact" {
+    null = true
+    type = text
+  }
+  column "risk_details" {
+    null = true
+    type = text
+  }
+
   // One column per OCSF object rather than a single blob holding the record.
   // The list paths select what they render and no more — the fix that stopped a
   // page of findings dragging every engine's payload through the database — and

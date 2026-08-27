@@ -4,7 +4,7 @@ import { DataTable, type DataTableGroupingMode } from "@flanksource/clicky-ui/da
 import { resourceColumns } from "./resourceColumns";
 import { selectionQuery, useEntityFilters } from "./filters";
 import { fetchResources, type Resource, type ResourcePage } from "./api-resources";
-import { syncResources } from "./api-insights";
+import { syncResources, type SyncRequest } from "./api-insights";
 import { SyncInsightsButton } from "./SyncInsightsButton";
 
 const PAGE_SIZE = 100;
@@ -78,7 +78,7 @@ export function ResourcesView({
     ...selectionQuery(selection),
     ...(query ? { search: query } : {}),
   }), [query, selection]);
-  const sync = useCallback((dryRun: boolean) => syncResources(selector, dryRun), [selector]);
+  const sync = useCallback((request: SyncRequest) => syncResources(selector, request), [selector]);
 
   const load = useCallback(async () => {
     setBusy(true);

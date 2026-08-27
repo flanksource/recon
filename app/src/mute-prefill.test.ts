@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  muteCheckPath,
   mutePrefillDraft,
   mutePrefillPath,
   mutePrefillQuery,
@@ -13,7 +14,7 @@ function finding(overrides: Partial<Finding> = {}): Finding {
   return {
     scanId: "01JB0000000000000000000000",
     lineNo: 7,
-    templateId: "gcp/bucket-public-access",
+    checkId: "gcp/bucket-public-access",
     name: "Bucket allows public access",
     severity: "high",
     host: "acme-prod",
@@ -120,7 +121,7 @@ describe("muteScopeOptions", () => {
   });
 
   it("offers nothing at all for a finding that names neither a check nor a subject", () => {
-    expect(muteScopeOptions(finding({ templateId: "", resources: undefined, matchedAt: "", host: "" }))).toEqual([]);
+    expect(muteScopeOptions(finding({ checkId: "", resources: undefined, matchedAt: "", host: "" }))).toEqual([]);
   });
 
   it("hands back a path the editor can open", () => {
@@ -140,7 +141,7 @@ describe("mutePrefillPath", () => {
   });
 
   it("still opens the editor when a finding names nothing to select on", () => {
-    expect(mutePrefillPath(finding({ templateId: "", resources: undefined, matchedAt: "", host: "" }))).toBe("/mutes/new");
+    expect(mutePrefillPath(finding({ checkId: "", resources: undefined, matchedAt: "", host: "" }))).toBe("/mutes/new");
   });
 });
 
@@ -223,5 +224,33 @@ describe("suggestMuteName", () => {
 
     expect(suggestMuteName(rule, ["open-redirect"])).toBe("open-redirect-2");
     expect(suggestMuteName(rule, ["open-redirect", "open-redirect-2"])).toBe("open-redirect-3");
+  });
+});
+
+describe("muteCheckPath", () => {
+  it("writes the same rule the check-anywhere scope does", () => {
+    // The check page has no finding to seed from, so it builds the draft from
+    // the check and the engine directly. The two must not drift: if the scope
+    // ever gains a dimension, this is what says so.
+    expect(muteCheckPath("gcp/bucket-public-access", "prowler")).toBe(
+      mutePrefillPath(finding(), "prowler", "check-anywhere"),
+    );
+  });
+
+  it("is independent of which affected resource it was reached from", () => {
+    const other = finding({
+      host: "other-account",
+      matchedAt: "//storage.googleapis.com/other-bucket",
+      resources: [{ provider: "gcp", scope: "other-account", uid: "other-bucket" }],
+    });
+
+    expect(mutePrefillPath(other, "prowler", "check-anywhere"))
+      .toBe(muteCheckPath("gcp/bucket-public-access", "prowler"));
+  });
+
+  it("still opens the editor when there is no engine to scope to", () => {
+    expect(muteCheckPath("gcp/bucket-public-access")).toBe(
+      "/mutes/new?templates=gcp%2Fbucket-public-access",
+    );
   });
 });

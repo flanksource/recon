@@ -206,11 +206,11 @@ func (d document) parse(targetID string) (*parsed, error) {
 		} {
 			for _, raw := range entries.raw {
 				found.Examined++
-				finding, actionable, err := entries.build(raw, context)
+				finding, keep, err := entries.build(raw, context)
 				if err != nil {
 					return nil, err
 				}
-				if !actionable {
+				if !keep {
 					continue
 				}
 				found.templates[finding.CheckID] = struct{}{}
@@ -291,7 +291,11 @@ type normalised struct {
 }
 
 // finding renders one trivy record as an OCSF Detection Finding.
-func (c findingContext) finding(r normalised) api.Finding {
+func (c findingContext) finding(r normalised) (api.Finding, error) {
+	evidences, err := recordEvidence(r)
+	if err != nil {
+		return api.Finding{}, err
+	}
 	types := append([]string{r.Class}, r.Tags...)
 	finding := api.Finding{
 		DetectionFinding: ocsf.DetectionFinding{
@@ -320,7 +324,7 @@ func (c findingContext) finding(r normalised) api.Finding {
 				},
 			},
 			Vulnerabilities: r.Vulnerable,
-			Evidences:       recordEvidence(r),
+			Evidences:       evidences,
 		},
 		TargetID:  c.TargetID,
 		CheckID:   r.CheckID,
@@ -332,22 +336,31 @@ func (c findingContext) finding(r normalised) api.Finding {
 	if r.Remediation != "" || len(r.References) > 0 {
 		finding.Remediation = &ocsf.Remediation{Desc: r.Remediation, References: r.References}
 	}
-	return finding
+	return finding, nil
+}
+
+// actionable adapts one built finding to the reader's triple. Only
+// misconfigurationFinding ever answers no, and it does so before building.
+func actionable(finding api.Finding, err error) (api.Finding, bool, error) {
+	if err != nil {
+		return api.Finding{}, false, err
+	}
+	return finding, true, nil
 }
 
 // recordEvidence carries what trivy showed of the file it was reading — the
 // offending lines and the cause metadata. An entry needs one of the attributes
 // OCSF's at_least_one constraint names, so `data` is what carries it and a
 // record with nothing to show produces no entry at all.
-func recordEvidence(r normalised) []ocsf.Evidences {
+func recordEvidence(r normalised) ([]ocsf.Evidences, error) {
 	if len(r.Evidence) == 0 {
-		return nil
+		return nil, nil
 	}
 	encoded, err := json.Marshal(r.Evidence)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("encode trivy evidence for %s: %w", r.CheckID, err)
 	}
-	return []ocsf.Evidences{{Name: r.Class, Data: encoded}}
+	return []ocsf.Evidences{{Name: r.Class, Data: encoded}}, nil
 }
 
 // epochMillis reads the timestamps trivy writes, which are RFC3339. A stamp
@@ -382,7 +395,7 @@ func vulnerabilityFinding(raw json.RawMessage, context findingContext) (api.Find
 		timestamp = context.Timestamp
 	}
 
-	return context.finding(normalised{
+	return actionable(context.finding(normalised{
 		CheckID:     record.VulnerabilityID,
 		Title:       name,
 		Desc:        record.Description,
@@ -409,7 +422,7 @@ func vulnerabilityFinding(raw json.RawMessage, context findingContext) (api.Find
 				FixedInVersion: record.FixedVersion,
 			}},
 		}},
-	}), true, nil
+	}))
 }
 
 // fixedBy states the upgrade that resolves the finding, which is the whole
@@ -446,7 +459,7 @@ func misconfigurationFinding(raw json.RawMessage, context findingContext) (api.F
 	if name == "" {
 		name = record.Message
 	}
-	return context.finding(normalised{
+	return actionable(context.finding(normalised{
 		CheckID:   record.ID,
 		Title:     name,
 		Desc:      record.Message,
@@ -465,7 +478,7 @@ func misconfigurationFinding(raw json.RawMessage, context findingContext) (api.F
 		// Where in the file, which is the whole of what triage needs beyond the
 		// message and has no modelled home.
 		Evidence: causeEvidence(record),
-	}), true, nil
+	}))
 }
 
 // causeEvidence is where in the scanned file the misconfiguration is, which is
@@ -502,7 +515,7 @@ func secretFinding(raw json.RawMessage, context findingContext) (api.Finding, bo
 	if name == "" {
 		name = record.RuleID
 	}
-	return context.finding(normalised{
+	return actionable(context.finding(normalised{
 		CheckID:   record.RuleID,
 		Title:     name,
 		Severity:  api.ParseSeverity(record.Severity),
@@ -516,7 +529,7 @@ func secretFinding(raw json.RawMessage, context findingContext) (api.Finding, bo
 		// number is the whole of what is carried.
 		Remediation: "Rotate the credential and remove it from " + context.Result.Target,
 		Evidence:    lineEvidence(record.StartLine),
-	}), true, nil
+	}))
 }
 
 // lineEvidence is where a secret was found. Deliberately only the location:
@@ -543,7 +556,7 @@ func licenseFinding(raw json.RawMessage, context findingContext) (api.Finding, b
 	if subject == "" {
 		subject = context.Result.Target
 	}
-	return context.finding(normalised{
+	return actionable(context.finding(normalised{
 		// Already composed, and the precedent for composing a check id where the
 		// engine's own is not unique on its own: a licence name is not a check.
 		CheckID:    "license/" + record.Name,
@@ -554,7 +567,7 @@ func licenseFinding(raw json.RawMessage, context findingContext) (api.Finding, b
 		Tags:       []string{"category", record.Category, "license", record.Name},
 		Time:       context.Timestamp,
 		References: compact([]string{record.Link}),
-	}), true, nil
+	}))
 }
 
 func cweTags(ids []string) []string {
