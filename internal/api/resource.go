@@ -154,6 +154,10 @@ type Resource struct {
 	// the same thing as, empty wherever recon cannot say.
 	ConfigType  string     `json:"configType,omitempty"`
 	ExternalIDs StringList `json:"externalIds,omitempty"`
+	// ConfigID is the catalog config item a person chose for this resource's
+	// insights when its identity matched more than one. Read-side only: it is
+	// written by a sync, never by an engine.
+	ConfigID string `json:"configId,omitempty"`
 
 	Tags     StringList        `json:"tags"`
 	Labels   map[string]string `json:"labels,omitempty"`

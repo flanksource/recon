@@ -2,8 +2,10 @@ package schema_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/flanksource/commons-db/dbtest"
+	"github.com/lib/pq"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -237,15 +239,35 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 				'flanksource-prod', 'bucket-a', 'prowler', 'MANUAL',
 				ARRAY['cis']::text[], 'Make the bucket private',
 				ARRAY['https://example.test/bucket']::text[],
-				'2026-08-11T12:00:30Z', $2::jsonb
+				NULL, $2::jsonb
 			) RETURNING id::text`, scanID, `{
 				"cloud": {"provider": "gcp", "account": {"uid": "flanksource-prod"}},
+				"finding_info": {"desc": "Objects in this bucket are readable by allUsers."},
 				"risk_details": "Anyone on the internet can read the objects.",
+				"time_dt": "2026-08-11T15:00:30.500000",
+				"status_code": "MANUAL",
+				"unmapped": {
+					"provider": "gcp",
+					"compliance": {"CIS-5.0": ["5.1"]}
+				},
 				"resources": [
 					{"uid": "bucket-a", "name": "logs"},
 					{"uid": "bucket-b", "name": "backups"}
 				]
 			}`).Scan(&prowlerID)).To(Succeed())
+
+		// Its own run, because `type` did not mean the same thing in both: for
+		// prowler it named the engine and for nuclei the protocol a template
+		// spoke, which is the conflation the upgrade has to see through.
+		var nucleiScanID string
+		Expect(db.SQL().QueryRow(`
+			INSERT INTO scans (
+				name, engine, profile, endpoint_count, phase,
+				started_at, finished_at, severities
+			) VALUES (
+				'legacy-ocsf-upgrade-nuclei', 'nuclei', 'safe', 1, 'done',
+				'2026-08-11T12:00:00Z', '2026-08-11T12:01:00Z', '{}'::jsonb
+			) RETURNING id::text`).Scan(&nucleiScanID)).To(Succeed())
 
 		// The four columns that only nuclei ever filled, and that OCSF models as
 		// one evidence entry.
@@ -253,21 +275,24 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(db.SQL().QueryRow(`
 			INSERT INTO findings (
 				scan_id, line_no, template_id, name, severity, host, matched_at,
-				type, tags, request, response, curl, extracted, "timestamp"
+				type, tags, request, response, curl, extracted, "timestamp", raw
 			) VALUES (
 				$1::uuid, 2, 'exposed-panel', 'Exposed admin panel', 'medium',
-				'app.example.test', 'https://app.example.test/admin', 'nuclei',
+				'app.example.test', 'https://app.example.test/admin', 'http',
 				'{}'::text[], 'GET /admin HTTP/1.1', 'HTTP/1.1 200 OK',
 				'curl -s https://app.example.test/admin',
-				ARRAY['v1.2.3']::text[], '2026-08-11T12:00:40Z'
-			) RETURNING id::text`, scanID).Scan(&nucleiID)).To(Succeed())
+				ARRAY['v1.2.3']::text[], '2026-08-11T12:00:40Z', $2::jsonb
+			) RETURNING id::text`, nucleiScanID, `{
+				"type": "http",
+				"info": {"reference": ["https://example.test/panel", "https://example.test/other"]}
+			}`).Scan(&nucleiID)).To(Succeed())
 
 		_, err = db.SQL().Exec(`
 			DELETE FROM schema_migration_scripts
 			WHERE scope = $1 AND path IN (
 				'016_backfill_resources.sql', '018_check_catalogue.sql',
 				'021_finding_verdict.sql', '022_finding_resources.sql',
-				'023_ocsf_findings.sql')`, schema.Name)
+				'023_ocsf_findings.sql', '025_repair_ocsf_engine.sql')`, schema.Name)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
@@ -277,6 +302,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			severityID, classUID, activityID int
 			typeUID                          int64
 			title, desc, kind                string
+			risk                             string
 			statusCode, provider             string
 			remediationDesc, remediationRef  string
 			profile                          string
@@ -285,14 +311,14 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			SELECT check_id, engine, verdict,
 			       severity_id, class_uid, activity_id, type_uid,
 			       finding_info ->> 'title', finding_info ->> 'desc',
-			       finding_info -> 'types' ->> 0,
+			       finding_info -> 'types' ->> 0, risk_details,
 			       status_code, cloud ->> 'provider',
 			       remediation ->> 'desc', remediation -> 'references' ->> 0,
 			       metadata -> 'profiles' ->> 0
 			FROM findings WHERE id = $1::uuid`, prowlerID).
 			Scan(&checkID, &engine, &verdict,
 				&severityID, &classUID, &activityID, &typeUID,
-				&title, &desc, &kind,
+				&title, &desc, &kind, &risk,
 				&statusCode, &provider,
 				&remediationDesc, &remediationRef, &profile)).To(Succeed())
 
@@ -309,7 +335,22 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		// What triage needed and could previously reach only by digging through
 		// the blob, differently per engine.
 		Expect(title).To(Equal("Bucket is public"))
-		Expect(desc).To(Equal("Anyone on the internet can read the objects."))
+		// What was found and what it means are two facts with two homes. The
+		// upgrade used to write the risk statement into the description, which
+		// is where a reader looks for the check's own words.
+		Expect(desc).To(Equal("Objects in this bucket are readable by allUsers."))
+		Expect(risk).To(Equal("Anyone on the internet can read the objects."))
+
+		// The timestamp column was NULL for every prowler row ever stored: it
+		// spells time_dt without a zone, and the ingest that wrote the column
+		// parsed it as RFC3339, which refuses one. Reading the record recovers
+		// what the column never held.
+		var stamped time.Time
+		Expect(db.SQL().QueryRow(
+			`SELECT "time" FROM findings WHERE id = $1::uuid`, prowlerID).
+			Scan(&stamped)).To(Succeed())
+		Expect(stamped).To(BeTemporally("==",
+			time.Date(2026, 8, 11, 15, 0, 30, 500_000_000, time.Local)))
 		Expect(kind).To(Equal("cis"), "recon's tags, projected into finding_info.types")
 		Expect(remediationDesc).To(Equal("Make the bucket private"))
 		Expect(remediationRef).To(Equal("https://example.test/bucket"))
@@ -354,6 +395,43 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 		Expect(curl).To(Equal("curl -s https://app.example.test/admin"))
 		Expect(extracted).To(Equal("v1.2.3"))
 
+		// The column named `type` said "http" for this row, which is the
+		// protocol — the run says which scanner produced it, and that is what
+		// `engine` means. Reading the column instead labelled a whole nuclei run
+		// "http", or nothing at all when the host never answered.
+		var nucleiEngine, protocol, srcURL string
+		var strayType *string
+		Expect(db.SQL().QueryRow(`
+			SELECT engine, unmapped ->> 'protocol', unmapped ->> 'type',
+			       finding_info ->> 'src_url'
+			FROM findings WHERE id = $1::uuid`, nucleiID).
+			Scan(&nucleiEngine, &protocol, &strayType, &srcURL)).To(Succeed())
+		Expect(nucleiEngine).To(Equal("nuclei"))
+		Expect(protocol).To(Equal("http"), "under the key the adapter writes it as")
+		Expect(strayType).To(BeNil(), "the same fact must not also be spelled `type`")
+		// One link, not the list rendered as JSON text into a field the schema
+		// types as a URL.
+		Expect(srcURL).To(Equal("https://example.test/panel"))
+
+		// The escape hatch carries what each adapter puts there and nothing
+		// else. Copying the rest of the record would move the verbatim payload
+		// from `raw` to `unmapped` and change nothing but its name — the same
+		// blob, every attribute stored twice beside its own column.
+		var nucleiKeys, prowlerKeys []string
+		Expect(db.SQL().QueryRow(`
+			SELECT ARRAY(SELECT jsonb_object_keys(unmapped) ORDER BY 1)
+			FROM findings WHERE id = $1::uuid`, nucleiID).
+			Scan(pq.Array(&nucleiKeys))).To(Succeed())
+		Expect(nucleiKeys).To(Equal([]string{"protocol"}))
+
+		Expect(db.SQL().QueryRow(`
+			SELECT ARRAY(SELECT jsonb_object_keys(unmapped) ORDER BY 1)
+			FROM findings WHERE id = $1::uuid`, prowlerID).
+			Scan(pq.Array(&prowlerKeys))).To(Succeed())
+		// Kept because prowler's checks are organised by framework, and "which
+		// CIS control does this fail" is what a compliance audit is asking.
+		Expect(prowlerKeys).To(Equal([]string{"compliance"}))
+
 		// The catalogue describes itself from the OCSF columns now, and must
 		// describe a check the same way a fresh run would.
 		var catalogueName, catalogueSeverity, catalogueRemediation string
@@ -375,12 +453,98 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 				'remediation_text')`).Scan(&legacy)).To(Succeed())
 		Expect(legacy).To(BeZero())
 
-		_, err = db.SQL().Exec(`DELETE FROM scans WHERE id = $1`, scanID)
+		_, err = db.SQL().Exec(
+			`DELETE FROM scans WHERE id = ANY(ARRAY[$1, $2]::uuid[])`, scanID, nucleiScanID)
 		Expect(err).ToNot(HaveOccurred())
 		_, err = db.SQL().Exec(`DELETE FROM resources`)
 		Expect(err).ToNot(HaveOccurred())
 		_, err = db.SQL().Exec(`DELETE FROM checks`)
 		Expect(err).ToNot(HaveOccurred())
+	})
+
+	// A rule's expression is CEL over the finding's own JSON projection, so
+	// reshaping the record reshaped the vocabulary. These specs are the other
+	// half of that: what the upgrade rewrites, and what it refuses to guess at.
+	Describe("stored mute expressions", func() {
+		rewind := func() {
+			_, err := db.SQL().Exec(`
+				DELETE FROM schema_migration_scripts
+				WHERE scope = $1 AND path = '024_mute_expr_ocsf.sql'`, schema.Name)
+			Expect(err).ToNot(HaveOccurred())
+		}
+		store := func(name, expression string) {
+			_, err := db.SQL().Exec(
+				`INSERT INTO mute_rules (name, expr) VALUES ($1, $2)`, name, expression)
+			Expect(err).ToNot(HaveOccurred())
+		}
+
+		AfterEach(func() {
+			_, err := db.SQL().Exec(`DELETE FROM mute_rules`)
+			Expect(err).ToNot(HaveOccurred())
+			rewind()
+			Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+		})
+
+		It("moves every one-to-one path onto its OCSF name", func() {
+			store("legacy-paths",
+				`finding.templateId == "gcp/bucket_public" && finding.type == "prowler" `+
+					`&& finding.name.contains("public") `+
+					`&& finding.raw.resources[0].uid == "bucket-a" `+
+					`&& finding.raw.cloud.account.uid == "1234" `+
+					`&& finding.raw.info.description != "" `+
+					`&& finding.remediation != "" && finding.reference.size() > 0`)
+			rewind()
+
+			Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+
+			var rewritten string
+			Expect(db.SQL().QueryRow(
+				`SELECT expr FROM mute_rules WHERE name = 'legacy-paths'`).
+				Scan(&rewritten)).To(Succeed())
+			Expect(rewritten).To(Equal(
+				`finding.checkId == "gcp/bucket_public" && finding.engine == "prowler" ` +
+					`&& finding.finding_info.title.contains("public") ` +
+					`&& finding.resources[0].uid == "bucket-a" ` +
+					`&& finding.cloud.account.uid == "1234" ` +
+					`&& finding.finding_info.desc != "" ` +
+					`&& finding.remediation.desc != "" && finding.remediation.references.size() > 0`))
+		})
+
+		// Editing a committed script makes it re-run on every database, so a
+		// rewrite that is not a fixed point corrupts what it already fixed.
+		It("leaves an already-rewritten expression alone", func() {
+			store("already-ocsf", `finding.remediation.desc != "" && finding.severity_id >= 4`)
+			rewind()
+
+			Expect(schema.Apply(GinkgoT().Context(), db.DSN())).To(Succeed())
+
+			var unchanged string
+			Expect(db.SQL().QueryRow(
+				`SELECT expr FROM mute_rules WHERE name = 'already-ocsf'`).
+				Scan(&unchanged)).To(Succeed())
+			Expect(unchanged).To(Equal(`finding.remediation.desc != "" && finding.severity_id >= 4`))
+		})
+
+		// severity was a string and is an integer; a rewrite would have to invent
+		// the comparison, and one that guessed wrong would suppress the wrong
+		// findings silently.
+		DescribeTable("refuses to guess at a path that did not survive",
+			func(expression string) {
+				store("untranslatable", expression)
+				rewind()
+
+				err := schema.Apply(GinkgoT().Context(), db.DSN())
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("untranslatable"))
+				Expect(err.Error()).To(ContainSubstring("no longer have"))
+			},
+			Entry("severity as a string", `finding.severity == "high"`),
+			Entry("timestamp as a string", `finding.timestamp.startsWith("2026")`),
+			Entry("matcherName, which meant four things", `finding.matcherName == "FAIL"`),
+			Entry("a request column that is an evidence entry now", `finding.request.contains("GET")`),
+			Entry("an engine key with no modelled home", `finding.raw.template_path != ""`),
+			Entry("an info key the upgrade dropped", `finding.raw.info.author == "pdteam"`),
+		)
 	})
 
 	It("provides generate_ulid from the pre-phase script", func() {

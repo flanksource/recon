@@ -26,9 +26,10 @@ const Variable = "finding"
 //
 // The JSON projection rather than the Go struct: an expression is written
 // against what `finding get --json`, the REST payload and findings.jsonl all
-// show, so there is no second vocabulary to keep in step. `finding.raw` is what
-// earns CEL its place — the engine's own record is the only place a resource's
-// native identity survives in full.
+// show, so there is no second vocabulary to keep in step. Since the record is
+// an OCSF Detection Finding, that vocabulary is OCSF's published one — an
+// expression reading finding.finding_info.title or finding.resources[0].uid is
+// addressing the schema rather than a recon invention.
 func environment(finding api.Finding) (map[string]any, error) {
 	encoded, err := json.Marshal(finding)
 	if err != nil {

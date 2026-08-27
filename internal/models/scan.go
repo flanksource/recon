@@ -145,6 +145,13 @@ type Finding struct {
 	StatusDetail *string    `gorm:"column:status_detail"`
 	Time         *time.Time `gorm:"column:time"`
 
+	// What it means for the finding to be true, which is the half of it triage
+	// reads. OCSF puts both at the event level rather than inside finding_info,
+	// and different engines fill different ones: nuclei writes impact, prowler
+	// risk_details.
+	Impact      *string `gorm:"column:impact"`
+	RiskDetails *string `gorm:"column:risk_details"`
+
 	// One jsonb column per OCSF object rather than a single blob holding the
 	// whole record. The list paths select what they render and no more — the
 	// fix that stopped a page of findings dragging every engine's payload
@@ -212,6 +219,9 @@ func (f Finding) Document(resources []api.ResourceRef) api.Finding {
 
 			StatusCode:   deref(f.StatusCode),
 			StatusDetail: deref(f.StatusDetail),
+
+			Impact:      deref(f.Impact),
+			RiskDetails: deref(f.RiskDetails),
 
 			FindingInfo:     f.FindingInfo.V,
 			Metadata:        f.Metadata.V,
@@ -308,6 +318,9 @@ func FindingFrom(scanID string, lineNo int, finding api.Finding, resourceID stri
 
 		StatusCode:   nonEmpty(scrub(finding.StatusCode)),
 		StatusDetail: nonEmpty(scrub(finding.StatusDetail)),
+
+		Impact:      nonEmpty(scrub(finding.Impact)),
+		RiskDetails: nonEmpty(scrub(finding.RiskDetails)),
 
 		FindingInfo:     wrap(finding.FindingInfo),
 		Metadata:        wrap(finding.Metadata),

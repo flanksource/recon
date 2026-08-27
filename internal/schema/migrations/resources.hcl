@@ -122,6 +122,26 @@ table "resources" {
     comment = "lowercased identities config-db could hold, offered together because no single field is reliably its primary one"
   }
 
+  // Where a person said this resource's insights belong, when its identity named
+  // more than one config item and the ladder could not decide. Written by a sync
+  // that actually pushed and never by an engine — the upsert above deliberately
+  // leaves both columns alone — so a re-scan cannot undo a decision.
+  //
+  // No foreign key: the catalog lives in another database entirely. A choice
+  // that has since been deleted upstream is reported as unresolved at sync time
+  // rather than silently pushed against a dangling id.
+  column "config_id" {
+    null    = true
+    type    = uuid
+    comment = "chosen Mission Control config item; NULL until somebody chooses"
+  }
+  column "config_rolled_up" {
+    null    = false
+    type    = boolean
+    default = false
+    comment = "the chosen item contains this resource rather than being it"
+  }
+
   column "tags" {
     null    = false
     type    = sql("text[]")

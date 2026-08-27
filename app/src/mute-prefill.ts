@@ -68,16 +68,16 @@ function canonicalResource(finding: Finding): { key: string; label: string } | u
  */
 export function mutePrefillQuery(
   finding: Finding,
-  // The scan engine the run used. Deliberately not finding.type, which is the
-  // protocol family (http, inspec, trivy) and is a different vocabulary from
-  // the engine names a rule is scoped by.
+  // The scan engine the run used. `finding.engine` says the same thing and is
+  // preferred when it is set; this stays the caller's override for the places
+  // that know the run and hold a finding that does not name one.
   engine?: string,
   scope: MuteScope = "check-on-resource",
 ): URLSearchParams {
   const spec = SCOPES.find((candidate) => candidate.id === scope) ?? SCOPES[0];
   const params = new URLSearchParams();
 
-  if (spec.templates && finding.templateId) params.set("templates", finding.templateId);
+  if (spec.templates && finding.checkId) params.set("templates", finding.checkId);
 
   if (spec.resource === "host" && finding.host) params.set("resources", finding.host);
   if (spec.resource === "resourceKey") {
@@ -85,10 +85,16 @@ export function mutePrefillQuery(
     if (resource) params.set("resourceKeys", resource.key);
   }
 
-  if (engine) params.set("engines", engine);
+  const reporting = engine ?? finding.engine;
+  if (reporting) params.set("engines", reporting);
 
   return params;
 }
+
+const draftPath = (params: URLSearchParams): string => {
+  const query = params.toString();
+  return query ? `/mutes/${NEW_MUTE}?${query}` : `/mutes/${NEW_MUTE}`;
+};
 
 /** Where a "Mute this finding" choice navigates to. */
 export function mutePrefillPath(
@@ -96,8 +102,25 @@ export function mutePrefillPath(
   engine?: string,
   scope: MuteScope = "check-on-resource",
 ): string {
-  const query = mutePrefillQuery(finding, engine, scope).toString();
-  return query ? `/mutes/${NEW_MUTE}?${query}` : `/mutes/${NEW_MUTE}`;
+  return draftPath(mutePrefillQuery(finding, engine, scope));
+}
+
+/**
+ * Where "mute this check everywhere" navigates to.
+ *
+ * The check-anywhere scope resolves to the check and the engine and nothing
+ * else, which is exactly what a listing grouped by check already holds — so it
+ * can offer that one scope without picking an arbitrary finding underneath to
+ * stand in for the rest. The scopes that name a resource deliberately have no
+ * equivalent here: seeding them from whichever affected resource happened to
+ * sort first would write a rule about that resource while reading as a rule
+ * about the check.
+ */
+export function muteCheckPath(checkId: string, engine?: string): string {
+  const params = new URLSearchParams();
+  if (checkId) params.set("templates", checkId);
+  if (engine) params.set("engines", engine);
+  return draftPath(params);
 }
 
 export type MuteScopeOption = {
@@ -119,7 +142,7 @@ export function muteScopeOptions(finding: Finding, engine?: string): MuteScopeOp
   const options: MuteScopeOption[] = [];
 
   for (const spec of SCOPES) {
-    if (spec.templates && !finding.templateId) continue;
+    if (spec.templates && !finding.checkId) continue;
 
     const canonical = canonicalResource(finding);
     const resource = spec.resource === "host" ? finding.host : canonical?.key;
@@ -134,7 +157,7 @@ export function muteScopeOptions(finding: Finding, engine?: string): MuteScopeOp
       id: spec.id,
       label: spec.label,
       title: [
-        spec.templates ? finding.templateId : "any check",
+        spec.templates ? finding.checkId : "any check",
         spec.resource ? `on ${spec.resource === "resourceKey" ? canonical?.label : resource}` : "anywhere",
       ]
         .filter(Boolean)

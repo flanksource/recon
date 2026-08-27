@@ -45,11 +45,11 @@ func (r ocsfReport) Resources() []api.Resource {
 // finding_info.title and nothing else, so the description prowler puts beside it
 // was invisible to recon and reachable only by digging in the raw blob.
 //
-// The two fields outside the embedded record are prowler's own. `time_dt` is the
-// RFC3339 spelling of a timestamp OCSF also defines as epoch milliseconds under
-// `time`, and prowler writes only the former. `unmapped` is OCSF's sanctioned
-// escape hatch, which prowler uses for the provider identity and the compliance
-// mappings that its checks are actually organised by.
+// The two fields outside the embedded record are prowler's own. `time_dt` is
+// the spelled-out timestamp beside OCSF's `time`, and the one recon reads — see
+// recordTime for why the embedded field cannot be trusted. `unmapped` is OCSF's
+// sanctioned escape hatch, which prowler uses for the provider identity and the
+// compliance mappings that its checks are actually organised by.
 type ocsfRecord struct {
 	ocsf.DetectionFinding
 
@@ -145,6 +145,10 @@ func parseOCSFRecord(raw json.RawMessage, targetID, provider string) (api.Findin
 	}
 
 	tags := recordTags(record)
+	stamped, err := recordTime(record)
+	if err != nil {
+		return api.Finding{}, record, false, err
+	}
 	finding := api.Finding{
 		DetectionFinding: ocsf.DetectionFinding{
 			ClassUID:    ocsf.ClassUID,
@@ -158,7 +162,7 @@ func parseOCSFRecord(raw json.RawMessage, targetID, provider string) (api.Findin
 			StatusDetail: record.StatusDetail,
 			StatusID:     ocsf.StatusIDNew,
 
-			Time:        recordTime(record),
+			Time:        stamped,
 			RiskDetails: record.RiskDetails,
 
 			FindingInfo: &ocsf.FindingInfo{
@@ -257,22 +261,31 @@ func recordDesc(record ocsfRecord) string {
 	return record.FindingInfo.Desc
 }
 
+// prowlerStamp is how prowler spells time_dt — local wall clock with sub-second
+// precision and no zone, which looks like RFC3339 and is not one.
+const prowlerStamp = "2006-01-02T15:04:05.999999"
+
 // recordTime reads the timestamp prowler writes.
 //
-// Prowler emits only `time_dt`, the RFC3339 spelling. OCSF's `time` is epoch
-// milliseconds and is what the column stores, so the conversion happens here
-// rather than leaving two representations to disagree. An unparseable stamp
-// yields zero, which the store keeps as NULL — a finding with no time is honest
-// about it rather than claiming 1970.
-func recordTime(record ocsfRecord) int64 {
+// time_dt first, because `time` is not what OCSF says it is: the schema defines
+// it as epoch milliseconds and prowler writes epoch seconds. Reading `time`
+// first dated every prowler finding to January 1970, and a stamp that is wrong
+// by a factor of a thousand still sorts and renders, so nothing complained.
+//
+// Both spellings of time_dt are accepted because prowler writes it without a
+// zone, which time.RFC3339 refuses — the reason the fallback was reached at all.
+func recordTime(record ocsfRecord) (int64, error) {
+	for _, layout := range []string{time.RFC3339, prowlerStamp} {
+		if parsed, err := time.ParseInLocation(layout, record.TimeDT, time.Local); err == nil {
+			return parsed.UnixMilli(), nil
+		}
+	}
 	if record.Time != 0 {
-		return record.Time
+		return record.Time * 1000, nil
 	}
-	parsed, err := time.Parse(time.RFC3339, record.TimeDT)
-	if err != nil {
-		return 0
-	}
-	return parsed.UnixMilli()
+	return 0, fmt.Errorf(
+		"prowler record %s carries no readable timestamp: time=%d time_dt=%q",
+		eventCode(record), record.Time, record.TimeDT)
 }
 
 func recordCloud(record ocsfRecord, provider string) *ocsf.Cloud {

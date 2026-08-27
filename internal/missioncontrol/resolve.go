@@ -37,6 +37,10 @@ type Candidate struct {
 type ResolveOptions struct {
 	State  api.InsightState
 	Target api.TargetDocument
+	// Pin is the choice a previous sync remembered for this state's resource. It
+	// short-circuits the ladder: a person has already said where these findings
+	// belong, and re-deriving it would let a catalog change quietly move them.
+	Pin *api.ConfigPin
 }
 
 // Match is the config item a finding was attached to.
@@ -48,9 +52,29 @@ type Match struct {
 	// own — see RolledUp.
 	MatchedOn string
 	RolledUp  bool
-	// Note records a finer identity that was skipped because it matched more
-	// than one config item. Ambiguity is not a miss, but it must not be silent.
-	Note string
+	// Pinned marks a match that came from the resource's stored choice.
+	Pinned bool
+	// Chosen marks a match an explicit choice resolved this run, which is what a
+	// real sync then remembers against the resource.
+	Chosen bool
+}
+
+// Resolution is everything one state's walk down the ladder established: where
+// it belongs, or why nothing could be found for it, and every identity that was
+// too popular to decide on its own.
+type Resolution struct {
+	Match      *Match
+	Unresolved *api.InsightUnresolved
+	Ambiguous  []Ambiguity
+}
+
+// Ambiguity is one identity several config items carried, with everything a
+// person needs to pick between them.
+type Ambiguity struct {
+	Identity string
+	Type     string
+	Scope    bool
+	Options  []api.InsightChoice
 }
 
 // resolveLimit bounds a candidate lookup. One match is the answer and two are
@@ -58,42 +82,72 @@ type Match struct {
 const resolveLimit = 10
 
 type lookup struct {
-	match     *Match
-	ambiguous []string
+	match *Match
+	// options is what an identity could be attached to, and is only populated
+	// when more than one config item carried it.
+	options []api.InsightChoice
 }
 
 // Resolver maps recon identities onto catalog config items. Lookups are
 // memoised for the life of an upload: a scan of one host produces many findings
 // that all resolve to the same config item.
+//
+// The search is deliberately not scoped to an agent. The agent an insight is
+// pushed as is recon's own identity, and recon scrapes no config items — the
+// config item a finding hangs off was ingested by whichever scraper or agent
+// owns that estate. Scoping the search by the push agent would match nothing,
+// and Mission Control rejects the whole query with `invalid agent` until the
+// name exists upstream.
 type Resolver struct {
 	client *sdk.Client
-	// Agent scopes the search to one agent's configs, or every agent when empty.
-	Agent string
+
+	// Choices attach an ambiguous identity to one of the config items offered
+	// for it. Keyed by the identity, because one account or cluster is the
+	// answer for every resource inside it.
+	Choices map[string]uuid.UUID
 
 	cache map[string]lookup
+	items map[uuid.UUID]*dutymodels.ConfigItem
 }
 
 func NewResolver(client *sdk.Client) *Resolver {
-	return &Resolver{client: client, cache: map[string]lookup{}}
+	return &Resolver{
+		client: client,
+		cache:  map[string]lookup{},
+		items:  map[uuid.UUID]*dutymodels.ConfigItem{},
+	}
 }
 
 // Resolve returns the config item a finding belongs to, or the report of why
 // nothing could be found for it.
-func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (*Match, *api.InsightUnresolved, error) {
+func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (Resolution, error) {
+	if options.Pin != nil {
+		return r.resolvePin(ctx, options)
+	}
+
+	var resolution Resolution
 	var tried []string
-	var skipped []string
 
 	for _, candidate := range candidates(options.State, options.Target) {
 		tried = append(tried, candidate.Value)
 
 		found, err := r.lookupCandidate(ctx, candidate)
 		if err != nil {
-			return nil, nil, err
+			return Resolution{}, err
 		}
-		if len(found.ambiguous) > 0 {
-			skipped = append(skipped, fmt.Sprintf("%s matched %d config items (%s)",
-				candidate.Value, len(found.ambiguous), strings.Join(found.ambiguous, ", ")))
-			continue
+		if len(found.options) > 0 {
+			resolution.Ambiguous = append(resolution.Ambiguous, Ambiguity{
+				Identity: candidate.Value, Type: candidate.Type, Scope: candidate.Scope,
+				Options: found.options,
+			})
+			chosen := r.chosen(candidate.Value, found.options)
+			if chosen == nil {
+				continue
+			}
+			chosen.MatchedOn = candidate.Value
+			chosen.RolledUp = candidate.Scope || chosen.RolledUp
+			resolution.Match = chosen
+			return resolution, nil
 		}
 		if found.match == nil {
 			continue
@@ -102,24 +156,89 @@ func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (*Match,
 		match := *found.match
 		match.MatchedOn = candidate.Value
 		match.RolledUp = candidate.Scope
-		match.Note = strings.Join(skipped, "; ")
-		return &match, nil, nil
+		resolution.Match = &match
+		return resolution, nil
 	}
 
-	reason := "no catalog config item matches the resource, its account, cluster or target"
-	if len(skipped) > 0 {
-		reason = strings.Join(skipped, "; ")
+	resolution.Unresolved = unresolved(options.State, tried, unresolvedReason(tried, resolution.Ambiguous))
+	return resolution, nil
+}
+
+// resolvePin attaches a state to the config item chosen for its resource.
+//
+// The item is still read back rather than trusted: a config item that has been
+// deleted since the choice was made would otherwise be pushed against, and
+// config_analysis.config_id is a foreign key, so the whole batch would be
+// rejected for one stale pin.
+func (r *Resolver) resolvePin(ctx context.Context, options ResolveOptions) (Resolution, error) {
+	id, err := uuid.Parse(options.Pin.ConfigID)
+	if err != nil {
+		return Resolution{}, fmt.Errorf("stored config choice %q for resource %s is not a uuid: %w",
+			options.Pin.ConfigID, options.State.Resource.ID, err)
 	}
+	item, err := r.configItem(ctx, id)
+	if err != nil {
+		return Resolution{}, err
+	}
+	if item == nil {
+		return Resolution{Unresolved: unresolved(options.State, []string{options.Pin.ConfigID},
+			fmt.Sprintf("the chosen config item %s is no longer in the catalog; sync with --repin to resolve it again",
+				options.Pin.ConfigID))}, nil
+	}
+	return Resolution{Match: &Match{
+		ConfigID:   item.ID,
+		ConfigName: derefString(item.Name),
+		ConfigType: derefString(item.Type),
+		MatchedOn:  derefString(item.Name),
+		RolledUp:   options.Pin.RolledUp,
+		Pinned:     true,
+	}}, nil
+}
+
+// chosen returns the match an explicit choice made for this identity, or nil
+// when nobody has chosen or the choice names something that was not offered.
+func (r *Resolver) chosen(identity string, options []api.InsightChoice) *Match {
+	id, found := r.Choices[identity]
+	if !found {
+		return nil
+	}
+	for _, option := range options {
+		if option.ID != id.String() {
+			continue
+		}
+		return &Match{
+			ConfigID: id, ConfigName: option.Name, ConfigType: option.Type,
+			// An ancestor is by definition not the thing the finding is about.
+			RolledUp: option.Ancestor,
+			Chosen:   true,
+		}
+	}
+	return nil
+}
+
+func unresolvedReason(tried []string, ambiguous []Ambiguity) string {
 	if len(tried) == 0 {
-		reason = "the finding carries no identity to resolve against"
+		return "the finding carries no identity to resolve against"
 	}
-	return nil, &api.InsightUnresolved{
-		Finding:  findingRef(options.State.Scan, options.State.Finding),
-		Host:     options.State.Resource.Name,
-		Severity: options.State.Finding.SeverityLevel(),
+	if len(ambiguous) == 0 {
+		return "no catalog config item matches the resource, its account, cluster or target"
+	}
+	reasons := make([]string, 0, len(ambiguous))
+	for _, ambiguity := range ambiguous {
+		reasons = append(reasons, fmt.Sprintf("%s matched %d config items; choose one",
+			ambiguity.Identity, matched(ambiguity.Options)))
+	}
+	return strings.Join(reasons, "; ")
+}
+
+func unresolved(state api.InsightState, tried []string, reason string) *api.InsightUnresolved {
+	return &api.InsightUnresolved{
+		Finding:  findingRef(state.Scan, state.Finding),
+		Host:     state.Resource.Name,
+		Severity: state.Finding.SeverityLevel(),
 		Tried:    tried,
 		Reason:   reason,
-	}, nil
+	}
 }
 
 // candidates builds the ladder, most specific first, dropping duplicates and
@@ -170,7 +289,7 @@ func searchable(value string) bool {
 // never match an array. Narrowing with LIKE and then confirming the exact value
 // against the fetched rows is what keeps the match honest.
 func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lookup, error) {
-	cacheKey := r.Agent + "\x00" + candidate.Type + "\x00" + candidate.Value
+	cacheKey := candidate.Type + "\x00" + candidate.Value
 	if cached, ok := r.cache[cacheKey]; ok {
 		return cached, nil
 	}
@@ -184,7 +303,6 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 		Limit: resolveLimit,
 		Configs: []dutytypes.ResourceSelector{{
 			Search: search,
-			Agent:  r.Agent,
 		}},
 	})
 	if err != nil {
@@ -202,6 +320,7 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 
 	var exact []dutymodels.ConfigItem
 	for _, item := range items {
+		r.items[item.ID] = &item
 		if identifies(item, candidate) {
 			exact = append(exact, item)
 		}
@@ -217,12 +336,33 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 			ConfigType: derefString(exact[0].Type),
 		}
 	default:
-		for _, item := range exact {
-			result.ambiguous = append(result.ambiguous, item.ID.String())
+		result.options, err = r.choices(ctx, exact)
+		if err != nil {
+			return lookup{}, err
 		}
 	}
 	r.cache[cacheKey] = result
 	return result, nil
+}
+
+// configItem reads one config item by id, memoised for the life of the upload.
+// A missing item is nil rather than an error: the id came from a stored choice
+// or a parent reference, and either can name something since deleted.
+func (r *Resolver) configItem(ctx context.Context, id uuid.UUID) (*dutymodels.ConfigItem, error) {
+	if cached, found := r.items[id]; found {
+		return cached, nil
+	}
+	items, err := r.client.GetCatalogItems(ctx, []string{id.String()})
+	if err != nil {
+		return nil, fmt.Errorf("read the catalog item %s: %w", id, err)
+	}
+	r.items[id] = nil
+	for _, item := range items {
+		if item.ID == id {
+			r.items[id] = &item
+		}
+	}
+	return r.items[id], nil
 }
 
 // identifies confirms the server's candidate really carries the identity, which

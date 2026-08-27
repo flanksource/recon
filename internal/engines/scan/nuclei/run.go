@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/projectdiscovery/gologger"
@@ -150,6 +151,11 @@ func convert(event *output.ResultEvent) (map[string]any, api.Finding, error) {
 	tags := orEmpty(event.Info.Tags.ToSlice())
 	matched := firstNonEmpty(event.Matched, event.URL, host)
 
+	evidences, err := eventEvidence(event, matched)
+	if err != nil {
+		return nil, api.Finding{}, err
+	}
+
 	finding := api.Finding{
 		DetectionFinding: ocsf.DetectionFinding{
 			ClassUID:    ocsf.ClassUID,
@@ -180,7 +186,7 @@ func convert(event *output.ResultEvent) (map[string]any, api.Finding, error) {
 				},
 			},
 			Impact:    event.Info.Impact,
-			Evidences: eventEvidence(event, matched),
+			Evidences: evidences,
 			// The protocol the template spoke, which used to be stored in the
 			// column named for the engine — where prowler wrote "prowler" and
 			// nuclei wrote "http", so one column meant two things.
@@ -207,11 +213,16 @@ func convert(event *output.ResultEvent) (map[string]any, api.Finding, error) {
 // An evidence entry has to carry one of the attributes OCSF's at_least_one
 // constraint names, so a finding with no exchange to show produces no entry
 // rather than an empty one that would fail validation.
-func eventEvidence(event *output.ResultEvent, matched string) []ocsf.Evidences {
+func eventEvidence(event *output.ResultEvent, matched string) ([]ocsf.Evidences, error) {
 	evidence := ocsf.Evidences{Name: event.MatcherName}
 	if matched != "" {
 		evidence.URL = &ocsf.URL{URLString: matched}
 	}
+	endpoint, err := resolvedEndpoint(event)
+	if err != nil {
+		return nil, err
+	}
+	evidence.DstEndpoint = endpoint
 	if event.Request != "" {
 		evidence.HTTPRequest = &ocsf.HTTPRequest{Args: event.Request}
 	}
@@ -232,9 +243,28 @@ func eventEvidence(event *output.ResultEvent, matched string) []ocsf.Evidences {
 	}
 	if evidence.URL == nil && evidence.HTTPRequest == nil &&
 		evidence.HTTPResponse == nil && evidence.Data == nil {
-		return nil
+		return nil, nil
 	}
-	return []ocsf.Evidences{evidence}
+	return []ocsf.Evidences{evidence}, nil
+}
+
+// resolvedEndpoint is the address the template actually reached, which a URL
+// alone does not say: behind a load balancer or a wildcard DNS record, which of
+// several hosts answered is the fact that makes a finding reproducible.
+func resolvedEndpoint(event *output.ResultEvent) (*ocsf.NetworkEndpoint, error) {
+	if event.IP == "" && event.Port == "" {
+		return nil, nil
+	}
+	endpoint := &ocsf.NetworkEndpoint{IP: event.IP, Hostname: event.Host}
+	if event.Port != "" {
+		port, err := strconv.Atoi(event.Port)
+		if err != nil {
+			return nil, fmt.Errorf("nuclei result %s reported port %q, which is not a number: %w",
+				event.TemplateID, event.Port, err)
+		}
+		endpoint.Port = port
+	}
+	return endpoint, nil
 }
 
 // eventUnmapped keeps what nuclei reports that OCSF has no field for.

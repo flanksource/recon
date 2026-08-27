@@ -31,6 +31,11 @@ type Resource struct {
 	ConfigType  string         `gorm:"column:config_type"`
 	ExternalIDs pq.StringArray `gorm:"column:external_ids;type:text[]"`
 
+	// The chosen catalog config item, written by a sync and never by an engine —
+	// which is why ResourceFrom does not set it and the upsert does not touch it.
+	ConfigID       *string `gorm:"column:config_id"`
+	ConfigRolledUp bool    `gorm:"column:config_rolled_up"`
+
 	Tags     pq.StringArray          `gorm:"column:tags;type:text[]"`
 	Labels   JSON[map[string]string] `gorm:"column:labels;type:jsonb"`
 	Metadata JSON[map[string]any]    `gorm:"column:metadata;type:jsonb"`
@@ -71,6 +76,7 @@ func (r Resource) Document(open int, severities map[string]int) api.Resource {
 		Engines:     api.StringList(orEmpty(stringSlice(r.Engines))),
 		ConfigType:  r.ConfigType,
 		ExternalIDs: api.StringList(stringSlice(r.ExternalIDs)),
+		ConfigID:    deref(r.ConfigID),
 		Tags:        api.StringList(orEmpty(stringSlice(r.Tags))),
 		Labels:      r.Labels.Get(),
 		Metadata:    r.Metadata.Get(),

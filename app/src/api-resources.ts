@@ -28,6 +28,8 @@ export type Resource = {
 
   configType?: string;
   externalIds?: string[];
+  /** The catalog config item a sync was told to attach this resource's insights to. */
+  configId?: string;
 
   tags?: string[];
   labels?: Record<string, string>;

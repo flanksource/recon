@@ -13,6 +13,7 @@ import (
 	"github.com/projectdiscovery/nuclei/v3/pkg/output"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/ocsf"
 )
 
 func TestNuclei(t *testing.T) {
@@ -114,6 +115,24 @@ var _ = Describe("converting a captured scan", func() {
 		var data map[string]any
 		Expect(json.Unmarshal(evidence.Data, &data)).To(Succeed())
 		Expect(data).To(HaveKeyWithValue("curl", ContainSubstring("curl")))
+	})
+
+	// Which host answered, which the URL does not say: behind a load balancer
+	// or a wildcard record the address is what makes a finding reproducible.
+	It("records the address the template reached", func() {
+		Expect(findings[0].Evidences[0].DstEndpoint).To(Equal(&ocsf.NetworkEndpoint{
+			IP:       "192.0.2.1",
+			Port:     443,
+			Hostname: "host-2.example.test",
+		}))
+	})
+
+	It("refuses a port that is not a number rather than dropping the address", func() {
+		_, _, err := convert(&output.ResultEvent{
+			TemplateID: "edge-bad-port", Host: "h.example.test", URL: "https://h.example.test",
+			IP: "192.0.2.9", Port: "https",
+		})
+		Expect(err).To(MatchError(ContainSubstring(`reported port "https"`)))
 	})
 
 	// What nuclei reported that the schema has no name for, in OCSF's own escape

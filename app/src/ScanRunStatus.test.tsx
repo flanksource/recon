@@ -132,9 +132,9 @@ describe("ScanRunStatus", () => {
       {
         scanId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
         lineNo: 1,
-        templateId: "tls-version",
-        name: "Deprecated TLS version",
-        severity: "high",
+        checkId: "tls-version",
+        finding_info: { uid: "tls-version", title: "Deprecated TLS version" },
+        severity_id: 4,
         host: "api.example.com",
         matchedAt: "https://api.example.com",
         tags: ["tls"],

@@ -38,8 +38,10 @@ var _ = Describe("what an InSpec run concluded", func() {
 	It("links every failure to the emitted account resource", func() {
 		parsed := report(Result{Status: StatusFailed})
 
-		Expect(parsed.Findings(account)).To(HaveLen(1))
-		Expect(parsed.Findings(account)[0].Resources).To(Equal([]api.ResourceRef{
+		findings, err := parsed.Findings(account)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(findings).To(HaveLen(1))
+		Expect(findings[0].Resources).To(Equal([]api.ResourceRef{
 			parsed.Resources(account)[0].Ref(),
 		}))
 		Expect(parsed.Resources(account)[0].ExternalIDs).To(ContainElement(account))
@@ -87,8 +89,10 @@ var _ = Describe("what an InSpec run concluded", func() {
 		// Every control it calls passed must have produced no finding, which is
 		// the invariant the lifecycle depends on: one control cannot be both
 		// the evidence of a problem and the proof that it is gone.
+		findings, err := parsed.Findings(account)
+		Expect(err).ToNot(HaveOccurred())
 		failing := map[string]struct{}{}
-		for _, finding := range parsed.Findings(account) {
+		for _, finding := range findings {
 			failing[finding.CheckID] = struct{}{}
 		}
 		for _, control := range verdicts {

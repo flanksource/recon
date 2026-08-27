@@ -1,6 +1,12 @@
 import type { DataTableColumn, BadgeStatus } from "@flanksource/clicky-ui/data";
 import { findingSearchTokens } from "./finding-markdown";
-import { resourceLabel, type Finding, type Severity } from "./types";
+import {
+  findingTitle,
+  resourceLabel,
+  severityOf,
+  type Finding,
+  type Severity,
+} from "./types";
 
 export const SEVERITY_RANK: Record<Severity, number> = {
   critical: 0,
@@ -11,11 +17,14 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   unknown: 5,
 };
 
-export function worstSeverity(findings: { severity: Severity }[]): Severity {
-  return findings.reduce<Severity>(
-    (worst, f) => (SEVERITY_RANK[f.severity] < SEVERITY_RANK[worst] ? f.severity : worst),
-    "unknown",
-  );
+// Takes findings by their OCSF severity_id rather than a severity string: the
+// integer is what the record carries, and the ladder is derived from it in one
+// place so the two cannot drift.
+export function worstSeverity(findings: { severity_id?: number }[]): Severity {
+  return findings.reduce<Severity>((worst, finding) => {
+    const severity = severityOf(finding);
+    return SEVERITY_RANK[severity] < SEVERITY_RANK[worst] ? severity : worst;
+  }, "unknown");
 }
 
 const SEVERITY_STYLE: Record<Severity, string> = {
@@ -46,33 +55,36 @@ export function severityStatus(sev: Severity): BadgeStatus | null {
 
 export const findingColumns: DataTableColumn<Finding>[] = [
   {
-    key: "severity",
+    key: "severity_id",
     label: "Severity",
     sortable: true,
     filterable: true,
     shrink: true,
-    render: (value) => severityBadge(value as Severity),
-    sortValue: (value) => SEVERITY_RANK[value as Severity] ?? 9,
-    filterValue: (value) => String(value),
+    // Rendered, sorted and filtered from the OCSF integer. Sorting on the id
+    // directly would reverse the listing — OCSF numbers upwards, critical is 5
+    // — which reads as a data problem rather than a sort problem.
+    render: (_value, row) => severityBadge(severityOf(row)),
+    sortValue: (_value, row) => SEVERITY_RANK[severityOf(row)] ?? 9,
+    filterValue: (_value, row) => severityOf(row),
   },
   {
-    key: "name",
+    key: "checkId",
     label: "Finding",
     grow: true,
     sortable: true,
     filterValue: (_value, row) => findingSearchTokens(row),
-    render: (value, row) => (
+    render: (_value, row) => (
       <div className="flex flex-col">
-        <span className="font-medium text-foreground">{String(value)}</span>
+        <span className="font-medium text-foreground">{findingTitle(row)}</span>
         <code className="text-xs text-muted-foreground">
-          {row.templateId}
-          {row.matcherName ? ` · ${row.matcherName}` : ""}
+          {row.checkId}
+          {row.status_code ? ` · ${row.status_code}` : ""}
         </code>
       </div>
     ),
   },
   { key: "host", label: "Host", sortable: true, filterable: true, grow: true },
-  { key: "type", label: "Type", sortable: true, filterable: true, shrink: true },
+  { key: "engine", label: "Engine", sortable: true, filterable: true, shrink: true },
   {
     key: "tags",
     label: "Tags",

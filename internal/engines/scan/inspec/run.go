@@ -110,7 +110,10 @@ func (e Engine) audit(
 				return err
 			}
 		}
-		emitted := parsed.Findings(account)
+		emitted, err := parsed.Findings(account)
+		if err != nil {
+			return err
+		}
 		for _, found := range emitted {
 			if err := encoder.Encode(found); err != nil {
 				return fmt.Errorf("write finding: %w", err)

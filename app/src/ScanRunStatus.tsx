@@ -8,6 +8,8 @@ import { severityBadge, SEVERITY_RANK } from "./scanColumns";
 import {
   SEVERITIES,
   TERMINAL_PHASES,
+  findingTitle,
+  severityOf,
   type Finding,
   type ScanOutputEvent,
   type ScanStatus,
@@ -68,7 +70,7 @@ function LiveFindings({ findings }: { findings: Finding[] }) {
         .reverse()
         .sort(
           (left, right) =>
-            SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity],
+            SEVERITY_RANK[severityOf(left)] - SEVERITY_RANK[severityOf(right)],
         ),
     [findings],
   );
@@ -81,13 +83,13 @@ function LiveFindings({ findings }: { findings: Finding[] }) {
     <ul className="divide-y divide-border">
       {sorted.map((finding, index) => (
         <li
-          key={`${finding.templateId}:${finding.host}:${index}`}
+          key={`${finding.checkId}:${finding.host}:${index}`}
           className="flex items-center gap-2 px-3 py-1.5 text-sm"
         >
-          {severityBadge(finding.severity)}
-          <span className="truncate font-medium">{finding.name}</span>
+          {severityBadge(severityOf(finding))}
+          <span className="truncate font-medium">{findingTitle(finding)}</span>
           <code className="truncate text-xs text-muted-foreground">
-            {finding.templateId}
+            {finding.checkId}
           </code>
           <span className="flex-1" />
           <span

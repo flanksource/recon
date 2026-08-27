@@ -28,11 +28,36 @@ describe("insight sync API", () => {
       configs: [], unresolved: [],
     }), { status: 200 }));
 
-    await sync({ provider: "gcp", status: "open" }, true);
+    await sync({ provider: "gcp", status: "open" }, { dryRun: true });
 
     expect(fetch).toHaveBeenCalledWith(`/api/v1/${entity}/sync`, expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ provider: "gcp", status: "open", "dry-run": true }),
+    }));
+  });
+
+  // The server parses a repeatable flag out of a JSON array, the same way it
+  // parses `--config identity=id` twice on the command line.
+  it("posts each answered ambiguity as one identity=config-id pair", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      agent: "recon", matchedResources: 0, matchedStates: 0, eligible: 0, skipped: 0,
+      open: 0, resolved: 0, silenced: 0, direct: 0, rolledUp: 0, pinned: 0, pushed: 0,
+      configs: [], unresolved: [], ambiguous: [],
+    }), { status: 200 }));
+
+    await syncFindings({ status: "open" }, {
+      dryRun: false,
+      repin: true,
+      choices: { "workload-prod-eu-02": "eb6a8af6", "prod-euw1": "03525cee" },
+    });
+
+    expect(fetch).toHaveBeenCalledWith("/api/v1/finding/sync", expect.objectContaining({
+      body: JSON.stringify({
+        status: "open",
+        "dry-run": false,
+        repin: true,
+        config: ["workload-prod-eu-02=eb6a8af6", "prod-euw1=03525cee"],
+      }),
     }));
   });
 });
