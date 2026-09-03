@@ -3,9 +3,9 @@ module github.com/flanksource/recon
 go 1.26.1
 
 require (
-	github.com/flanksource/clicky v1.21.56
-	github.com/flanksource/commons v1.56.0
-	github.com/flanksource/commons-db v0.1.27
+	github.com/flanksource/clicky v1.21.57
+	github.com/flanksource/commons v1.57.0
+	github.com/flanksource/commons-db v0.1.29
 	github.com/flanksource/deps v1.0.41
 	github.com/flanksource/duty v1.0.1371
 	github.com/flanksource/incident-commander v0.0.1934
@@ -188,7 +188,6 @@ require (
 	github.com/go-rod/rod v0.116.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
-	github.com/go-test/deep v1.1.1 // indirect
 	github.com/goburrow/cache v0.1.4 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
