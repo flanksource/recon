@@ -1,4 +1,5 @@
 import type { DataTableColumn } from "@flanksource/clicky-ui/data";
+import { ResourceIcon } from "@flanksource/icons/icon";
 import { severityBadge } from "./scanColumns";
 import type { Resource } from "./api-resources";
 import type { Severity } from "./types";
@@ -88,8 +89,21 @@ function severityStrip(resource: Resource) {
  */
 function nameCell(resource: Resource) {
   const name = resource.name || resource.uid;
+  const icon = resource.configType || resource.type || resource.provider;
   return (
     <div className="flex min-w-0 items-baseline gap-2">
+      <span
+        role="img"
+        aria-label={`${icon} icon`}
+        className="inline-flex size-5 shrink-0 self-center items-center justify-center text-muted-foreground"
+      >
+        <ResourceIcon
+          primary={resource.configType || resource.type}
+          secondary={resource.configType ? resource.type : resource.provider}
+          className="size-5"
+          aria-hidden="true"
+        />
+      </span>
       <span className="truncate font-medium">{name}</span>
       {resource.uid && resource.uid !== name && (
         <span className="truncate text-xs text-muted-foreground" title={resource.uid}>
@@ -134,6 +148,22 @@ export const resourceColumns: DataTableColumn<Resource>[] = [
   },
   { key: "scope", label: "Account", sortable: true },
   { key: "region", label: "Region", sortable: true },
+  {
+    key: "firstSeen",
+    label: "First seen",
+    kind: "timestamp",
+    filterKey: "first-seen",
+    sortable: true,
+    shrink: true,
+  },
+  {
+    key: "lastSeen",
+    label: "Last seen",
+    kind: "timestamp",
+    filterKey: "last-seen",
+    sortable: true,
+    shrink: true,
+  },
   {
     key: "findings",
     label: "Findings",

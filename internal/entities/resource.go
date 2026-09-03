@@ -37,6 +37,10 @@ func (r *Registry) registerResource() {
 		ListPagedWithContext(pagedResources(bind(r, (*store.Store).ListResourcesPaged))).
 		GetWithContext(bind(r, (*store.Store).GetResource)).
 		Filters(r.resourceFilters()...).
+		WithAction(entity.TypedActionWithContext("config", resourceConfigFlags{}, r.resourceConfig).
+			WithMethod("GET").WithShort("Read the linked Mission Control catalog item")).
+		WithAction(entity.TypedActionWithContext("unlink-config", resourceConfigFlags{}, r.unlinkResourceConfig).
+			WithShort("Remove the stored Mission Control config link")).
 		WithAction(entity.TypedActionWithContext("sync", resourceSyncFlags{}, r.syncResources).
 			WithOptionalID().WithShort("Sync current states for the selected resources to Mission Control")).
 		WithAction(entity.TypedActionWithContext("mute", resourceMuteFlags{}, r.muteResource).
@@ -97,5 +101,7 @@ func (r *Registry) resourceFilters() []clicky.Filter[store.ResourceOpts] {
 			store.ResourceFailing, store.ResourceClean, store.ResourceUnchecked)},
 		filter[store.ResourceOpts]{key: "state", label: "State", values: fixed(
 			api.ResourcePresent, api.ResourceAbsent)},
+		rangeFilter[store.ResourceOpts]{key: "first-seen", label: "First seen"},
+		rangeFilter[store.ResourceOpts]{key: "last-seen", label: "Last seen"},
 	}
 }

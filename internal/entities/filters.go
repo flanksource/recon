@@ -43,6 +43,21 @@ type filter[Opts any] struct {
 	values values
 }
 
+// rangeFilter advertises a date-only range for a string flag. The flag stays a
+// string because the same >=from,<=to grammar is shared by the CLI and HTTP.
+type rangeFilter[Opts any] struct {
+	key   string
+	label string
+}
+
+func (f rangeFilter[Opts]) Key() string   { return f.key }
+func (f rangeFilter[Opts]) Label() string { return f.label }
+func (rangeFilter[Opts]) Lookup(*Opts) (map[string]clickyapi.Textable, error) {
+	return nil, nil
+}
+func (rangeFilter[Opts]) Options(Opts) map[string]clickyapi.Textable { return nil }
+func (rangeFilter[Opts]) LookupType() string                         { return "day-range" }
+
 func (f filter[Opts]) Key() string   { return f.key }
 func (f filter[Opts]) Label() string { return f.label }
 

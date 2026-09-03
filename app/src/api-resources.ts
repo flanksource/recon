@@ -61,6 +61,13 @@ export type ResourcePage = {
   page: { limit: number; offset: number; total: number };
 };
 
+export type LinkedConfig = {
+  id: string;
+  name: string;
+  type: string;
+  url: string;
+};
+
 /** What is currently true about one check on one resource. */
 export type FindingState = {
   id: string;
@@ -90,6 +97,18 @@ export function fetchResources(
 
 export function fetchResource(id: string): Promise<Resource> {
   return request<Resource>(`${API}/resource/${encodeURIComponent(id)}`);
+}
+
+export function fetchResourceConfig(id: string): Promise<LinkedConfig | null> {
+  return request<LinkedConfig | null>(
+    `${API}/resource/${encodeURIComponent(id)}/config`,
+  );
+}
+
+export async function removeResourceConfig(id: string): Promise<void> {
+  await request(`${API}/resource/${encodeURIComponent(id)}/unlink-config`, {
+    method: "POST",
+  });
 }
 
 /**

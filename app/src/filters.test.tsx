@@ -47,6 +47,12 @@ function multi(filters: FilterBarFilter[], key: string) {
   return filter;
 }
 
+function dateRange(filters: FilterBarFilter[], key: string) {
+  const filter = byKey(filters, key);
+  if (filter.kind !== "date-range") throw new Error(`${key} is ${filter.kind}, not date-range`);
+  return filter;
+}
+
 describe("entity filter controls", () => {
   afterEach(() => {
     cleanup();
@@ -63,6 +69,48 @@ describe("entity filter controls", () => {
     // Severity is read as a literal value server-side, so an exclusion there
     // would be sent as a severity named "!info" and quietly match nothing.
     expect(byKey(result.current.filters, "severity").kind).toBe("lookup-multi");
+  });
+
+  it("renders date range metadata as date-only controls and sends both bounds", async () => {
+    mockLookup({
+      filters: {
+        "first-seen": { label: "First seen", type: "day-range" },
+        "last-seen": { label: "Last seen", type: "day-range" },
+      },
+    });
+    const { result } = await loadFilters("resource");
+
+    expect(dateRange(result.current.filters, "first-seen").timeEnabled).toBe(false);
+    expect(dateRange(result.current.filters, "last-seen").timeEnabled).toBe(false);
+
+    act(() => {
+      dateRange(result.current.filters, "first-seen").onApply("2026-08-01", "2026-08-31");
+    });
+
+    expect(result.current.selection).toEqual({
+      "first-seen": [">=2026-08-01,<=2026-08-31"],
+    });
+    expect(selectionQuery(result.current.selection)).toEqual({
+      "first-seen": ">=2026-08-01,<=2026-08-31",
+    });
+  });
+
+  it("reads a stored date range back into its two bounds", async () => {
+    mockLookup({
+      filters: { "last-seen": { label: "Last seen", type: "day-range" } },
+    });
+    const { result } = await loadFilters("resource");
+
+    act(() => {
+      result.current.setSelection({ "last-seen": [">=2026-08-20,<=2026-08-22"] });
+    });
+
+    await waitFor(() => {
+      expect(dateRange(result.current.filters, "last-seen")).toMatchObject({
+        from: "2026-08-20",
+        to: "2026-08-22",
+      });
+    });
   });
 
   // The three listings name the same idea differently: templates and findings

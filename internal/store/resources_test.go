@@ -282,6 +282,31 @@ var _ = Describe("the resource inventory", Ordered, Label("db"), func() {
 			Expect(err).To(MatchError(ContainSubstring(`unknown state "deleted"`)))
 		})
 
+		It("filters first and last sightings by inclusive date ranges", func() {
+			later := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+			newResource := bucket
+			newResource.UID, newResource.Name = "new-bucket", "new-bucket"
+			record(later, bucket, newResource)
+
+			firstSeen, err := st.ListResources(ctx, store.ResourceOpts{
+				FirstSeen: ">=2026-08-24,<=2026-08-24",
+			})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(firstSeen).To(HaveLen(1))
+			Expect(firstSeen[0].Name).To(Equal("new-bucket"))
+
+			lastSeen, err := st.ListResources(ctx, store.ResourceOpts{
+				LastSeen: ">=2026-08-24,<=2026-08-24",
+			})
+			Expect(err).ToNot(HaveOccurred())
+			Expect([]string{lastSeen[0].Name, lastSeen[1].Name}).To(ConsistOf("logs", "new-bucket"))
+		})
+
+		It("rejects an invalid sighting range", func() {
+			_, err := st.ListResources(ctx, store.ResourceOpts{FirstSeen: "2026-08-24"})
+			Expect(err).To(MatchError(ContainSubstring("first-seen range")))
+		})
+
 		// The envelope exists so "what have I got" has a true answer. A page
 		// whose total is the page size is not a partial answer, it is a wrong
 		// one — so the count has to ignore the limit.
@@ -455,6 +480,24 @@ var _ = Describe("the resource inventory", Ordered, Label("db"), func() {
 
 			Expect(st.ConfigPins(ctx, []string{stored.ID})).To(BeEmpty())
 			Expect(stored.ConfigID).To(BeEmpty())
+		})
+
+		It("removes the chosen config item without removing the resource", func() {
+			record(time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC), bucket)
+			stored, err := st.GetResource(ctx, "gcp/"+account+"/logs")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(st.SetConfigPins(ctx, map[string]api.ConfigPin{
+				stored.ID: {ConfigID: chosen, RolledUp: true},
+			})).To(Succeed())
+
+			removed, err := st.ClearConfigPin(ctx, stored.ID)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(removed).To(Equal(chosen))
+			Expect(st.ConfigPins(ctx, []string{stored.ID})).To(BeEmpty())
+			kept, err := st.GetResource(ctx, stored.ID)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(kept.ConfigID).To(BeEmpty())
 		})
 	})
 })

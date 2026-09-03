@@ -22,13 +22,14 @@ import (
 )
 
 type catalog struct {
-	server       *httptest.Server
-	items        []dutymodels.ConfigItem
-	searches     []string
-	searchAgents []string
-	pushes       [][]dutymodels.ConfigAnalysis
-	pushAgent    string
-	pushFails    bool
+	server        *httptest.Server
+	items         []dutymodels.ConfigItem
+	searches      []string
+	searchAgents  []string
+	searchDeleted []bool
+	pushes        [][]dutymodels.ConfigAnalysis
+	pushAgent     string
+	pushFails     bool
 }
 
 func newCatalog(items ...dutymodels.ConfigItem) *catalog {
@@ -41,6 +42,7 @@ func newCatalog(items ...dutymodels.ConfigItem) *catalog {
 			search := request.Configs[0].Search
 			c.searches = append(c.searches, search)
 			c.searchAgents = append(c.searchAgents, request.Configs[0].Agent)
+			c.searchDeleted = append(c.searchDeleted, request.Configs[0].IncludeDeleted)
 			selected := make([]query.SelectedResource, 0, len(c.items))
 			for _, item := range c.items {
 				selected = append(selected, query.SelectedResource{
@@ -141,6 +143,7 @@ var _ = Describe("resolving a current resource state", func() {
 		Expect(resolution.Match.ConfigID.String()).To(Equal(instanceID))
 		Expect(resolution.Match.RolledUp).To(BeFalse())
 		Expect(catalog.searches[0]).To(ContainSubstring(`type="AWS::EC2::Instance"`))
+		Expect(catalog.searchDeleted).To(Equal([]bool{true}))
 	})
 
 	It("never treats evidence locations as resource identity", func() {

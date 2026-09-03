@@ -214,6 +214,8 @@ export type FilterVocabulary = {
   // rather than implying it listed everything.
   total: number;
   truncated: boolean;
+  type?: string;
+  timeEnabled?: boolean;
 };
 
 export const SEVERITIES = [

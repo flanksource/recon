@@ -14,6 +14,8 @@ const RESOURCE_SORT_KEYS: Record<string, string> = {
   type: "type",
   scope: "account",
   region: "region",
+  firstSeen: "first-seen",
+  lastSeen: "last-seen",
   findings: "findings",
 };
 
