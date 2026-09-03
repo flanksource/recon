@@ -9,6 +9,7 @@
 # Engine binaries provisioned by deps. deps-lock.yaml IS committed, so the
 # resolved versions and checksums stay reproducible.
 /.bin/
+/.release/
 
 # Local development against sibling checkouts; CI resolves the go.mod pins.
 /go.work
