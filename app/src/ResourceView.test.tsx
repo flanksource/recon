@@ -1,19 +1,28 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ResourceView, frameworkRollup } from "./ResourceView";
-import { fetchResource, fetchResourceFindings } from "./api-resources";
+import { ResourceView } from "./ResourceView";
+import {
+  fetchResource,
+  fetchResourceConfig,
+  fetchResourceFindings,
+  removeResourceConfig,
+} from "./api-resources";
 import type { Resource } from "./api-resources";
 import type { Finding } from "./types";
 
 vi.mock("./api-resources", () => ({
   fetchResource: vi.fn(),
+  fetchResourceConfig: vi.fn(),
   fetchResourceFindings: vi.fn(),
+  removeResourceConfig: vi.fn(),
 }));
 
 const fetchResourceMock = vi.mocked(fetchResource);
+const fetchResourceConfigMock = vi.mocked(fetchResourceConfig);
 const fetchFindingsMock = vi.mocked(fetchResourceFindings);
+const removeResourceConfigMock = vi.mocked(removeResourceConfig);
 
 function stubMatchMedia() {
   Object.defineProperty(window, "matchMedia", {
@@ -60,16 +69,69 @@ function finding(overrides: Partial<Finding> = {}): Finding {
 }
 
 describe("ResourceView", () => {
-  beforeEach(() => stubMatchMedia());
+  beforeEach(() => {
+    stubMatchMedia();
+    fetchResourceConfigMock.mockResolvedValue(null);
+  });
   afterEach(cleanup);
 
-  it("shows the config-db identity a Mission Control lookup would use", async () => {
-    fetchResourceMock.mockResolvedValue(resource());
+  it("shows the linked Mission Control config name, type, and id", async () => {
+    const configId = "fc3e34be-c311-e6e7-7b64-e29cfe90334e";
+    fetchResourceMock.mockResolvedValue(resource({ configId }));
+    fetchResourceConfigMock.mockResolvedValue({
+      id: configId,
+      name: "Production GCP",
+      type: "GCP::Project",
+      url: `https://beta.example.com/catalog/${configId}`,
+    });
     fetchFindingsMock.mockResolvedValue([]);
 
     render(<ResourceView id="01JRESOURCE" onBack={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText("GCP::Bucket")).toBeInTheDocument());
+    const link = await screen.findByRole("link", { name: "Production GCP" });
+    expect(link).toHaveAttribute(
+      "href",
+      `https://beta.example.com/catalog/${configId}`,
+    );
+    expect(screen.getByText("GCP::Project")).toBeInTheDocument();
+    expect(screen.getByText(configId)).toBeInTheDocument();
+    expect(screen.queryByText("External IDs")).not.toBeInTheDocument();
+  });
+
+  it("removes the stored config link after confirmation", async () => {
+    const configId = "fc3e34be-c311-e6e7-7b64-e29cfe90334e";
+    fetchResourceMock.mockResolvedValue(resource({ configId }));
+    fetchResourceConfigMock.mockResolvedValue({
+      id: configId,
+      name: "Production GCP",
+      type: "GCP::Project",
+      url: `https://beta.example.com/catalog/${configId}`,
+    });
+    fetchFindingsMock.mockResolvedValue([]);
+    removeResourceConfigMock.mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<ResourceView id="01JRESOURCE" onBack={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove link" }));
+
+    await waitFor(() => expect(removeResourceConfigMock).toHaveBeenCalledWith("01JRESOURCE"));
+    expect(screen.queryByRole("link", { name: "Production GCP" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove link" })).not.toBeInTheDocument();
+  });
+
+  it("does not render the compliance summary", async () => {
+    fetchResourceMock.mockResolvedValue(
+      resource({ findings: 1, severities: { high: 1 } }),
+    );
+    fetchFindingsMock.mockResolvedValue([
+      finding({ tags: ["compliance:CIS-5.0:1.13"] }),
+    ]);
+
+    render(<ResourceView id="01JRESOURCE" onBack={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText("Identity")).toBeInTheDocument());
+    expect(screen.queryByText("Compliance")).not.toBeInTheDocument();
+    expect(screen.queryByText("CIS-5.0")).not.toBeInTheDocument();
   });
 
   // The payoff of recording passes: a resource with no findings is a statement,
@@ -108,40 +170,5 @@ describe("ResourceView", () => {
     render(<ResourceView id="nope" onBack={() => {}} />);
 
     await waitFor(() => expect(screen.getByText("resource not found")).toBeInTheDocument());
-  });
-});
-
-// Read from the tags the checks already carry rather than from a framework
-// catalogue recon would have to maintain: a roll-up derived from anything else
-// would disagree with the findings printed underneath it.
-describe("frameworkRollup", () => {
-  it("counts failing controls per framework", () => {
-    const rollup = frameworkRollup([
-      finding({ tags: ["compliance:CIS-5.0:1.13", "storage"] }),
-      finding({ tags: ["compliance:CIS-5.0:2.1"] }),
-      finding({ tags: ["compliance:PCI-4.0:3.2"] }),
-    ]);
-
-    expect(rollup).toEqual([
-      ["CIS-5.0", 2],
-      ["PCI-4.0", 1],
-    ]);
-  });
-
-  // One finding tagged with three sections of one benchmark is one failing
-  // control, not three — otherwise the roll-up exceeds the number of findings
-  // it is summarising and reads as a worse posture than the data shows.
-  it("counts a finding once per framework however many sections it cites", () => {
-    expect(
-      frameworkRollup([
-        finding({
-          tags: ["compliance:CIS-5.0:1.13", "compliance:CIS-5.0:2.1", "compliance:CIS-5.0:5.3"],
-        }),
-      ]),
-    ).toEqual([["CIS-5.0", 1]]);
-  });
-
-  it("ignores findings that cite no framework", () => {
-    expect(frameworkRollup([finding({ tags: ["storage", "gcp"] })])).toEqual([]);
   });
 });

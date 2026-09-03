@@ -166,10 +166,10 @@ func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (Resolut
 
 // resolvePin attaches a state to the config item chosen for its resource.
 //
-// The item is still read back rather than trusted: a config item that has been
-// deleted since the choice was made would otherwise be pushed against, and
-// config_analysis.config_id is a foreign key, so the whole batch would be
-// rejected for one stale pin.
+// The item is still read back rather than trusted so its current identity is
+// used. Catalog rows marked deleted remain valid matches: Mission Control keeps
+// them addressable, and the stored choice must not silently move to another
+// item merely because its lifecycle changed.
 func (r *Resolver) resolvePin(ctx context.Context, options ResolveOptions) (Resolution, error) {
 	id, err := uuid.Parse(options.Pin.ConfigID)
 	if err != nil {
@@ -302,7 +302,8 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 	resp, err := r.client.SearchCatalog(ctx, query.SearchResourcesRequest{
 		Limit: resolveLimit,
 		Configs: []dutytypes.ResourceSelector{{
-			Search: search,
+			Search:         search,
+			IncludeDeleted: true,
 		}},
 	})
 	if err != nil {
@@ -347,7 +348,7 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 
 // configItem reads one config item by id, memoised for the life of the upload.
 // A missing item is nil rather than an error: the id came from a stored choice
-// or a parent reference, and either can name something since deleted.
+// or a parent reference, and either can name something no longer in the catalog.
 func (r *Resolver) configItem(ctx context.Context, id uuid.UUID) (*dutymodels.ConfigItem, error) {
 	if cached, found := r.items[id]; found {
 		return cached, nil

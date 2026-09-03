@@ -51,6 +51,10 @@ var _ = Describe("the generated route surface", func() {
 			Expect(document.Paths).To(HaveKey(path))
 			Expect(document.Paths[path]).To(HaveKey("post"))
 		}
+		Expect(document.Paths).To(HaveKey("/api/v1/resource/{id}/config"))
+		Expect(document.Paths["/api/v1/resource/{id}/config"]).To(HaveKey("get"))
+		Expect(document.Paths).To(HaveKey("/api/v1/resource/{id}/unlink-config"))
+		Expect(document.Paths["/api/v1/resource/{id}/unlink-config"]).To(HaveKey("post"))
 		Expect(document.Paths).ToNot(HaveKey("/api/v1/scan/{id}/upload"))
 	})
 })

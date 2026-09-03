@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Panel } from "@flanksource/clicky-ui/components";
 import { Badge, DataTable, KeyValueList } from "@flanksource/clicky-ui/data";
 import type { DataTableColumn } from "@flanksource/clicky-ui/data";
@@ -7,7 +7,10 @@ import { severityBadge, SEVERITY_RANK } from "./scanColumns";
 import { typeTail } from "./resourceColumns";
 import {
   fetchResource,
+  fetchResourceConfig,
   fetchResourceFindings,
+  removeResourceConfig,
+  type LinkedConfig,
   type Resource,
 } from "./api-resources";
 import type { Finding, Severity } from "./types";
@@ -23,18 +26,26 @@ export function ResourceView({
   onMuteFinding?: (path: string) => void;
 }) {
   const [resource, setResource] = useState<Resource | null>(null);
+  const [linkedConfig, setLinkedConfig] = useState<LinkedConfig | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
+  const [unlinking, setUnlinking] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setBusy(true);
     setError(null);
-    Promise.all([fetchResource(id), fetchResourceFindings(id)])
-      .then(([found, evidence]) => {
+    Promise.all([
+      fetchResource(id),
+      fetchResourceConfig(id),
+      fetchResourceFindings(id),
+    ])
+      .then(([found, config, evidence]) => {
         if (cancelled) return;
         setResource(found);
+        setLinkedConfig(config);
         setFindings(evidence);
       })
       .catch((e: Error) => !cancelled && setError(e.message))
@@ -43,8 +54,6 @@ export function ResourceView({
       cancelled = true;
     };
   }, [id]);
-
-  const compliance = useMemo(() => frameworkRollup(findings), [findings]);
 
   if (error) {
     return (
@@ -62,6 +71,20 @@ export function ResourceView({
 
   const display = (value: unknown) =>
     value === undefined || value === "" ? "—" : String(value);
+
+  const unlinkConfig = async () => {
+    if (!window.confirm("Remove the Mission Control config link from this resource?")) return;
+    setUnlinking(true);
+    setUnlinkError(null);
+    try {
+      await removeResourceConfig(id);
+      setLinkedConfig(null);
+    } catch (e) {
+      setUnlinkError((e as Error).message);
+    } finally {
+      setUnlinking(false);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4">
@@ -82,7 +105,12 @@ export function ResourceView({
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div>
+        {unlinkError && (
+          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {unlinkError}
+          </div>
+        )}
         <Panel title="Identity">
           <KeyValueList
             items={[
@@ -104,47 +132,32 @@ export function ResourceView({
               { key: "engines", label: "Engines", value: display(resource.engines?.join(", ")) },
               { key: "firstSeen", label: "First seen", value: display(resource.firstSeen) },
               { key: "lastSeen", label: "Last seen", value: display(resource.lastSeen) },
-              // The identity Mission Control's catalog would hold the same
-              // thing under, empty wherever recon cannot say.
-              { key: "configType", label: "Config type", value: display(resource.configType) },
               {
-                key: "externalIds",
-                label: "External IDs",
-                value: display(resource.externalIds?.join(", ")),
+                key: "configName",
+                label: "Config name",
+                value: linkedConfig ? (
+                  <span className="inline-flex items-center gap-2">
+                    <a
+                      href={linkedConfig.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {linkedConfig.name || linkedConfig.id}
+                    </a>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={unlinking}
+                      onClick={() => void unlinkConfig()}
+                    >
+                      {unlinking ? "Removing…" : "Remove link"}
+                    </Button>
+                  </span>
+                ) : "—",
               },
-            ]}
-          />
-        </Panel>
-
-        <Panel title="Compliance">
-          <KeyValueList
-            items={[
-              {
-                key: "open",
-                label: "Open findings",
-                value:
-                  resource.findings === 0 ? (
-                    <span className="text-sm text-muted-foreground">none</span>
-                  ) : (
-                    <span className="inline-flex gap-1">
-                      {(Object.keys(resource.severities ?? {}) as Severity[])
-                        .sort((a, b) => SEVERITY_RANK[a] - SEVERITY_RANK[b])
-                        .map((severity) => (
-                          <span key={severity} className="inline-flex items-center gap-0.5">
-                            {severityBadge(severity)}
-                            <span className="text-xs tabular-nums">
-                              {resource.severities?.[severity]}
-                            </span>
-                          </span>
-                        ))}
-                    </span>
-                  ),
-              },
-              ...compliance.map(([framework, count]) => ({
-                key: framework,
-                label: framework,
-                value: `${count} failing control${count === 1 ? "" : "s"}`,
-              })),
+              { key: "configType", label: "Config type", value: display(linkedConfig?.type) },
+              { key: "configId", label: "Config ID", value: display(linkedConfig?.id) },
               { key: "tags", label: "Tags", value: display(resource.tags?.join(", ")) },
               {
                 key: "labels",
@@ -202,31 +215,3 @@ const findingColumnsForResource: DataTableColumn<Finding>[] = [
   { key: "name", label: "Title" },
   { key: "timestamp", label: "Reported" },
 ];
-
-/**
- * Failing controls per compliance framework.
- *
- * Read from the `compliance:CIS-5.0:1.13` tags the checks already carry rather
- * than from a framework catalogue recon would have to maintain: the tags are
- * what the engine actually asserted, and a roll-up derived from anything else
- * would disagree with the findings underneath it.
- */
-export function frameworkRollup(findings: Finding[]): [string, number][] {
-  const counts = new Map<string, number>();
-  for (const finding of findings) {
-    const frameworks = new Set<string>();
-    for (const tag of finding.tags ?? []) {
-      if (!tag.startsWith("compliance:")) continue;
-      // compliance:CIS-5.0:1.13 → CIS-5.0. Split on the second colon only: a
-      // control id contains dots but the framework is the middle segment.
-      const parts = tag.split(":");
-      if (parts.length >= 2 && parts[1]) frameworks.add(parts[1]);
-    }
-    // Counted once per finding per framework, so a control tagged with three
-    // sections of the same benchmark is one failing control, not three.
-    for (const framework of frameworks) {
-      counts.set(framework, (counts.get(framework) ?? 0) + 1);
-    }
-  }
-  return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
-}

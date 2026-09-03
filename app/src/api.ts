@@ -55,6 +55,8 @@ type LookupFilter = {
   label?: string;
   total?: number;
   truncated?: boolean;
+  type?: string;
+  timeEnabled?: boolean;
   // Keyed by the value the filter sends; the value is a rendered node the
   // filter bar does not need, because these values are their own labels.
   options?: Record<string, unknown>;
@@ -83,6 +85,8 @@ export async function fetchFilters(
     options: optionValues(filter),
     total: filter.total ?? optionValues(filter).length,
     truncated: filter.truncated ?? false,
+    type: filter.type,
+    timeEnabled: filter.timeEnabled,
   }));
 }
 

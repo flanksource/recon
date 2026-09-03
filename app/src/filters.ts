@@ -87,13 +87,28 @@ export function useEntityFilters(
   const filters = useMemo<FilterBarFilter[]>(
     () =>
       vocabularies.map((vocabulary) => {
+        const values = selection[vocabulary.key] ?? [];
+        if (vocabulary.type === "date-range" || vocabulary.type === "day-range") {
+          const bounds = boundsOf(values[0]);
+          return {
+            key: vocabulary.key,
+            label: vocabulary.label,
+            kind: "date-range",
+            from: bounds.from,
+            to: bounds.to,
+            timeEnabled: vocabulary.type === "day-range" ? false : vocabulary.timeEnabled,
+            onApply: (from: string, to: string) =>
+              setSelection((current) =>
+                withValues(current, vocabulary.key, rangeValue(from, to)),
+              ),
+          } satisfies FilterBarFilter;
+        }
         // A search replaces the head set for that control, which is what the
         // server-side narrowing is for; until one runs, the head is all there is.
         const options = (searched[vocabulary.key] ?? vocabulary.options).map((value) => ({
           value,
           label: value,
         }));
-        const values = selection[vocabulary.key] ?? [];
         const shared = {
           key: vocabulary.key,
           label: vocabulary.label,
@@ -128,6 +143,20 @@ export function useEntityFilters(
   );
 
   return { filters, selection, setSelection, error };
+}
+
+function boundsOf(value: string | undefined): { from?: string; to?: string } {
+  const bounds: { from?: string; to?: string } = {};
+  for (const part of value?.split(",") ?? []) {
+    if (part.startsWith(">=")) bounds.from = part.slice(2);
+    if (part.startsWith("<=")) bounds.to = part.slice(2);
+  }
+  return bounds;
+}
+
+function rangeValue(from: string, to: string): string[] {
+  const bounds = [from ? `>=${from}` : "", to ? `<=${to}` : ""].filter(Boolean);
+  return bounds.length === 0 ? [] : [bounds.join(",")];
 }
 
 // The selection is stored as the patterns the server takes — `dos` and `!dos` —

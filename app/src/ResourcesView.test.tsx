@@ -8,6 +8,7 @@ import { fetchResources } from "./api-resources";
 import { fetchFilterOptions, fetchFilters } from "./api";
 import type { Resource, ResourcePage } from "./api-resources";
 import { syncResources } from "./api-insights";
+import { resourceColumns } from "./resourceColumns";
 
 vi.mock("./api-resources", () => ({ fetchResources: vi.fn() }));
 vi.mock("./api-insights", () => ({ syncResources: vi.fn() }));
@@ -66,6 +67,27 @@ describe("ResourcesView", () => {
   });
   afterEach(cleanup);
 
+  it("exposes sortable first-seen and last-seen timestamp columns", () => {
+    expect(resourceColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "firstSeen",
+          label: "First seen",
+          kind: "timestamp",
+          filterKey: "first-seen",
+          sortable: true,
+        }),
+        expect.objectContaining({
+          key: "lastSeen",
+          label: "Last seen",
+          kind: "timestamp",
+          filterKey: "last-seen",
+          sortable: true,
+        }),
+      ]),
+    );
+  });
+
   it("keeps the human name and opaque uid on one line", async () => {
     // The case the old matchedAt column got wrong: a GCP firewall's uid is a
     // number and its name is what an operator recognises, so a table showing
@@ -79,6 +101,21 @@ describe("ResourcesView", () => {
     const identity = name.parentElement;
     expect(identity).toContainElement(uid);
     expect(identity).toHaveClass("flex", "items-baseline");
+  });
+
+  it("uses the config type icon beside each resource", async () => {
+    fetchResourcesMock.mockResolvedValue(page([
+      resource({ configType: "GCP::Compute::Instance" }),
+    ]));
+
+    const { container } = render(<ResourcesView onOpenResource={() => {}} />);
+
+    const name = await screen.findByText("tailscale-router");
+    const icon = container.querySelector<HTMLElement>(
+      '[aria-label="GCP::Compute::Instance icon"]',
+    );
+    expect(name.parentElement).toContainElement(icon);
+    expect(icon?.querySelector("svg")).not.toBeNull();
   });
 
   it("links each row to the resource it names", async () => {
