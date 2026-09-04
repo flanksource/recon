@@ -49,6 +49,19 @@ func StateAnalysis(state api.InsightState, configID uuid.UUID) (dutymodels.Confi
 	}, nil
 }
 
+// ClosedStateAnalysis resolves the deterministic insight on its previous config
+// item before a resource link moves or disappears.
+func ClosedStateAnalysis(state api.InsightState, configID uuid.UUID, reason string) (dutymodels.ConfigAnalysis, error) {
+	analysis, err := StateAnalysis(state, configID)
+	if err != nil {
+		return dutymodels.ConfigAnalysis{}, err
+	}
+	analysis.Status = dutymodels.AnalysisStatusResolved
+	analysis.Analysis["finding_status"] = api.StatusResolved
+	analysis.Analysis["resolution_reason"] = reason
+	return analysis, nil
+}
+
 func analysisStatus(status string) (string, error) {
 	switch status {
 	case api.StatusOpen, api.StatusManual:

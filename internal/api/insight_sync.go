@@ -40,6 +40,7 @@ type InsightSync struct {
 	Open             int `json:"open"`
 	Resolved         int `json:"resolved"`
 	Silenced         int `json:"silenced"`
+	Closed           int `json:"closed,omitempty"`
 	Direct           int `json:"direct"`
 	RolledUp         int `json:"rolledUp"`
 	// Pinned counts states attached through a manual link.
@@ -114,9 +115,9 @@ const (
 	ConfigMatchManual    ConfigMatchMethod = "manual"
 )
 
-// ConfigPin is the durable catalog link used for a resource's insights. Method
-// records how it was selected; RolledUp says whether the item is the resource
-// itself or merely contains it.
+// ConfigPin is the durable catalog link used for a resource's insights.
+// Method determines whether the resolver may replace it; RolledUp says whether
+// the item is the resource itself or merely contains it.
 type ConfigPin struct {
 	ConfigID string            `json:"configId"`
 	Method   ConfigMatchMethod `json:"method"`

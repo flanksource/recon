@@ -143,7 +143,7 @@ var _ = Describe("resolving a current resource state", func() {
 		Expect(resolution.Match.ConfigID.String()).To(Equal(instanceID))
 		Expect(resolution.Match.RolledUp).To(BeFalse())
 		Expect(catalog.searches[0]).To(ContainSubstring(`type="AWS::EC2::Instance"`))
-		Expect(catalog.searchDeleted).To(Equal([]bool{true}))
+		Expect(catalog.searchDeleted).To(Equal([]bool{false}))
 	})
 
 	It("never treats evidence locations as resource identity", func() {
@@ -283,7 +283,7 @@ var _ = Describe("a choice a previous sync remembered", func() {
 		Expect(resolution.Match.RolledUp).To(BeTrue())
 	})
 
-	It("reports one that has left the catalog rather than pushing against it", func() {
+	It("re-resolves one that has left the catalog rather than using it", func() {
 		catalog := newCatalog()
 		defer catalog.server.Close()
 
@@ -295,7 +295,6 @@ var _ = Describe("a choice a previous sync remembered", func() {
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(resolution.Match).To(BeNil())
-		Expect(resolution.Unresolved.Reason).To(ContainSubstring("no longer in the catalog"))
-		Expect(resolution.Unresolved.Reason).To(ContainSubstring("--repin"))
+		Expect(resolution.Unresolved.Reason).To(ContainSubstring("no identity to resolve"))
 	})
 })

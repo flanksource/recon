@@ -37,8 +37,9 @@ type Candidate struct {
 type ResolveOptions struct {
 	State  api.InsightState
 	Target api.TargetDocument
-	// Pin is the link a previous sync persisted for this state's resource. It
-	// short-circuits the ladder until explicit re-resolution is requested.
+	// Pin is the link a previous sync persisted. A valid manual link freezes the
+	// choice; a valid automatic exact link is a cache hit; automatic roll-ups and
+	// stale links walk the ladder again.
 	Pin *api.ConfigPin
 }
 
@@ -122,9 +123,18 @@ func NewResolver(client *sdk.Client) *Resolver {
 // nothing could be found for it.
 func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (Resolution, error) {
 	if options.Pin != nil {
-		return r.resolvePin(ctx, options)
+		match, reusable, err := r.resolveStored(ctx, options)
+		if err != nil {
+			return Resolution{}, err
+		}
+		if reusable {
+			return Resolution{Match: match}, nil
+		}
 	}
+	return r.resolveCandidates(ctx, options)
+}
 
+func (r *Resolver) resolveCandidates(ctx context.Context, options ResolveOptions) (Resolution, error) {
 	var resolution Resolution
 	var tried []string
 
@@ -165,40 +175,54 @@ func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (Resolut
 	return resolution, nil
 }
 
-// resolvePin attaches a state to the config item persisted for its resource.
-//
-// The item is still read back rather than trusted so its current identity is
-// used. Catalog rows marked deleted remain valid matches: Mission Control keeps
-// them addressable, and the stored choice must not silently move to another
-// item merely because its lifecycle changed.
-func (r *Resolver) resolvePin(ctx context.Context, options ResolveOptions) (Resolution, error) {
+// resolveStored validates the persisted link before using it. Manual links need
+// only an active destination because the person deliberately overrode identity;
+// automatic exact links must still identify the resource. Automatic roll-ups
+// are re-resolved so a specific config item discovered later can replace them.
+func (r *Resolver) resolveStored(ctx context.Context, options ResolveOptions) (*Match, bool, error) {
 	id, err := uuid.Parse(options.Pin.ConfigID)
 	if err != nil {
-		return Resolution{}, fmt.Errorf("stored config link %q for resource %s is not a uuid: %w",
+		return nil, false, fmt.Errorf("stored config link %q for resource %s is not a uuid: %w",
 			options.Pin.ConfigID, options.State.Resource.ID, err)
 	}
 	item, err := r.configItem(ctx, id)
 	if err != nil {
-		return Resolution{}, err
+		return nil, false, err
 	}
-	if item == nil {
-		return Resolution{Unresolved: unresolved(options.State, []string{options.Pin.ConfigID},
-			fmt.Sprintf("the linked config item %s is no longer in the catalog; sync with --repin to resolve it again",
-				options.Pin.ConfigID))}, nil
+	if item == nil || item.DeletedAt != nil {
+		return nil, false, nil
 	}
 	method := options.Pin.Method
 	if method == "" {
 		method = api.ConfigMatchManual
 	}
-	return Resolution{Match: &Match{
+	match := &Match{
 		ConfigID:   item.ID,
 		ConfigName: derefString(item.Name),
 		ConfigType: derefString(item.Type),
 		MatchedOn:  derefString(item.Name),
 		Method:     method,
 		RolledUp:   options.Pin.RolledUp,
-		Pinned:     method == api.ConfigMatchManual,
-	}}, nil
+	}
+	switch method {
+	case api.ConfigMatchManual:
+		match.Pinned = true
+		return match, true, nil
+	case api.ConfigMatchAutomatic:
+		if options.Pin.RolledUp {
+			return nil, false, nil
+		}
+		for _, candidate := range candidates(options.State, options.Target) {
+			if !candidate.Scope && identifies(*item, candidate) {
+				match.MatchedOn = candidate.Value
+				return match, true, nil
+			}
+		}
+		return nil, false, nil
+	default:
+		return nil, false, fmt.Errorf("stored config link for resource %s has unknown match method %q",
+			options.State.Resource.ID, method)
+	}
 }
 
 // chosen returns the match an explicit choice made for this identity, or nil
@@ -309,8 +333,7 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 	resp, err := r.client.SearchCatalog(ctx, query.SearchResourcesRequest{
 		Limit: resolveLimit,
 		Configs: []dutytypes.ResourceSelector{{
-			Search:         search,
-			IncludeDeleted: true,
+			Search: search,
 		}},
 	})
 	if err != nil {
@@ -329,7 +352,7 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 	var exact []dutymodels.ConfigItem
 	for _, item := range items {
 		r.items[item.ID] = &item
-		if identifies(item, candidate) {
+		if item.DeletedAt == nil && identifies(item, candidate) {
 			exact = append(exact, item)
 		}
 	}
@@ -351,6 +374,38 @@ func (r *Resolver) lookupCandidate(ctx context.Context, candidate Candidate) (lo
 	}
 	r.cache[cacheKey] = result
 	return result, nil
+}
+
+// preloadConfigItems validates all persisted config IDs in the SDK's bounded
+// batches, avoiding one request per linked resource on subsequent syncs.
+func (r *Resolver) preloadConfigItems(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	requested := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("stored config link %q is not a uuid: %w", raw, err)
+		}
+		if _, found := r.items[id]; found {
+			continue
+		}
+		requested = append(requested, id.String())
+		r.items[id] = nil
+	}
+	if len(requested) == 0 {
+		return nil
+	}
+	items, err := r.client.GetCatalogItems(ctx, requested)
+	if err != nil {
+		return fmt.Errorf("validate %d stored config links: %w", len(requested), err)
+	}
+	for i := range items {
+		item := items[i]
+		r.items[item.ID] = &item
+	}
+	return nil
 }
 
 // configItem reads one config item by id, memoised for the life of the upload.
