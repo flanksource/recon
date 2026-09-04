@@ -44,6 +44,16 @@ func (s *Store) ConfigPins(ctx context.Context, resourceIDs []string) (map[strin
 	return pins, nil
 }
 
+// ConfigLinkStates returns every current finding state on resources whose link
+// is changing, irrespective of the user's sync filters. They are used only to
+// close insights on the previous config item.
+func (s *Store) ConfigLinkStates(ctx context.Context, resourceIDs []string) ([]api.InsightState, error) {
+	if len(resourceIDs) == 0 {
+		return []api.InsightState{}, nil
+	}
+	return s.ListInsightStates(ctx, FindingStateOpts{Resource: resourceIDs})
+}
+
 // SetConfigPins records the config links a successful sync used.
 //
 // One statement per distinct link rather than per resource: an account roll-up
@@ -84,6 +94,30 @@ func (s *Store) SetConfigPins(ctx context.Context, pins map[string]api.ConfigPin
 		if err != nil {
 			return fmt.Errorf("store config link %s for %d resources: %w", pin.ConfigID, len(ids), err)
 		}
+	}
+	return nil
+}
+
+// ClearConfigPins removes links for one Mission Control destination. The empty
+// server admits legacy links whose destination was not recorded; a current link
+// for another server must survive this sync.
+func (s *Store) ClearConfigPins(ctx context.Context, resourceIDs []string, server string) error {
+	if len(resourceIDs) == 0 {
+		return nil
+	}
+	sort.Strings(resourceIDs)
+	query := s.DB(ctx).Model(&models.Resource{}).Where("id IN ?", resourceIDs)
+	if server != "" {
+		query = query.Where("config_server = ? OR config_server = ''", server)
+	}
+	if err := query.Updates(map[string]any{
+		"config_id":           nil,
+		"config_match_method": api.ConfigMatchManual,
+		"config_rolled_up":    false,
+		"config_server":       "",
+		"updated_at":          gorm.Expr("now()"),
+	}).Error; err != nil {
+		return fmt.Errorf("clear config links for %d resources: %w", len(resourceIDs), err)
 	}
 	return nil
 }

@@ -96,7 +96,7 @@ func (r *Resolver) choices(ctx context.Context, exact []dutymodels.ConfigItem) (
 		if err != nil {
 			return nil, err
 		}
-		if found == nil {
+		if found == nil || found.DeletedAt != nil {
 			continue
 		}
 		ancestors = append(ancestors, choiceOf(*found, true))

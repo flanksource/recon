@@ -62,6 +62,9 @@ func (u InsightSync) summary() []string {
 			attached, len(u.Configs), u.Direct, u.RolledUp, u.Pinned),
 		fmt.Sprintf("%d open · %d resolved · %d silenced", u.Open, u.Resolved, u.Silenced),
 	}
+	if u.Closed > 0 {
+		lines = append(lines, fmt.Sprintf("%d insights on previous config links closed", u.Closed))
+	}
 	if u.Pushed > 0 {
 		lines = append(lines, fmt.Sprintf("%d insights pushed", u.Pushed))
 	}

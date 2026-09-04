@@ -135,7 +135,7 @@ table "resources" {
     null    = false
     type    = text
     default = "manual"
-    comment = "whether finding sync matched the config item automatically or a person chose it"
+    comment = "automatic links may be re-resolved; manual links remain pinned"
   }
   column "config_rolled_up" {
     null    = false
