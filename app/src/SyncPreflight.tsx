@@ -32,6 +32,7 @@ export function SyncPreflight({
         <Count label="Open" value={result.open} />
         <Count label="Resolved" value={result.resolved} />
         <Count label="Silenced" value={result.silenced} />
+        {(result.closed ?? 0) > 0 && <Count label="Previous links closed" value={result.closed ?? 0} />}
         <Count label="Direct" value={result.direct} />
         <Count label="Rolled up" value={result.rolledUp} />
         {result.pinned > 0 && <Count label="Chosen" value={result.pinned} />}

@@ -23,10 +23,11 @@ var _ = Describe("reading a linked config item", func() {
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(linked).To(Equal(&missioncontrol.LinkedConfig{
-			ID:   accountID,
-			Name: "Production GCP",
-			Type: "GCP::Project",
-			URL:  catalog.server.URL + "/catalog/" + accountID,
+			ID:     accountID,
+			Name:   "Production GCP",
+			Type:   "GCP::Project",
+			URL:    catalog.server.URL + "/catalog/" + accountID,
+			Server: catalog.server.URL + "/api",
 		}))
 	})
 
