@@ -672,9 +672,11 @@ export type InsightSync = {
   open: number;
   resolved: number;
   silenced: number;
+  /** Insights resolved on config items a resource is no longer linked to. */
+  closed?: number;
   direct: number;
   rolledUp: number;
-  /** States attached through a choice an earlier sync remembered. */
+  /** States attached through a stored manual config link. */
   pinned: number;
   pushed: number;
   configs: InsightConfig[];

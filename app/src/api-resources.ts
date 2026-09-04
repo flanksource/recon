@@ -28,8 +28,11 @@ export type Resource = {
 
   configType?: string;
   externalIds?: string[];
-  /** The catalog config item a sync was told to attach this resource's insights to. */
+  /** The catalog config item finding sync attaches this resource's insights to. */
   configId?: string;
+  configMatchMethod?: "automatic" | "manual";
+  configRolledUp?: boolean;
+  configServer?: string;
 
   tags?: string[];
   labels?: Record<string, string>;
@@ -66,6 +69,9 @@ export type LinkedConfig = {
   name: string;
   type: string;
   url: string;
+  method?: "automatic" | "manual";
+  rolledUp?: boolean;
+  server?: string;
 };
 
 /** What is currently true about one check on one resource. */
