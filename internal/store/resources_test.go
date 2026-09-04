@@ -463,7 +463,7 @@ var _ = Describe("the resource inventory", Ordered, Label("db"), func() {
 			record(at.Add(time.Hour), bucket)
 
 			Expect(st.ConfigPins(ctx, []string{stored.ID})).To(Equal(map[string]api.ConfigPin{
-				stored.ID: {ConfigID: chosen, RolledUp: true},
+				stored.ID: {ConfigID: chosen, Method: api.ConfigMatchManual, RolledUp: true},
 			}))
 			reread, err := st.GetResource(ctx, stored.ID)
 			Expect(err).ToNot(HaveOccurred())
