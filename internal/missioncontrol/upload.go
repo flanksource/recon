@@ -53,17 +53,14 @@ type SyncOptions struct {
 	// Choices attach an ambiguous identity to one of the config items offered
 	// for it, keyed by identity.
 	Choices map[string]uuid.UUID
-	// Repin ignores the choices previous syncs remembered and resolves every
-	// state against the catalog again. It is the only way back out of a choice
-	// that has since become wrong.
+	// Repin ignores the links previous syncs stored and resolves every state
+	// against the catalog again.
 	Repin bool
 	// Progress is called as each state is resolved. Optional.
 	Progress func(Progress)
 }
 
-// PinStore remembers which config item a resource's insights were attached to.
-// Reading it is what lets a later sync skip the ladder; writing it is what makes
-// a choice stick.
+// PinStore persists the config item a resource's insights were attached to.
 type PinStore interface {
 	ConfigPins(ctx context.Context, resourceIDs []string) (map[string]api.ConfigPin, error)
 	SetConfigPins(ctx context.Context, pins map[string]api.ConfigPin) error
@@ -82,8 +79,7 @@ type Uploader struct {
 type Plan struct {
 	Result   api.InsightSync
 	Analyses []dutymodels.ConfigAnalysis
-	// Pins are the choices this run made, to be remembered against the resources
-	// they were made for once the insights actually land.
+	// Pins are the links this run used, persisted once the insights land.
 	Pins map[string]api.ConfigPin
 }
 
@@ -129,6 +125,7 @@ func (u *Uploader) Plan(
 	matchedResources int,
 	options SyncOptions,
 ) (*Plan, error) {
+	u.Server = normalizeServer(u.Server)
 	agent := options.Agent
 	if agent == "" {
 		agent = DefaultAgent
@@ -178,10 +175,16 @@ func (u *Uploader) Plan(
 			return nil, err
 		}
 		count(&plan.Result, analysis, match)
-		if match.Chosen {
-			plan.Pins[state.Resource.ID] = api.ConfigPin{
-				ConfigID: match.ConfigID.String(), RolledUp: match.RolledUp,
+		if state.Resource.ID != "" {
+			pin := api.ConfigPin{
+				ConfigID: match.ConfigID.String(), Method: match.Method,
+				RolledUp: match.RolledUp, Server: u.Server,
 			}
+			if existing, found := plan.Pins[state.Resource.ID]; found && existing != pin {
+				return nil, fmt.Errorf("resource %s resolves to different config destinations across its finding states",
+					state.Resource.ID)
+			}
+			plan.Pins[state.Resource.ID] = pin
 		}
 		recordConfig(configs, match)
 	}
@@ -193,7 +196,7 @@ func (u *Uploader) Plan(
 	return plan, nil
 }
 
-// Push sends a plan's insights and remembers the choices that produced them.
+// Push sends a plan's insights and persists the links that produced them.
 func (u *Uploader) Push(ctx context.Context, plan *Plan, options SyncOptions) (api.InsightSync, error) {
 	if len(plan.Analyses) == 0 {
 		return plan.Result, nil
@@ -206,18 +209,18 @@ func (u *Uploader) Push(ctx context.Context, plan *Plan, options SyncOptions) (a
 	}
 	plan.Result.Pushed = len(plan.Analyses)
 
-	// Written only now: a choice that describes insights nobody accepted would
-	// be a preference recorded for a sync that never happened.
+	// Written only now: a link must not describe insights the destination did not
+	// accept.
 	if u.Pins != nil && len(plan.Pins) > 0 {
 		if err := u.Pins.SetConfigPins(ctx, plan.Pins); err != nil {
-			return plan.Result, fmt.Errorf("remember %d config choices: %w", len(plan.Pins), err)
+			return plan.Result, fmt.Errorf("store %d config links: %w", len(plan.Pins), err)
 		}
 	}
 	report(options.Progress, Progress{Phase: PhasePush, Done: plan.Result.Pushed, Total: plan.Result.Pushed})
 	return plan.Result, nil
 }
 
-// storedPins reads the choices previous syncs remembered for these resources.
+// storedPins reads the links previous syncs persisted for these resources.
 func (u *Uploader) storedPins(
 	ctx context.Context,
 	states []api.InsightState,
@@ -236,13 +239,21 @@ func (u *Uploader) storedPins(
 	}
 	stored, err := u.Pins.ConfigPins(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("read the stored config choices: %w", err)
+		return nil, fmt.Errorf("read the stored config links: %w", err)
 	}
 	pins := make(map[string]*api.ConfigPin, len(stored))
 	for id, pin := range stored {
+		pin.Server = normalizeServer(pin.Server)
+		if pin.Server != "" && pin.Server != u.Server {
+			continue
+		}
 		pins[id] = &pin
 	}
 	return pins, nil
+}
+
+func normalizeServer(server string) string {
+	return strings.TrimRight(strings.TrimSpace(server), "/")
 }
 
 func report(progress func(Progress), at Progress) {
