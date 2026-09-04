@@ -18,11 +18,14 @@ func uploaderFor(c *catalog) *missioncontrol.Uploader {
 	}
 }
 
-// remembered is the links a previous sync stored, and what this one stores.
+// remembered is the choices a previous sync stored, and what this one stores.
 type remembered struct {
-	stored map[string]api.ConfigPin
-	saved  map[string]api.ConfigPin
-	asked  []string
+	stored      map[string]api.ConfigPin
+	saved       map[string]api.ConfigPin
+	asked       []string
+	cleared     []string
+	clearServer string
+	states      []api.InsightState
 }
 
 func (r *remembered) ConfigPins(_ context.Context, resourceIDs []string) (map[string]api.ConfigPin, error) {
@@ -44,6 +47,16 @@ func (r *remembered) SetConfigPins(_ context.Context, pins map[string]api.Config
 		r.saved[id] = pin
 	}
 	return nil
+}
+
+func (r *remembered) ClearConfigPins(_ context.Context, resourceIDs []string, server string) error {
+	r.cleared = append(r.cleared, resourceIDs...)
+	r.clearServer = server
+	return nil
+}
+
+func (r *remembered) ConfigLinkStates(_ context.Context, _ []string) ([]api.InsightState, error) {
+	return r.states, nil
 }
 
 // ambiguousCatalog is one project described twice, which is what a second
