@@ -7,14 +7,19 @@ import (
 	"strings"
 
 	"github.com/flanksource/incident-commander/sdk"
+
+	"github.com/flanksource/recon/internal/api"
 )
 
-// LinkedConfig is the authoritative catalog item a recon resource is pinned to.
+// LinkedConfig is the authoritative catalog item linked to a recon resource.
 type LinkedConfig struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
-	URL  string `json:"url"`
+	ID       string                `json:"id"`
+	Name     string                `json:"name"`
+	Type     string                `json:"type"`
+	URL      string                `json:"url"`
+	Method   api.ConfigMatchMethod `json:"method"`
+	RolledUp bool                  `json:"rolledUp"`
+	Server   string                `json:"server"`
 }
 
 // ConfigLookupOptions selects the catalog client and item to read. Client and
@@ -23,7 +28,12 @@ type ConfigLookupOptions struct {
 	Context string
 	Client  *sdk.Client
 	Server  string
-	ID      string
+	// ExpectedServer is the destination persisted with the resource link. A
+	// different active context must not look the UUID up in the wrong catalog.
+	ExpectedServer string
+	ID             string
+	Method         api.ConfigMatchMethod
+	RolledUp       bool
 }
 
 // LookupConfig reads one linked item from Mission Control's catalog.
@@ -46,6 +56,12 @@ func LookupConfig(ctx context.Context, options ConfigLookupOptions) (*LinkedConf
 	if server == "" {
 		return nil, fmt.Errorf("mission control server is required")
 	}
+	server = normalizeServer(server)
+	expected := normalizeServer(options.ExpectedServer)
+	if expected != "" && expected != server {
+		return nil, fmt.Errorf("resource is linked to Mission Control server %s, but the active context uses %s",
+			expected, server)
+	}
 
 	items, err := client.GetCatalogItems(ctx, []string{options.ID})
 	if err != nil {
@@ -60,6 +76,7 @@ func LookupConfig(ctx context.Context, options ConfigLookupOptions) (*LinkedConf
 	}
 	return &LinkedConfig{
 		ID: options.ID, Name: derefString(items[0].Name), Type: derefString(items[0].Type), URL: link,
+		Method: options.Method, RolledUp: options.RolledUp, Server: server,
 	}, nil
 }
 

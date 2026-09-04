@@ -158,6 +158,14 @@ export function ResourceView({
               },
               { key: "configType", label: "Config type", value: display(linkedConfig?.type) },
               { key: "configId", label: "Config ID", value: display(linkedConfig?.id) },
+              {
+                key: "configMatch",
+                label: "Config match",
+                value: linkedConfig
+                  ? `${linkedConfig.method || "manual"} · ${linkedConfig.rolledUp ? "roll-up" : "exact"}`
+                  : "—",
+              },
+              { key: "configServer", label: "Config server", value: display(linkedConfig?.server) },
               { key: "tags", label: "Tags", value: display(resource.tags?.join(", ")) },
               {
                 key: "labels",

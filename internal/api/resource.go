@@ -154,10 +154,13 @@ type Resource struct {
 	// the same thing as, empty wherever recon cannot say.
 	ConfigType  string     `json:"configType,omitempty"`
 	ExternalIDs StringList `json:"externalIds,omitempty"`
-	// ConfigID is the catalog config item a person chose for this resource's
-	// insights when its identity matched more than one. Read-side only: it is
-	// written by a sync, never by an engine.
-	ConfigID string `json:"configId,omitempty"`
+	// The config link is read-side only: finding sync owns it, while engines own
+	// ConfigType and ExternalIDs. Method distinguishes a derived link from one a
+	// person fixed manually; RolledUp distinguishes identity from containment.
+	ConfigID          string            `json:"configId,omitempty"`
+	ConfigMatchMethod ConfigMatchMethod `json:"configMatchMethod,omitempty"`
+	ConfigRolledUp    bool              `json:"configRolledUp,omitempty"`
+	ConfigServer      string            `json:"configServer,omitempty"`
 
 	Tags     StringList        `json:"tags"`
 	Labels   map[string]string `json:"labels,omitempty"`
@@ -247,4 +250,3 @@ func (f Finding) ResourceFallback() ResourceRef {
 	}
 	return ResourceRef{UID: f.Host, Name: name, Type: f.Engine}
 }
-
