@@ -42,8 +42,7 @@ type InsightSync struct {
 	Silenced         int `json:"silenced"`
 	Direct           int `json:"direct"`
 	RolledUp         int `json:"rolledUp"`
-	// Pinned counts the states attached through a choice a previous sync
-	// remembered against their resource, rather than through the ladder.
+	// Pinned counts states attached through a manual link.
 	Pinned int `json:"pinned"`
 	Pushed int `json:"pushed"`
 
@@ -108,13 +107,21 @@ type InsightChoice struct {
 	Deleted  bool `json:"deleted,omitempty"`
 }
 
-// ConfigPin is the catalog config item a resource's insights hang off, chosen
-// by hand and remembered so later syncs stop asking the same question.
+type ConfigMatchMethod string
+
+const (
+	ConfigMatchAutomatic ConfigMatchMethod = "automatic"
+	ConfigMatchManual    ConfigMatchMethod = "manual"
+)
+
+// ConfigPin is the durable catalog link used for a resource's insights. Method
+// records how it was selected; RolledUp says whether the item is the resource
+// itself or merely contains it.
 type ConfigPin struct {
-	ConfigID string `json:"configId"`
-	// RolledUp records that the chosen item contains the resource rather than
-	// being it, so a later sync reports the attachment the same way this one did.
-	RolledUp bool `json:"rolledUp,omitempty"`
+	ConfigID string            `json:"configId"`
+	Method   ConfigMatchMethod `json:"method"`
+	RolledUp bool              `json:"rolledUp,omitempty"`
+	Server   string            `json:"server,omitempty"`
 }
 
 func (u InsightSync) MarshalJSON() ([]byte, error) {

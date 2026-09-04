@@ -18,7 +18,7 @@ func uploaderFor(c *catalog) *missioncontrol.Uploader {
 	}
 }
 
-// remembered is the choices a previous sync stored, and what this one stores.
+// remembered is the links a previous sync stored, and what this one stores.
 type remembered struct {
 	stored map[string]api.ConfigPin
 	saved  map[string]api.ConfigPin
@@ -213,8 +213,12 @@ var _ = Describe("syncing an identity several config items carry", func() {
 			Insights: 2, RolledUp: true, Pinned: true,
 		}}))
 		Expect(pins.saved).To(Equal(map[string]api.ConfigPin{
-			"01JRESOURCEweb-1": {ConfigID: twinID, RolledUp: true},
-			"01JRESOURCEweb-2": {ConfigID: twinID, RolledUp: true},
+			"01JRESOURCEweb-1": {
+				ConfigID: twinID, Method: api.ConfigMatchManual, RolledUp: true, Server: catalog.server.URL,
+			},
+			"01JRESOURCEweb-2": {
+				ConfigID: twinID, Method: api.ConfigMatchManual, RolledUp: true, Server: catalog.server.URL,
+			},
 		}))
 	})
 

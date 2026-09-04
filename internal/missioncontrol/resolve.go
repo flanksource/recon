@@ -37,9 +37,8 @@ type Candidate struct {
 type ResolveOptions struct {
 	State  api.InsightState
 	Target api.TargetDocument
-	// Pin is the choice a previous sync remembered for this state's resource. It
-	// short-circuits the ladder: a person has already said where these findings
-	// belong, and re-deriving it would let a catalog change quietly move them.
+	// Pin is the link a previous sync persisted for this state's resource. It
+	// short-circuits the ladder until explicit re-resolution is requested.
 	Pin *api.ConfigPin
 }
 
@@ -51,8 +50,9 @@ type Match struct {
 	// MatchedOn is the identity that resolved, which is not always the finding's
 	// own — see RolledUp.
 	MatchedOn string
+	Method    api.ConfigMatchMethod
 	RolledUp  bool
-	// Pinned marks a match that came from the resource's stored choice.
+	// Pinned marks a match that came from a stored manual link.
 	Pinned bool
 	// Chosen marks a match an explicit choice resolved this run, which is what a
 	// real sync then remembers against the resource.
@@ -155,6 +155,7 @@ func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (Resolut
 
 		match := *found.match
 		match.MatchedOn = candidate.Value
+		match.Method = api.ConfigMatchAutomatic
 		match.RolledUp = candidate.Scope
 		resolution.Match = &match
 		return resolution, nil
@@ -164,7 +165,7 @@ func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (Resolut
 	return resolution, nil
 }
 
-// resolvePin attaches a state to the config item chosen for its resource.
+// resolvePin attaches a state to the config item persisted for its resource.
 //
 // The item is still read back rather than trusted so its current identity is
 // used. Catalog rows marked deleted remain valid matches: Mission Control keeps
@@ -173,7 +174,7 @@ func (r *Resolver) Resolve(ctx context.Context, options ResolveOptions) (Resolut
 func (r *Resolver) resolvePin(ctx context.Context, options ResolveOptions) (Resolution, error) {
 	id, err := uuid.Parse(options.Pin.ConfigID)
 	if err != nil {
-		return Resolution{}, fmt.Errorf("stored config choice %q for resource %s is not a uuid: %w",
+		return Resolution{}, fmt.Errorf("stored config link %q for resource %s is not a uuid: %w",
 			options.Pin.ConfigID, options.State.Resource.ID, err)
 	}
 	item, err := r.configItem(ctx, id)
@@ -182,16 +183,21 @@ func (r *Resolver) resolvePin(ctx context.Context, options ResolveOptions) (Reso
 	}
 	if item == nil {
 		return Resolution{Unresolved: unresolved(options.State, []string{options.Pin.ConfigID},
-			fmt.Sprintf("the chosen config item %s is no longer in the catalog; sync with --repin to resolve it again",
+			fmt.Sprintf("the linked config item %s is no longer in the catalog; sync with --repin to resolve it again",
 				options.Pin.ConfigID))}, nil
+	}
+	method := options.Pin.Method
+	if method == "" {
+		method = api.ConfigMatchManual
 	}
 	return Resolution{Match: &Match{
 		ConfigID:   item.ID,
 		ConfigName: derefString(item.Name),
 		ConfigType: derefString(item.Type),
 		MatchedOn:  derefString(item.Name),
+		Method:     method,
 		RolledUp:   options.Pin.RolledUp,
-		Pinned:     true,
+		Pinned:     method == api.ConfigMatchManual,
 	}}, nil
 }
 
@@ -208,6 +214,7 @@ func (r *Resolver) chosen(identity string, options []api.InsightChoice) *Match {
 		}
 		return &Match{
 			ConfigID: id, ConfigName: option.Name, ConfigType: option.Type,
+			Method: api.ConfigMatchManual,
 			// An ancestor is by definition not the thing the finding is about.
 			RolledUp: option.Ancestor,
 			Chosen:   true,

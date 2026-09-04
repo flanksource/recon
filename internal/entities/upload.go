@@ -17,7 +17,7 @@ type syncFlags struct {
 	Agent      string   `flag:"agent" help:"Agent name the insights are attributed to" default:"recon"`
 	Unresolved string   `flag:"unresolved" help:"What to do with unresolved resources: report or error" default:"report"`
 	Config     []string `flag:"config" help:"Attach an identity that matched several config items to one of them, as identity=config-id"`
-	Repin      bool     `flag:"repin" help:"Ignore remembered config choices and resolve every state against the catalog again"`
+	Repin      bool     `flag:"repin" help:"Ignore stored config links and resolve every state against the catalog again"`
 	DryRun     bool     `flag:"dry-run" help:"Resolve and preview without writing"`
 }
 
