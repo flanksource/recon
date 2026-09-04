@@ -27,7 +27,10 @@ func (r *Registry) resourceConfig(
 	if resource.ConfigID == "" {
 		return nil, nil
 	}
-	linked, err := missioncontrol.LookupConfig(ctx, missioncontrol.ConfigLookupOptions{ID: resource.ConfigID})
+	linked, err := missioncontrol.LookupConfig(ctx, missioncontrol.ConfigLookupOptions{
+		ID: resource.ConfigID, ExpectedServer: resource.ConfigServer,
+		Method: resource.ConfigMatchMethod, RolledUp: resource.ConfigRolledUp,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("read config linked to resource %s: %w", id, err)
 	}

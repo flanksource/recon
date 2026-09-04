@@ -62,7 +62,7 @@ func (Resource) TableName() string { return "resources" }
 // resource at all, so a cached column would go quietly wrong. Scan.Document
 // takes its counts the same way and for the same reason.
 func (r Resource) Document(open int, severities map[string]int) api.Resource {
-	return api.Resource{
+	document := api.Resource{
 		ID:          r.ID,
 		Provider:    r.Provider,
 		Scope:       r.Scope,
@@ -90,6 +90,12 @@ func (r Resource) Document(open int, severities map[string]int) api.Resource {
 		Findings:    open,
 		Severities:  severities,
 	}
+	if document.ConfigID != "" {
+		document.ConfigMatchMethod = api.ConfigMatchMethod(r.ConfigMatchMethod)
+		document.ConfigRolledUp = r.ConfigRolledUp
+		document.ConfigServer = r.ConfigServer
+	}
+	return document
 }
 
 // ResourceFrom builds a row from what an engine reported.
