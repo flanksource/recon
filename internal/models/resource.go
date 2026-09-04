@@ -31,10 +31,13 @@ type Resource struct {
 	ConfigType  string         `gorm:"column:config_type"`
 	ExternalIDs pq.StringArray `gorm:"column:external_ids;type:text[]"`
 
-	// The chosen catalog config item, written by a sync and never by an engine —
-	// which is why ResourceFrom does not set it and the upsert does not touch it.
+	// Finding sync owns the catalog link, which is why ResourceFrom and the
+	// engine upsert leave these fields untouched.
 	ConfigID       *string `gorm:"column:config_id"`
 	ConfigRolledUp bool    `gorm:"column:config_rolled_up"`
+
+	ConfigMatchMethod string `gorm:"column:config_match_method"`
+	ConfigServer      string `gorm:"column:config_server"`
 
 	Tags     pq.StringArray          `gorm:"column:tags;type:text[]"`
 	Labels   JSON[map[string]string] `gorm:"column:labels;type:jsonb"`
