@@ -92,6 +92,7 @@ func ConfigHandler(config Config) http.Handler {
 func Protect(config Config, next http.Handler) http.Handler {
 	clientConfig := &clerk.ClientConfig{}
 	clientConfig.Key = clerk.String(config.SecretKey)
+	csrf := http.NewCrossOriginProtection()
 
 	verified := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := clerk.SessionClaimsFromContext(r.Context())
@@ -101,6 +102,10 @@ func Protect(config Config, next http.Handler) http.Handler {
 		}
 		if claims.ActiveOrganizationID != config.OrganizationID {
 			writeError(w, http.StatusForbidden, "active Clerk organization is not allowed")
+			return
+		}
+		if err := csrf.Check(r); err != nil {
+			writeError(w, http.StatusForbidden, "cross-origin request not allowed")
 			return
 		}
 		next.ServeHTTP(w, r)
