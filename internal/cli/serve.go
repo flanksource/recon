@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/flanksource/recon"
+	"github.com/flanksource/recon/internal/auth"
 	"github.com/flanksource/recon/internal/db"
 	"github.com/flanksource/recon/internal/engines/scan/nuclei"
 	"github.com/flanksource/recon/internal/server"
@@ -40,6 +41,10 @@ func newServeCommand() *cobra.Command {
 			if namespace == "" {
 				return fmt.Errorf("namespace must not be empty")
 			}
+			authConfig, err := auth.FromEnvironment(os.LookupEnv)
+			if err != nil {
+				return err
+			}
 			if err := scans.SetConcurrency(scanConcurrency); err != nil {
 				return err
 			}
@@ -60,7 +65,7 @@ func newServeCommand() *cobra.Command {
 					cmd.Printf("seeded %d default engine profiles\n", seeded)
 				}
 
-				return serve(cmd, st, host, port, namespace, dev)
+				return serve(cmd, st, host, port, namespace, dev, authConfig)
 			})
 		},
 	}
@@ -76,9 +81,17 @@ func newServeCommand() *cobra.Command {
 }
 
 // serve builds the mux and runs until the context is cancelled.
-func serve(cmd *cobra.Command, st *store.Store, host string, port int, namespace string, dev bool) error {
+func serve(
+	cmd *cobra.Command,
+	st *store.Store,
+	host string,
+	port int,
+	namespace string,
+	dev bool,
+	authConfig auth.Config,
+) error {
 	config := server.Config{
-		Host: host, Port: port, Namespace: namespace,
+		Host: host, Port: port, Namespace: namespace, Auth: authConfig,
 		Root: cmd.Root(), Registry: registry, Store: st, Scans: scans, Sweeps: sweeps, Probes: liveness,
 		UI: recon.UI, UIDir: recon.UIDir,
 	}

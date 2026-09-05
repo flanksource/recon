@@ -10,11 +10,13 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/flanksource/clicky/rpc"
 	"github.com/flanksource/clicky/task"
 	"github.com/spf13/cobra"
 
+	"github.com/flanksource/recon/internal/auth"
 	"github.com/flanksource/recon/internal/discovery"
 	prowlerschema "github.com/flanksource/recon/internal/engines/scan/prowler/schema"
 	"github.com/flanksource/recon/internal/entities"
@@ -30,6 +32,7 @@ import (
 type Config struct {
 	Host string
 	Port int
+	Auth auth.Config
 
 	// Namespace is the default Kubernetes namespace for runtime secret
 	// references and metadata catalogs.
@@ -83,6 +86,10 @@ type Config struct {
 
 // Handler builds the mux.
 func Handler(config Config) http.Handler {
+	if err := config.Auth.Validate(); err != nil {
+		panic(err)
+	}
+
 	// Every component that reaches the database is given it here, in one place.
 	// The CLI path attaches it in a pre-run hook, which serve deliberately skips
 	// because it opens its own connection — so missing one here left the scan
@@ -104,6 +111,7 @@ func Handler(config Config) http.Handler {
 	}
 
 	mux := http.NewServeMux()
+	mux.Handle("GET /api/auth/config", auth.ConfigHandler(config.Auth))
 	task.RegisterHandlers(mux, "/api/v1")
 	if contextFactory != nil {
 		registerSecretCatalogs(mux, secretCatalogOptions{
@@ -186,5 +194,20 @@ func Handler(config Config) http.Handler {
 		// answers 200 with index.html, which reads to a client as success.
 		mux.Handle("/api/", httpapi.NotFound())
 	}
-	return mux
+	if !config.Auth.Enabled() {
+		return mux
+	}
+
+	protected := auth.Protect(config.Auth, mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The SPA must load before Clerk can establish a session, and its public
+		// configuration is what gives the browser the publishable key. Everything
+		// else under /api is enforced by the same backend boundary.
+		if r.URL.Path == "/api/auth/config" ||
+			(r.URL.Path != "/api" && !strings.HasPrefix(r.URL.Path, "/api/")) {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		protected.ServeHTTP(w, r)
+	})
 }
