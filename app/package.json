@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.262",
+    "@clerk/react": "6.15.1",
     "@flanksource/clicky-ui": "^0.3.25",
     "@flanksource/facet": "0.1.71",
     "@flanksource/icons": "1.0.63",

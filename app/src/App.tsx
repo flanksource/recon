@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TaskManagerButton } from "@flanksource/clicky-ui/data";
 import { useBrowserRouter } from "@flanksource/clicky-ui/rpc";
@@ -31,16 +31,18 @@ const TABS = [
   { path: "/mutes", label: "Mutes" },
 ];
 
-export function App() {
+type AppProps = { accountControl?: ReactNode };
+
+export function App({ accountControl }: AppProps = {}) {
   const [queryClient] = useState(() => new QueryClient());
   return (
     <QueryClientProvider client={queryClient}>
-      <AppContent />
+      <AppContent accountControl={accountControl} />
     </QueryClientProvider>
   );
 }
 
-function AppContent() {
+function AppContent({ accountControl }: AppProps) {
   const router = useBrowserRouter();
   useEffect(() => {
     if (router.pathname === "/") router.navigate("/inventory", { replace: true });
@@ -104,6 +106,12 @@ function AppContent() {
       onNavigate={(href) => router.navigate(href)}
     />
   );
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      {taskButton}
+      {accountControl}
+    </div>
+  );
 
   // Which routes own their chrome. The scan detail view and the report
   // playground render their own AppShell; the rest still get the standalone nav
@@ -126,7 +134,7 @@ function AppContent() {
       }
       onMuteFinding={(path) => router.navigate(path)}
       tabs={tabs}
-      taskButton={taskButton}
+      taskButton={headerActions}
     />
   ) : reportMatch ? (
     <ReportPlayground
@@ -135,7 +143,7 @@ function AppContent() {
         router.navigate(scanId ? `/reports/${encodeURIComponent(scanId)}` : "/reports")
       }
       tabs={tabs}
-      taskButton={taskButton}
+      taskButton={headerActions}
     />
   ) : router.pathname === "/inventory" ? (
     <InventoryView
@@ -214,7 +222,7 @@ function AppContent() {
       {!ownsShell && (
         <nav className="flex items-center gap-1 border-b border-border px-4 pt-2">
           {tabs}
-          <div className="ml-auto pb-2">{taskButton}</div>
+          <div className="ml-auto pb-2">{headerActions}</div>
         </nav>
       )}
       <div className="min-h-0 flex-1">{content}</div>
