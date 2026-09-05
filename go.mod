@@ -5,6 +5,7 @@ go 1.26.1
 replace github.com/glebarez/sqlite => github.com/clarkmcc/gorm-sqlite v0.0.0-20240426202654-00ed082c0311
 
 require (
+	github.com/clerk/clerk-sdk-go/v2 v2.7.0
 	github.com/flanksource/clicky v1.21.57
 	github.com/flanksource/commons v1.57.0
 	github.com/flanksource/commons-db v0.1.29
