@@ -17,7 +17,7 @@
     "@ai-sdk/react": "^3.0.262",
     "@flanksource/clicky-ui": "^0.3.25",
     "@flanksource/facet": "0.1.71",
-    "@flanksource/icons": "1.0.63",
+    "@flanksource/icons": "1.0.65",
     "@tanstack/react-query": "^5.101.4",
     "ai": "^6.0.259",
     "ajv": "^8.17.1",

@@ -9,7 +9,7 @@
     "pdf": "facet pdf ScanReport.tsx -d sample.json -o dist"
   },
   "dependencies": {
-    "@flanksource/clicky-ui": "0.3.22",
+    "@flanksource/clicky-ui": "0.3.34",
     "@flanksource/facet": "0.1.71",
     "markdown-to-jsx": "7.7.7",
     "react": "^19.2.8",
