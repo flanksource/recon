@@ -2,7 +2,7 @@
 
 A local Vite + React application built on `@flanksource/clicky-ui` for maintaining the canonical JSON target inventory, inspecting observed network and TLS metadata, running scans, and editing scanner profiles.
 
-The application has no authentication and is intended for local development only. The Vite middleware supplies the filesystem-backed API in both development and preview mode.
+The application can run without authentication for local development. When Clerk is configured, every API request requires a signed-in member of the single Clerk organization assigned to that Recon deployment.
 
 ## Run
 
@@ -12,6 +12,20 @@ task -d nuclei app:dev
 ```
 
 Open `http://localhost:5280`. From the repository root, `make nuclei-app` starts the same process.
+
+## Clerk authentication
+
+Set all three values on the `reconctl serve` process to enable authentication:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `CLERK_PUBLISHABLE_KEY` | Public Clerk application-instance configuration supplied to the React client at runtime |
+| `CLERK_SECRET_KEY` | Secret used by the Go server to retrieve Clerk signing keys and verify sessions |
+| `CLERK_ORG_ID` | The one Clerk organization whose members may use this deployment |
+
+Leaving all three unset preserves the unauthenticated local workflow. Supplying only some of them stops the server with an incomplete-configuration error rather than exposing a partially protected application.
+
+The browser automatically activates the configured organization after sign-in. The backend still verifies the organization claim on every API request; frontend gating is only the user experience, not the security boundary. All accepted organization members currently have the same access—there is no role-based authorization or local user/membership storage.
 
 ## Routes
 
