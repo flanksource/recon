@@ -2,6 +2,8 @@ module github.com/flanksource/recon
 
 go 1.26.1
 
+replace github.com/glebarez/sqlite => github.com/clarkmcc/gorm-sqlite v0.0.0-20240426202654-00ed082c0311
+
 require (
 	github.com/flanksource/clicky v1.21.57
 	github.com/flanksource/commons v1.57.0
@@ -158,7 +160,6 @@ require (
 	github.com/getkin/kin-openapi v0.144.0 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/gin-gonic/gin v1.9.1 // indirect
-	github.com/glebarez/go-sqlite v1.22.0 // indirect
 	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
