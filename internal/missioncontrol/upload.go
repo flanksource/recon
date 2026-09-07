@@ -230,7 +230,7 @@ func (u *Uploader) Plan(
 		}
 		for _, state := range closureStates {
 			previous, found := changed[state.Resource.ID]
-			if !found || !eligibleState(state) {
+			if !found || !eligibleRetirement(state) {
 				continue
 			}
 			closed, err := u.closePrevious(ctx, analyses, state, previous)
@@ -383,8 +383,11 @@ func insightStateKey(state api.InsightState) string {
 }
 
 func eligibleState(state api.InsightState) bool {
-	return state.Scan.Phase == api.PhaseDone &&
-		(state.State.Status != api.StatusResolved || state.State.Occurrences != 0)
+	return state.Scan.Phase == api.PhaseDone && eligibleRetirement(state)
+}
+
+func eligibleRetirement(state api.InsightState) bool {
+	return state.State.Status != api.StatusResolved || state.State.Occurrences != 0
 }
 
 func conflictingResourceLink(resourceID string) error {
