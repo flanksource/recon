@@ -73,6 +73,9 @@ var ErrRendererUnavailable = errors.New("facet is not installed")
 
 // Options configures a Renderer.
 type Options struct {
+	// Entry selects a report template; empty preserves the single-scan report.
+	Entry string
+
 	// SourceDir renders from a template directory on disk instead of the copy
 	// embedded in the binary. It is what makes the report designable: point it
 	// at app/reports in a checkout and an edit to the TSX is in the next PDF.
@@ -85,6 +88,7 @@ type Options struct {
 // Renderer prints report payloads through facet.
 type Renderer struct {
 	sourceDir string
+	entry     string
 	timeout   time.Duration
 
 	extractOnce sync.Once
@@ -98,7 +102,11 @@ func New(options Options) *Renderer {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	return &Renderer{sourceDir: options.SourceDir, timeout: timeout}
+	entry := options.Entry
+	if entry == "" {
+		entry = recon.ReportEntry
+	}
+	return &Renderer{sourceDir: options.SourceDir, entry: entry, timeout: timeout}
 }
 
 // Available reports whether a render could run at all, so a caller can say
@@ -140,7 +148,7 @@ func (r *Renderer) Render(ctx context.Context, format Format, payload any) ([]by
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer
-	command := exec.CommandContext(renderCtx, "facet", string(format), recon.ReportEntry,
+	command := exec.CommandContext(renderCtx, "facet", string(format), r.entry,
 		"-d", dataFile, "-o", outFile)
 	command.Dir = source
 	command.Stdout = &stdout
@@ -166,8 +174,8 @@ func (r *Renderer) Render(ctx context.Context, format Format, payload any) ([]by
 // source resolves the template directory, extracting the embedded copy once.
 func (r *Renderer) source() (string, error) {
 	if r.sourceDir != "" {
-		if _, err := os.Stat(filepath.Join(r.sourceDir, recon.ReportEntry)); err != nil {
-			return "", fmt.Errorf("report source %s has no %s: %w", r.sourceDir, recon.ReportEntry, err)
+		if _, err := os.Stat(filepath.Join(r.sourceDir, r.entry)); err != nil {
+			return "", fmt.Errorf("report source %s has no %s: %w", r.sourceDir, r.entry, err)
 		}
 		return r.sourceDir, nil
 	}

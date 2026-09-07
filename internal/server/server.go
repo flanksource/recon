@@ -176,6 +176,8 @@ func Handler(config Config) http.Handler {
 		httpapi.RegisterScanFiles(mux, config.Store)
 		httpapi.RegisterScanReport(mux, config.Store,
 			report.New(report.Options{SourceDir: config.ReportSourceDir}))
+		httpapi.RegisterOpenFindingsReport(mux, config.Store,
+			report.New(report.Options{SourceDir: config.ReportSourceDir, Entry: "OpenFindingsReport.tsx"}))
 	}
 
 	// The interface claims "/", so it is the fallback for everything the API did

@@ -27,12 +27,14 @@ import type { ReportEvidence, ReportFinding, ReportScan } from "./scan-report-ty
 const SEVERITY_TAG_MAPPING = (key: string, value: unknown): string =>
   key === "severity" ? (SEVERITY_BADGE[value as keyof typeof SEVERITY_BADGE] ?? "") : "";
 
-export function FindingsSummaryTable({ groups }: { groups: FindingGroup[] }) {
+/** Cross-scan reports name the engine so identical check IDs remain distinct. */
+export function FindingsSummaryTable({ groups, showEngine = false }: { groups: FindingGroup[]; showEngine?: boolean }) {
   const rows = groups.map((group, index) => ({
     id: `#${index + 1}`,
     name: group.names.join("; "),
     severity: group.severity,
     check: group.checkId,
+    engine: group.engines.join(", "),
     instances: `${group.instances.length} ${group.instances.length === 1 ? "instance" : "instances"}`,
   }));
   return (
@@ -42,7 +44,7 @@ export function FindingsSummaryTable({ groups }: { groups: FindingGroup[] }) {
       subject="name"
       primaryTags={["severity"]}
       tagMapping={SEVERITY_TAG_MAPPING}
-      keys={["check", "instances"]}
+      keys={showEngine ? ["engine", "check", "instances"] : ["check", "instances"]}
       size="sm"
       emptyMessage="No findings in this scan."
     />
@@ -166,7 +168,7 @@ export function DetailedFindings({
       {groups.map((group, index) => {
         const TypeIcon = findingTypeIcon(group);
         return (
-          <div key={group.checkId}>
+          <div key={JSON.stringify([group.engines, group.checkId])}>
             <Finding
               id={`#${index + 1}`}
               title={group.names.join("; ")}
@@ -188,8 +190,8 @@ export function DetailedFindings({
             <ReportMarkdownSection title="Recommended action" values={group.remediations} />
             <InstancesTable group={group} />
             {showEvidence &&
-              group.findings.map((finding) => (
-                <Evidence key={`${finding.scanId}#${finding.lineNo}`} finding={finding} />
+              group.findings.map((finding, occurrence) => (
+                <Evidence key={`${finding.scanId}#${finding.lineNo}#${occurrence}`} finding={finding} />
               ))}
           </div>
         );
