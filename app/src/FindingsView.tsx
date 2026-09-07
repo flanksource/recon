@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button } from "@flanksource/clicky-ui/components";
+import { Button, DropdownMenu } from "@flanksource/clicky-ui/components";
 import { DataTable, type DataTableColumn } from "@flanksource/clicky-ui/data";
 import { fetchFindingGroups, syncFindings, type SyncRequest } from "./api-insights";
 import { selectionQuery, useEntityFilters } from "./filters";
@@ -136,6 +136,16 @@ export function FindingsView() {
             <div className="flex items-center gap-2">
               <StatusToggle label="Resolved" selected={showResolved} onClick={() => setShowResolved((value) => !value)} />
               <StatusToggle label="Muted" selected={showMuted} onClick={() => setShowMuted((value) => !value)} />
+              <DropdownMenu
+                label="Export all open findings"
+                variant="outline"
+                size="sm"
+                items={[
+                  { label: "PDF", title: "All open and manual-review findings, regardless of table filters", onSelect: () => window.open("/api/findings/report.pdf", "_blank", "noopener") },
+                  { label: "HTML", title: "All open and manual-review findings, regardless of table filters", onSelect: () => window.open("/api/findings/report.html", "_blank", "noopener") },
+                  { label: "Report payload (JSON)", onSelect: () => window.open("/api/findings/report", "_blank", "noopener") },
+                ]}
+              />
               <SyncInsightsButton sync={sync} />
             </div>
           ),
@@ -163,4 +173,3 @@ function StatusToggle({ label, selected, onClick }: { label: string; selected: b
     </Button>
   );
 }
-

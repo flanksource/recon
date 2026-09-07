@@ -156,6 +156,16 @@ findings stay open with an ageing `last seen` rather than quietly resolving. A c
 failed run resolves nothing from silence, but the passes it did record still count: cutting
 a run short truncates what it said, it does not falsify it.
 
+The **Findings** tab's **Export all open findings** menu downloads a PDF, HTML, or
+JSON snapshot across the entire inventory, independent of table filters and pagination.
+It includes open and manual-review states, excludes resolved and muted states, and
+counts each resource/engine/check pair once rather than repeating historical detections.
+The report includes severity totals, affected resources, first/last-seen timestamps,
+remediation, and retained evidence; it does not claim scan coverage or a pass rate.
+The endpoints are `GET /api/findings/report`, `/api/findings/report.pdf`, and
+`/api/findings/report.html`. PDF and HTML use the same Facet installation as single-scan
+exports (`@flanksource/facet-cli`, plus Chromium or a configured Facet server).
+
 ### Mission Control identity
 
 Each resource carries the identity Mission Control's catalog would hold the same thing
