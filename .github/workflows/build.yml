@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, fix/persist-automatic-config-links, fix/reconcile-config-links]
 
 permissions:
   contents: read
