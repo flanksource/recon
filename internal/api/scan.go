@@ -39,6 +39,10 @@ type Scan struct {
 	EngineVersion string `json:"engineVersion,omitempty"`
 	Profile       string `json:"profile"`
 
+	CreatorUserID       string `json:"creatorUserId,omitempty"`
+	CreatorScheduleID   string `json:"creatorScheduleId,omitempty"`
+	CreatorScheduleName string `json:"creatorScheduleName,omitempty"`
+
 	Selector      map[string]any `json:"selector"`
 	SelectorLabel string         `json:"selectorLabel"`
 	EndpointCount int            `json:"endpointCount"`

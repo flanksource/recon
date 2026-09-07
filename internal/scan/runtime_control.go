@@ -48,6 +48,17 @@ func (r *Runtime) Cancel() error {
 	return r.cancelRun(run)
 }
 
+// CancelID stops one scheduled run on server shutdown without cancelling a manual scan.
+func (r *Runtime) CancelID(id string) error {
+	r.mu.Lock()
+	run := r.runs[id]
+	r.mu.Unlock()
+	if run == nil {
+		return fmt.Errorf("scan %q is not active in this runtime", id)
+	}
+	return r.cancelRun(run)
+}
+
 func (r *Runtime) cancelRun(run *Run) error {
 	r.mu.Lock()
 	if run.Scan.Phase.Terminal() {

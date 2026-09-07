@@ -29,6 +29,20 @@ table "scans" {
     type = text
   }
 
+  // Historical attribution survives deletion of a Clerk user or schedule.
+  column "creator_user_id" {
+    null = true
+    type = text
+  }
+  column "creator_schedule_id" {
+    null = true
+    type = uuid
+  }
+  column "creator_schedule_name" {
+    null = true
+    type = text
+  }
+
   // The resolved selector. Stored rather than referenced by name so a run still
   // describes exactly what it covered after the filter is changed.
   column "selector" {
@@ -116,6 +130,22 @@ table "scans" {
   }
   index "scans_engine_idx" {
     columns = [column.engine, column.profile]
+  }
+  index "scans_creator_schedule_idx" {
+    columns = [column.creator_schedule_id, column.created_at, column.id]
+    where = "creator_schedule_id IS NOT NULL"
+  }
+  check "scans_creator_exclusive" {
+    expr = "creator_user_id IS NULL OR creator_schedule_id IS NULL"
+  }
+  check "scans_creator_schedule_pair" {
+    expr = "(creator_schedule_id IS NULL) = (creator_schedule_name IS NULL)"
+  }
+  check "scans_creator_user_nonempty" {
+    expr = "creator_user_id IS NULL OR btrim(creator_user_id) <> ''"
+  }
+  check "scans_creator_schedule_name_nonempty" {
+    expr = "creator_schedule_name IS NULL OR btrim(creator_schedule_name) <> ''"
   }
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -119,6 +120,24 @@ func serve(
 
 	handler := server.Handler(config)
 
+	// A server that cannot bind must not fire scheduled scans.
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(cmd.Context())
+	schedulesDone := make(chan struct{})
+	go func() {
+		defer close(schedulesDone)
+		registry.RunSchedules(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-schedulesDone
+	}()
+
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
 		Handler: handler,
@@ -137,7 +156,7 @@ func serve(
 	}()
 
 	cmd.Printf("listening on http://%s:%d\n", host, port)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil

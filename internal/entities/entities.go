@@ -99,6 +99,7 @@ func (r *Registry) Register() {
 	r.registerProbe()
 	r.registerProfile()
 	r.registerMute()
+	r.registerSchedule()
 	r.registerTemplate()
 	r.registerEngine()
 	r.registerZone()
