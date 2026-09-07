@@ -32,7 +32,7 @@ const maxDuration = 30 * time.Minute
 type Request struct {
 	Engine   string
 	Profile  string
-	Selector store.TargetOpts
+	Selector api.TargetSelector
 
 	// Overrides are run-only tweaks layered over the stored profile. They are
 	// not persisted: the profile stays what it is, and the effective config is

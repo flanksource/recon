@@ -50,7 +50,7 @@ func (r Rule) Matches(finding api.Finding) (bool, error) {
 // structurallyMatches applies every dimension the database can hold.
 //
 // Dimensions are ANDed and the values within one are ORed, which is what
-// TargetOpts already documents. An empty dimension is unconstrained rather than
+// api.TargetSelector already documents. An empty dimension is unconstrained rather than
 // unsatisfiable — an empty severity list means severity is not part of this
 // rule, not that no severity qualifies.
 func (r Rule) structurallyMatches(finding api.Finding) bool {

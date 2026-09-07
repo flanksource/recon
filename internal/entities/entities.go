@@ -137,7 +137,7 @@ func deleteZone(r *Registry) func(context.Context, string) error {
 }
 
 func (r *Registry) registerTarget() {
-	clicky.NewEntity[api.TargetDocument, store.TargetOpts, api.TargetDocument]("target").
+	clicky.NewEntity[api.TargetDocument, api.TargetSelector, api.TargetDocument]("target").
 		Aliases("targets").
 		ToolGroup("inventory").
 		ListWithContext(bind(r, (*store.Store).ListTargets)).

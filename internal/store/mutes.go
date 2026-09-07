@@ -77,7 +77,7 @@ func validateMuteRule(rule api.MuteRule) error {
 			return fmt.Errorf("mute rule %s: %w", rule.Name, err)
 		}
 	}
-	if _, err := TargetOptsFrom(rule.Targets); err != nil {
+	if _, err := api.ParseTargetSelector(rule.Targets); err != nil {
 		return fmt.Errorf("mute rule %s targets: %w", rule.Name, err)
 	}
 	if err := mute.Compile(rule.Expr); err != nil {
@@ -166,7 +166,7 @@ func (s *Store) MuteRules(ctx context.Context, engine string) ([]mute.Rule, erro
 
 		resolved := mute.Rule{MuteRule: rule}
 		if len(rule.Targets) > 0 {
-			opts, err := TargetOptsFrom(rule.Targets)
+			opts, err := api.ParseTargetSelector(rule.Targets)
 			if err != nil {
 				return nil, fmt.Errorf("mute rule %s targets: %w", rule.Name, err)
 			}

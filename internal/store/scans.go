@@ -42,7 +42,7 @@ func (o ScanOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 		db = db.Where("COALESCE((severities ->> ?)::int, 0) > 0", severity)
 	}
 	if o.Since != "" {
-		since, err := parseSince(o.Since)
+		since, err := api.ParseSince(o.Since)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +148,7 @@ func (s *Store) scanHosts(ctx context.Context, row models.Scan) ([]string, error
 // It is derived rather than stored so that a change to how selectors read does
 // not need a migration.
 func selectorLabel(row models.Scan) (string, error) {
-	opts, err := TargetOptsFrom(row.Selector.Get())
+	opts, err := api.ParseTargetSelector(row.Selector.Get())
 	if err != nil {
 		return "", fmt.Errorf("scan %s selector: %w", row.ID, err)
 	}

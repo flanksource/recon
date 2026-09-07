@@ -62,7 +62,7 @@ var _ = Describe("provider contexts in the inventory", Ordered, Label("db"), fun
 	})
 
 	It("resolves only contexts for the requested provider", func() {
-		contexts, err := st.ProviderContexts(ctx, store.TargetOpts{}, "gcp")
+		contexts, err := st.ProviderContexts(ctx, api.TargetSelector{}, "gcp")
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(contexts).To(Equal([]store.ProviderContext{{
@@ -73,13 +73,13 @@ var _ = Describe("provider contexts in the inventory", Ordered, Label("db"), fun
 	})
 
 	It("refuses an explicit context belonging to another provider", func() {
-		_, err := st.ProviderContexts(ctx, store.TargetOpts{IDs: []string{"github-production"}}, "gcp")
+		_, err := st.ProviderContexts(ctx, api.TargetSelector{IDs: []string{"github-production"}}, "gcp")
 
 		Expect(err).To(MatchError(ContainSubstring("github-production uses provider github, not gcp")))
 	})
 
 	It("never resolves a provider context as a network endpoint", func() {
-		endpoints, err := st.Endpoints(ctx, store.TargetOpts{IDs: []string{"gcp-production"}})
+		endpoints, err := st.Endpoints(ctx, api.TargetSelector{IDs: []string{"gcp-production"}})
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(endpoints).To(BeEmpty())
@@ -153,7 +153,7 @@ var _ = Describe("provider contexts in the inventory", Ordered, Label("db"), fun
 		Expect(string(body)).ToNot(ContainSubstring("stored-token"))
 		Expect(string(body)).To(ContainSubstring(`"configured":true`))
 
-		contexts, err := st.ProviderContexts(ctx, store.TargetOpts{IDs: []string{"gcp-production"}}, "gcp")
+		contexts, err := st.ProviderContexts(ctx, api.TargetSelector{IDs: []string{"gcp-production"}}, "gcp")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(contexts).To(HaveLen(1))
 		Expect(contexts[0].Credentials.EnvVars[0].ValueStatic).To(Equal("stored-token"))
@@ -168,7 +168,7 @@ var _ = Describe("provider contexts in the inventory", Ordered, Label("db"), fun
 		body, err = json.Marshal(preservedMarker)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring(`"configured":true`))
-		contexts, err = st.ProviderContexts(ctx, store.TargetOpts{IDs: []string{"gcp-production"}}, "gcp")
+		contexts, err = st.ProviderContexts(ctx, api.TargetSelector{IDs: []string{"gcp-production"}}, "gcp")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(contexts[0].Credentials.EnvVars[0].ValueStatic).To(Equal("stored-token"))
 
@@ -181,7 +181,7 @@ var _ = Describe("provider contexts in the inventory", Ordered, Label("db"), fun
 		})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cleared.Credentials).To(BeNil())
-		contexts, err = st.ProviderContexts(ctx, store.TargetOpts{IDs: []string{"gcp-production"}}, "gcp")
+		contexts, err = st.ProviderContexts(ctx, api.TargetSelector{IDs: []string{"gcp-production"}}, "gcp")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(contexts[0].Credentials).To(BeNil())
 	})

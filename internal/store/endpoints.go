@@ -29,7 +29,7 @@ type Endpoint struct {
 // This exists to be looked at before a run, not only during one: "which
 // endpoints does this hit" has to be answerable in advance or an intrusive scan
 // can surprise someone.
-func (s *Store) Endpoints(ctx context.Context, opts TargetOpts) ([]Endpoint, error) {
+func (s *Store) Endpoints(ctx context.Context, opts api.TargetSelector) ([]Endpoint, error) {
 	targets, err := s.ListTargets(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func (s *Store) Endpoints(ctx context.Context, opts TargetOpts) ([]Endpoint, err
 // The selector is narrowed to the cloud kinds rather than the caller having to
 // remember: asking for accounts and getting hosts back would put hostnames in
 // front of an engine that would try to audit them as projects.
-func (s *Store) Accounts(ctx context.Context, opts TargetOpts) ([]Endpoint, error) {
+func (s *Store) Accounts(ctx context.Context, opts api.TargetSelector) ([]Endpoint, error) {
 	contexts, err := s.ProviderContexts(ctx, opts, "gcp")
 	if err != nil {
 		return nil, err

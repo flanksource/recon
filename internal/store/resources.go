@@ -18,7 +18,7 @@ import (
 // ResourceOpts selects resources.
 //
 // A list filter rather than a stored selector, so it carries Scope and Validate
-// but not the Empty/Describe/Map contract TargetOpts needs — those exist because
+// but not the Empty/Describe/Map contract api.TargetSelector needs — those exist because
 // a target selector is written onto a scan row and replayed, and this one never
 // is. FindingOpts sets the same reduced precedent.
 type ResourceOpts struct {
@@ -92,7 +92,7 @@ func (o ResourceOpts) Validate() error {
 		}
 	}
 	if o.Since != "" {
-		if _, err := parseSince(o.Since); err != nil {
+		if _, err := api.ParseSince(o.Since); err != nil {
 			return err
 		}
 	}
@@ -154,7 +154,7 @@ func (o ResourceOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 		db = db.Where("name ILIKE ? OR uid ILIKE ?", pattern, pattern)
 	}
 	if o.Since != "" {
-		since, err := parseSince(o.Since)
+		since, err := api.ParseSince(o.Since)
 		if err != nil {
 			return nil, err
 		}

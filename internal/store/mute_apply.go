@@ -121,7 +121,7 @@ func (s *Store) resolveMuteRule(ctx context.Context, rule api.MuteRule) (mute.Ru
 	if len(rule.Targets) == 0 {
 		return resolved, nil
 	}
-	opts, err := TargetOptsFrom(rule.Targets)
+	opts, err := api.ParseTargetSelector(rule.Targets)
 	if err != nil {
 		return mute.Rule{}, fmt.Errorf("mute rule %s targets: %w", rule.Name, err)
 	}

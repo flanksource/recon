@@ -101,7 +101,7 @@ var _ = Describe("the configured zones", Ordered, Label("db"), func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(st.DeleteZone(ctx, "example.test")).To(Succeed())
 
-		remaining, err := st.ListTargets(ctx, store.TargetOpts{})
+		remaining, err := st.ListTargets(ctx, api.TargetSelector{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(remaining).To(HaveLen(1))
 	})

@@ -21,8 +21,8 @@ import (
 const targetOrder = `id COLLATE "C" ASC`
 
 // ListTargets returns the targets a selector matches, ordered by stable ID.
-func (s *Store) ListTargets(ctx context.Context, opts TargetOpts) ([]api.TargetDocument, error) {
-	query, err := opts.Scope(s.DB(ctx))
+func (s *Store) ListTargets(ctx context.Context, opts api.TargetSelector) ([]api.TargetDocument, error) {
+	query, err := scopeTargets(s.DB(ctx), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +456,7 @@ func (s *Store) TagVocabulary(ctx context.Context) ([]string, error) {
 
 // Inventory assembles the listing the UI loads on start.
 func (s *Store) Inventory(ctx context.Context) (api.Inventory, error) {
-	rows, err := s.ListTargets(ctx, TargetOpts{})
+	rows, err := s.ListTargets(ctx, api.TargetSelector{})
 	if err != nil {
 		return api.Inventory{}, err
 	}

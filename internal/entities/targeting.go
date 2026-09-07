@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/flanksource/recon/internal/store"
+	"github.com/flanksource/recon/internal/api"
 )
 
 // runTarget is the common targeting surface for scan and discovery. Inventory
@@ -31,7 +31,7 @@ type runTarget struct {
 }
 
 type resolvedTarget struct {
-	Inventory store.TargetOpts
+	Inventory api.TargetSelector
 	Hosts     []string
 	Domains   []string
 	CIDRs     []string
@@ -43,7 +43,7 @@ func (t resolvedTarget) explicit() bool {
 
 func (t runTarget) resolve() (resolvedTarget, error) {
 	resolved := resolvedTarget{
-		Inventory: store.TargetOpts{
+		Inventory: api.TargetSelector{
 			Selector: t.Selector,
 			IDs:      uniqueStrings(t.ID),
 			Kind:     t.Kind,

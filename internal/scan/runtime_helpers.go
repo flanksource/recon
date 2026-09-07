@@ -19,7 +19,7 @@ func serialEngines() []string {
 	return names
 }
 
-func selectorMap(opts store.TargetOpts) (*map[string]any, error) {
+func selectorMap(opts api.TargetSelector) (*map[string]any, error) {
 	stored, err := opts.Map()
 	if err != nil {
 		return nil, err

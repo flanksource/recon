@@ -210,7 +210,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 		})
 
 		// Every entity's selector, not just the target's. The spec used to
-		// reflect over store.TargetOpts alone while claiming to describe "the
+		// reflect over the target selector alone while claiming to describe "the
 		// filter bar", so the coverage it advertised did not exist for any
 		// other entity — and a selector field the spec omits is a filter the UI
 		// silently cannot offer.
@@ -231,7 +231,7 @@ var _ = Describe("the HTTP surface", Ordered, Label("db"), func() {
 						"selector field %s is not offered as a query parameter", selector.Field(i).Name)
 				}
 			},
-			Entry("target", "/api/v1/target", store.TargetOpts{}),
+			Entry("target", "/api/v1/target", api.TargetSelector{}),
 			Entry("scan", "/api/v1/scan", store.ScanOpts{}),
 			Entry("finding", "/api/v1/finding", store.FindingOpts{}),
 			Entry("resource", "/api/v1/resource", store.ResourceOpts{}),
