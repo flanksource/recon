@@ -28,11 +28,20 @@ import (
 // either wedged or is scanning far more than anyone intended.
 const maxDuration = 30 * time.Minute
 
+// Creator is copied from a verified user or claimed schedule before queueing.
+// It is internal transport state, never decoded from scan action input.
+type Creator struct {
+	UserID       string
+	ScheduleID   string
+	ScheduleName string
+}
+
 // Request is what starts a scan.
 type Request struct {
 	Engine   string
 	Profile  string
 	Selector api.TargetSelector
+	Creator  Creator
 
 	// Overrides are run-only tweaks layered over the stored profile. They are
 	// not persisted: the profile stays what it is, and the effective config is
@@ -298,7 +307,7 @@ func (r *Runtime) enqueue(
 		return api.Scan{}, err
 	}
 
-	row, err := r.Store.CreateScan(ctx, models.Scan{
+	input := models.Scan{
 		Name:          name,
 		Engine:        spec.Name,
 		Profile:       request.Profile,
@@ -306,7 +315,15 @@ func (r *Runtime) enqueue(
 		EndpointCount: subjects.count(),
 		Phase:         string(api.PhaseQueued),
 		StartedAt:     queuedAt,
-	})
+	}
+	if request.Creator.UserID != "" {
+		input.CreatorUserID = &request.Creator.UserID
+	}
+	if request.Creator.ScheduleID != "" {
+		input.CreatorScheduleID = &request.Creator.ScheduleID
+		input.CreatorScheduleName = &request.Creator.ScheduleName
+	}
+	row, err := r.Store.CreateScan(ctx, input)
 	if err != nil {
 		return api.Scan{}, err
 	}

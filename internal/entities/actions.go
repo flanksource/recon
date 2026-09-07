@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/recon/internal/api"
+	"github.com/flanksource/recon/internal/auth"
 	"github.com/flanksource/recon/internal/discovery"
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
@@ -94,11 +95,11 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		return api.Scan{}, err
 	}
 
-	return r.startScan(ctx, opts.scanFlags, target)
+	return r.startScan(ctx, opts.scanFlags, target, scan.Creator{UserID: auth.UserID(ctx)})
 }
 
 // startScan shares target lookup, discovery and scan submission between manual runs and schedules.
-func (r *Registry) startScan(ctx context.Context, opts scanFlags, target resolvedTarget) (api.Scan, error) {
+func (r *Registry) startScan(ctx context.Context, opts scanFlags, target resolvedTarget, creator scan.Creator) (api.Scan, error) {
 	var err error
 	if opts.Profile, err = defaultProfile(opts.Engine, opts.Profile); err != nil {
 		return api.Scan{}, err
@@ -118,7 +119,7 @@ func (r *Registry) startScan(ctx context.Context, opts scanFlags, target resolve
 		return api.Scan{}, err
 	}
 	if direct {
-		return r.submitScan(ctx, opts, directSelector, scanConfig)
+		return r.submitScan(ctx, opts, directSelector, scanConfig, creator)
 	}
 	if r.Runtimes.Discovery == nil {
 		return api.Scan{}, fmt.Errorf("this build cannot run discovery before scanning")
@@ -168,7 +169,7 @@ func (r *Registry) startScan(ctx context.Context, opts scanFlags, target resolve
 		}
 	}
 
-	return r.submitScan(ctx, opts, scanSelector, scanConfig)
+	return r.submitScan(ctx, opts, scanSelector, scanConfig, creator)
 }
 
 // accountSelector resolves the run's targeting onto cloud accounts.
@@ -238,11 +239,13 @@ func (r *Registry) submitScan(
 	opts scanFlags,
 	selector api.TargetSelector,
 	config map[string]any,
+	creator scan.Creator,
 ) (api.Scan, error) {
 	started, err := r.Runtimes.Scans.Start(ctx, scan.Request{
 		Engine:    opts.Engine,
 		Profile:   opts.Profile,
 		Selector:  selector,
+		Creator:   creator,
 		Overrides: config,
 		Confirmed: opts.Confirm,
 		NoMutes:   opts.NoMutes,

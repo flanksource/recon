@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +19,16 @@ const (
 	EnvSecretKey      = "CLERK_SECRET_KEY"
 	EnvOrganizationID = "CLERK_ORG_ID"
 )
+
+// UserID reads only the verified session carried by the HTTP auth middleware.
+// CLI and auth-disabled requests have no verified identity and return empty.
+func UserID(ctx context.Context) string {
+	claims, ok := clerk.SessionClaimsFromContext(ctx)
+	if !ok || claims == nil {
+		return ""
+	}
+	return claims.Subject
+}
 
 // Config identifies the Clerk instance and the only organization allowed to
 // use this deployment. All three values are optional together for local use.

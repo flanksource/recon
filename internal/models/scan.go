@@ -21,6 +21,10 @@ type Scan struct {
 	EngineVersion *string `gorm:"column:engine_version"`
 	Profile       string  `gorm:"column:profile"`
 
+	CreatorUserID       *string `gorm:"<-:create"`
+	CreatorScheduleID   *string `gorm:"<-:create"`
+	CreatorScheduleName *string `gorm:"<-:create"`
+
 	Selector      JSON[map[string]any] `gorm:"column:selector;type:jsonb"`
 	EndpointCount int                  `gorm:"column:endpoint_count"`
 
@@ -63,26 +67,29 @@ func (ScanOutput) TableName() string { return "scan_outputs" }
 // strings, so emitting an offset here would reorder the runs list.
 func (s Scan) Document(findings int, hosts []string, label string) api.Scan {
 	scan := api.Scan{
-		ID:            s.ID,
-		Name:          s.Name,
-		Engine:        s.Engine,
-		EngineVersion: deref(s.EngineVersion),
-		Profile:       s.Profile,
-		Selector:      s.Selector.Get(),
-		SelectorLabel: label,
-		EndpointCount: s.EndpointCount,
-		Phase:         api.Phase(s.Phase),
-		StartedAt:     localTimestamp(s.StartedAt),
-		DurationMS:    s.DurationMS,
-		Command:       stringSlice(s.Command),
-		ExitCode:      s.ExitCode,
-		Error:         deref(s.Error),
-		Findings:      findings,
-		Muted:         s.Muted,
-		Severities:    s.Severities.Get(),
-		Stats:         s.Stats.V,
-		Hosts:         hosts,
-		Result:        deref(s.ResultPath),
+		ID:                  s.ID,
+		Name:                s.Name,
+		Engine:              s.Engine,
+		EngineVersion:       deref(s.EngineVersion),
+		Profile:             s.Profile,
+		CreatorUserID:       deref(s.CreatorUserID),
+		CreatorScheduleID:   deref(s.CreatorScheduleID),
+		CreatorScheduleName: deref(s.CreatorScheduleName),
+		Selector:            s.Selector.Get(),
+		SelectorLabel:       label,
+		EndpointCount:       s.EndpointCount,
+		Phase:               api.Phase(s.Phase),
+		StartedAt:           localTimestamp(s.StartedAt),
+		DurationMS:          s.DurationMS,
+		Command:             stringSlice(s.Command),
+		ExitCode:            s.ExitCode,
+		Error:               deref(s.Error),
+		Findings:            findings,
+		Muted:               s.Muted,
+		Severities:          s.Severities.Get(),
+		Stats:               s.Stats.V,
+		Hosts:               hosts,
+		Result:              deref(s.ResultPath),
 	}
 	if s.FinishedAt != nil {
 		scan.FinishedAt = localTimestamp(*s.FinishedAt)

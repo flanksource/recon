@@ -59,7 +59,7 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			"checks", "connections", "discoveries", "discovery_hosts",
 			"engine_profiles", "finding_resources", "finding_states", "findings",
 			"mute_rules", "probe_results", "probes", "resources", "scan_outputs",
-			"scans", "targets", "zones",
+			"scan_schedules", "scans", "targets", "zones",
 		))
 	})
 

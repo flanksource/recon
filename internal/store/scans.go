@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/flanksource/commons/logger"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -17,16 +18,27 @@ import (
 
 // ScanOpts selects scan runs.
 type ScanOpts struct {
-	Engine   []string `flag:"engine" help:"Only runs of these engines"`
-	Profile  []string `flag:"profile" help:"Only runs of these profiles"`
-	Phase    []string `flag:"phase" help:"Only runs in these phases (idle, queued, running, done, failed, cancelled)"`
-	Severity []string `flag:"severity" help:"Only runs that found at least one finding of these severities"`
-	Since    string   `flag:"since" help:"Only runs started since this time (RFC3339 or a duration such as 24h)"`
-	Limit    int      `flag:"limit" help:"Most recent N runs" default:"100"`
+	CreatorUserID     string   `flag:"creator-user-id" help:"Only runs initiated by this Clerk user"`
+	CreatorScheduleID string   `flag:"creator-schedule-id" help:"Only runs initiated by this immutable schedule ID"`
+	Engine            []string `flag:"engine" help:"Only runs of these engines"`
+	Profile           []string `flag:"profile" help:"Only runs of these profiles"`
+	Phase             []string `flag:"phase" help:"Only runs in these phases (idle, queued, running, done, failed, cancelled)"`
+	Severity          []string `flag:"severity" help:"Only runs that found at least one finding of these severities"`
+	Since             string   `flag:"since" help:"Only runs started since this time (RFC3339 or a duration such as 24h)"`
+	Limit             int      `flag:"limit" help:"Most recent N runs" default:"100"`
 }
 
 // Scope pushes the selector into SQL.
 func (o ScanOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
+	if o.CreatorUserID != "" {
+		db = db.Where("creator_user_id = ?", o.CreatorUserID)
+	}
+	if o.CreatorScheduleID != "" {
+		if _, err := uuid.Parse(o.CreatorScheduleID); err != nil {
+			return nil, fmt.Errorf("creator-schedule-id must be a UUID")
+		}
+		db = db.Where("creator_schedule_id = ?", o.CreatorScheduleID)
+	}
 	if len(o.Engine) > 0 {
 		db = db.Where("engine = ANY(?)", stringArray(o.Engine))
 	}
@@ -61,8 +73,15 @@ func (s *Store) ListScans(ctx context.Context, opts ScanOpts) ([]api.Scan, error
 		query = query.Limit(opts.Limit)
 	}
 
+	// A queued run's started_at moves when execution starts; schedule history
+	// follows admission order so its latest scan cannot change as the queue drains.
+	if opts.CreatorScheduleID != "" {
+		query = query.Order("created_at DESC, id DESC")
+	} else {
+		query = query.Order("started_at DESC")
+	}
 	var rows []models.Scan
-	if err := query.Order("started_at DESC").Find(&rows).Error; err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list scans: %w", err)
 	}
 
