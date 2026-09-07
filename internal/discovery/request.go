@@ -30,7 +30,7 @@ func requiredEngines(mode string, enumerates bool) []string {
 }
 
 func discoveryInput(opts Options) map[string]any {
-	input := make(map[string]any, len(opts.Input)+3)
+	input := make(map[string]any, len(opts.Input))
 	for key, value := range opts.Input {
 		input[key] = value
 	}
