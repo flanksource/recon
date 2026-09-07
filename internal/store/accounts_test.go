@@ -63,14 +63,14 @@ var _ = Describe("provider contexts and network targets", Ordered, Label("db"), 
 	}
 
 	It("never resolves provider contexts to network addresses", func() {
-		endpoints, err := st.Endpoints(ctx, store.TargetOpts{})
+		endpoints, err := st.Endpoints(ctx, api.TargetSelector{})
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(names(endpoints)).To(Equal([]string{liveHost}))
 	})
 
 	It("keeps the compatibility GCP account projection provider-scoped", func() {
-		accounts, err := st.Accounts(ctx, store.TargetOpts{})
+		accounts, err := st.Accounts(ctx, api.TargetSelector{})
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(names(accounts)).To(Equal([]string{prodProject, sandboxProject}))
@@ -81,21 +81,21 @@ var _ = Describe("provider contexts and network targets", Ordered, Label("db"), 
 	})
 
 	It("selects an account by stable context ID", func() {
-		accounts, err := st.Accounts(ctx, store.TargetOpts{IDs: []string{sandboxContext}})
+		accounts, err := st.Accounts(ctx, api.TargetSelector{IDs: []string{sandboxContext}})
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(names(accounts)).To(Equal([]string{sandboxProject}))
 	})
 
 	It("carries class through for the risk gate", func() {
-		accounts, err := st.Accounts(ctx, store.TargetOpts{})
+		accounts, err := st.Accounts(ctx, api.TargetSelector{})
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(store.Hosts(store.Risky(accounts))).To(Equal([]string{prodProject}))
 	})
 
 	It("filters generic contexts by provider and kind", func() {
-		found, err := st.ListTargets(ctx, store.TargetOpts{
+		found, err := st.ListTargets(ctx, api.TargetSelector{
 			Kind: []string{string(api.KindProviderContext)}, Provider: []string{"github"},
 		})
 
@@ -105,7 +105,7 @@ var _ = Describe("provider contexts and network targets", Ordered, Label("db"), 
 	})
 
 	It("rejects an explicit context for the wrong provider", func() {
-		_, err := st.Accounts(ctx, store.TargetOpts{IDs: []string{"github-production"}})
+		_, err := st.Accounts(ctx, api.TargetSelector{IDs: []string{"github-production"}})
 
 		Expect(err).To(MatchError(ContainSubstring("uses provider github, not gcp")))
 	})

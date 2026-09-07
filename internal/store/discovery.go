@@ -28,7 +28,7 @@ func (s *Store) ListDiscoveries(ctx context.Context, opts DiscoverOpts) ([]api.D
 		query = query.Where("chain = ANY(?)", stringArray(opts.Chain))
 	}
 	if opts.Since != "" {
-		since, err := parseSince(opts.Since)
+		since, err := api.ParseSince(opts.Since)
 		if err != nil {
 			return nil, err
 		}

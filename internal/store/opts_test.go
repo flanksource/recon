@@ -40,7 +40,7 @@ func tags(values ...string) func(*api.TargetDocument) {
 // says what --kind accepts, so this is what keeps it true.
 var _ = Describe("the kind flag's help text", func() {
 	It("names every kind the filter actually accepts", func() {
-		field, found := reflect.TypeOf(store.TargetOpts{}).FieldByName("Kind")
+		field, found := reflect.TypeOf(api.TargetSelector{}).FieldByName("Kind")
 		Expect(found).To(BeTrue())
 
 		help := field.Tag.Get("help")
@@ -136,7 +136,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 		}
 	})
 
-	hosts := func(opts store.TargetOpts) []string {
+	hosts := func(opts api.TargetSelector) []string {
 		found, err := st.ListTargets(ctx, opts)
 		Expect(err).ToNot(HaveOccurred())
 		var names []string
@@ -147,23 +147,23 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 	}
 
 	It("returns everything when nothing is selected", func() {
-		Expect(hosts(store.TargetOpts{})).To(HaveLen(5))
+		Expect(hosts(api.TargetSelector{})).To(HaveLen(5))
 	})
 
 	It("filters by class", func() {
-		Expect(hosts(store.TargetOpts{Class: []string{"non-prod"}})).
+		Expect(hosts(api.TargetSelector{Class: []string{"non-prod"}})).
 			To(Equal([]string{"b.example.test", "c.example.test"}))
 	})
 
 	It("treats several classes as any-of", func() {
-		Expect(hosts(store.TargetOpts{Class: []string{"prod", "deactivated"}})).
+		Expect(hosts(api.TargetSelector{Class: []string{"prod", "deactivated"}})).
 			To(Equal([]string{"a.example.test", "d.example.test"}))
 	})
 
 	It("filters by tag, matching any", func() {
-		Expect(hosts(store.TargetOpts{Tags: []string{"http"}})).
+		Expect(hosts(api.TargetSelector{Tags: []string{"http"}})).
 			To(Equal([]string{"a.example.test", "b.example.test"}))
-		Expect(hosts(store.TargetOpts{Tags: []string{"edge", "internal"}})).
+		Expect(hosts(api.TargetSelector{Tags: []string{"edge", "internal"}})).
 			To(Equal([]string{"a.example.test", "c.example.test"}))
 	})
 
@@ -172,108 +172,108 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 	// template filter, or the same chip would mean two different things
 	// depending on which listing it is on.
 	It("excludes a tag prefixed with !", func() {
-		Expect(hosts(store.TargetOpts{Tags: []string{"!http"}})).
+		Expect(hosts(api.TargetSelector{Tags: []string{"!http"}})).
 			To(Equal([]string{"c.example.test", "d.example.test", "e.example.test"}))
 	})
 
 	It("drops a target carrying an excluded tag even when another tag was included", func() {
-		Expect(hosts(store.TargetOpts{Tags: []string{"http", "!edge"}})).
+		Expect(hosts(api.TargetSelector{Tags: []string{"http", "!edge"}})).
 			To(Equal([]string{"b.example.test"}))
 	})
 
 	It("keeps a target with no tags at all out of the way of an exclusion", func() {
 		// d has no tags, so "not tagged edge" is true of it.
-		Expect(hosts(store.TargetOpts{Tags: []string{"!edge"}})).
+		Expect(hosts(api.TargetSelector{Tags: []string{"!edge"}})).
 			To(ContainElement("d.example.test"))
 	})
 
 	It("filters tags with Kubernetes selector semantics", func() {
-		Expect(hosts(store.TargetOpts{Selector: "http,env=prod,tier in (frontend,api)"})).
+		Expect(hosts(api.TargetSelector{Selector: "http,env=prod,tier in (frontend,api)"})).
 			To(Equal([]string{"a.example.test"}))
-		Expect(hosts(store.TargetOpts{Selector: "!edge,env,env!=prod"})).
+		Expect(hosts(api.TargetSelector{Selector: "!edge,env,env!=prod"})).
 			To(Equal([]string{"b.example.test"}))
 	})
 
 	It("rejects an invalid Kubernetes selector", func() {
-		_, err := st.ListTargets(ctx, store.TargetOpts{Selector: "env in ("})
+		_, err := st.ListTargets(ctx, api.TargetSelector{Selector: "env in ("})
 		Expect(err).To(MatchError(ContainSubstring("selector")))
 	})
 
 	It("filters by assigned profile", func() {
-		Expect(hosts(store.TargetOpts{Profiles: []string{"scan:nuclei:full"}})).
+		Expect(hosts(api.TargetSelector{Profiles: []string{"scan:nuclei:full"}})).
 			To(Equal([]string{"b.example.test"}))
 	})
 
 	It("combines predicates with AND", func() {
-		Expect(hosts(store.TargetOpts{Class: []string{"non-prod"}, Tags: []string{"http"}})).
+		Expect(hosts(api.TargetSelector{Class: []string{"non-prod"}, Tags: []string{"http"}})).
 			To(Equal([]string{"b.example.test"}))
 	})
 
 	It("filters by curated port", func() {
-		Expect(hosts(store.TargetOpts{Ports: []int{22}})).To(Equal([]string{"c.example.test"}))
+		Expect(hosts(api.TargetSelector{Ports: []int{22}})).To(Equal([]string{"c.example.test"}))
 	})
 
 	It("filters by last HTTP status", func() {
-		Expect(hosts(store.TargetOpts{Status: []int{403}})).To(Equal([]string{"b.example.test"}))
+		Expect(hosts(api.TargetSelector{Status: []int{403}})).To(Equal([]string{"b.example.test"}))
 	})
 
 	// e.example.test still carries the 200 from its last good probe, so a filter
 	// that only asked for a status code would call a host that no longer resolves
 	// live.
 	It("filters to hosts that answered, excluding one whose last probe failed", func() {
-		Expect(hosts(store.TargetOpts{Live: true})).
+		Expect(hosts(api.TargetSelector{Live: true})).
 			To(Equal([]string{"a.example.test", "b.example.test"}))
 	})
 
 	It("filters by why the last probe failed", func() {
-		Expect(hosts(store.TargetOpts{Failure: []string{"dns"}})).
+		Expect(hosts(api.TargetSelector{Failure: []string{"dns"}})).
 			To(Equal([]string{"e.example.test"}))
-		Expect(hosts(store.TargetOpts{Failure: []string{"refused"}})).To(BeEmpty())
+		Expect(hosts(api.TargetSelector{Failure: []string{"refused"}})).To(BeEmpty())
 	})
 
 	It("treats several failure kinds as any-of", func() {
-		Expect(hosts(store.TargetOpts{Failure: []string{"dns", "timeout"}})).
+		Expect(hosts(api.TargetSelector{Failure: []string{"dns", "timeout"}})).
 			To(Equal([]string{"e.example.test"}))
 	})
 
 	It("rejects a failure kind the prober cannot produce", func() {
-		_, err := st.ListTargets(ctx, store.TargetOpts{Failure: []string{"gremlins"}})
+		_, err := st.ListTargets(ctx, api.TargetSelector{Failure: []string{"gremlins"}})
 		Expect(err).To(MatchError(ContainSubstring(`unknown failure "gremlins"`)))
 	})
 
 	It("filters by an absolute last-seen time", func() {
-		Expect(hosts(store.TargetOpts{LastSeen: "2026-06-01T00:00:00Z"})).
+		Expect(hosts(api.TargetSelector{LastSeen: "2026-06-01T00:00:00Z"})).
 			To(Equal([]string{"a.example.test", "e.example.test"}))
 	})
 
 	It("names an exact set of hosts", func() {
-		Expect(hosts(store.TargetOpts{Hosts: []string{"c.example.test", "a.example.test"}})).
+		Expect(hosts(api.TargetSelector{Hosts: []string{"c.example.test", "a.example.test"}})).
 			To(Equal([]string{"a.example.test", "c.example.test"}), "results stay host-ordered")
 	})
 
 	It("rejects a class that cannot match rather than returning nothing", func() {
 		// Silently returning zero rows reads as "the inventory is empty", which
 		// is the wrong conclusion to hand someone about to run a scan.
-		_, err := st.ListTargets(ctx, store.TargetOpts{Class: []string{"staging"}})
+		_, err := st.ListTargets(ctx, api.TargetSelector{Class: []string{"staging"}})
 		Expect(err).To(MatchError(ContainSubstring(`unknown class "staging"`)))
 	})
 
 	It("rejects malformed stable IDs and provider names", func() {
-		_, err := st.ListTargets(ctx, store.TargetOpts{IDs: []string{"gcp/project"}})
+		_, err := st.ListTargets(ctx, api.TargetSelector{IDs: []string{"gcp/project"}})
 		Expect(err).To(MatchError(ContainSubstring("invalid target id")))
 
-		_, err = st.ListTargets(ctx, store.TargetOpts{Provider: []string{"GCP"}})
+		_, err = st.ListTargets(ctx, api.TargetSelector{Provider: []string{"GCP"}})
 		Expect(err).To(MatchError(ContainSubstring("invalid provider")))
 	})
 
 	It("rejects an impossible port", func() {
-		_, err := st.ListTargets(ctx, store.TargetOpts{Ports: []int{0}})
+		_, err := st.ListTargets(ctx, api.TargetSelector{Ports: []int{0}})
 		Expect(err).To(MatchError(ContainSubstring("out of range")))
 	})
 
 	Describe("resolving to endpoints", func() {
 		It("prefers the url that actually answered", func() {
-			found, err := st.Endpoints(ctx, store.TargetOpts{Hosts: []string{"a.example.test"}})
+			found, err := st.Endpoints(ctx, api.TargetSelector{Hosts: []string{"a.example.test"}})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(found).To(HaveLen(1))
 			Expect(found[0].URL).To(Equal("https://a.example.test"))
@@ -281,7 +281,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 		})
 
 		It("expands a host with several open ports into several endpoints", func() {
-			found, err := st.Endpoints(ctx, store.TargetOpts{Hosts: []string{"b.example.test"}})
+			found, err := st.Endpoints(ctx, api.TargetSelector{Hosts: []string{"b.example.test"}})
 			Expect(err).ToNot(HaveOccurred())
 
 			var urls []string
@@ -295,14 +295,14 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 		})
 
 		It("uses a curated port when nothing has answered", func() {
-			found, err := st.Endpoints(ctx, store.TargetOpts{Hosts: []string{"c.example.test"}})
+			found, err := st.Endpoints(ctx, api.TargetSelector{Hosts: []string{"c.example.test"}})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(found).To(HaveLen(1))
 			Expect(found[0].Port).To(Equal(22))
 		})
 
 		It("narrows to the ports the selector named", func() {
-			found, err := st.Endpoints(ctx, store.TargetOpts{
+			found, err := st.Endpoints(ctx, api.TargetSelector{
 				Hosts: []string{"b.example.test"}, Ports: []int{8443},
 			})
 			Expect(err).ToNot(HaveOccurred())
@@ -311,7 +311,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 		})
 
 		It("names the endpoints an intrusive scan would need confirming", func() {
-			found, err := st.Endpoints(ctx, store.TargetOpts{Live: true})
+			found, err := st.Endpoints(ctx, api.TargetSelector{Live: true})
 			Expect(err).ToNot(HaveOccurred())
 
 			risky := store.Risky(found)
@@ -323,7 +323,7 @@ var _ = Describe("the target selector", Ordered, Label("db"), func() {
 
 var _ = Describe("stored target selectors", func() {
 	It("rejects a stored selector with the wrong field type", func() {
-		_, err := store.TargetOptsFrom(map[string]any{"ports": "not-a-list"})
+		_, err := api.ParseTargetSelector(map[string]any{"ports": "not-a-list"})
 		Expect(err).To(MatchError(ContainSubstring("decode stored target selector")))
 	})
 
@@ -333,12 +333,12 @@ var _ = Describe("stored target selectors", func() {
 	// nothing in the result says so. The near-miss is the realistic case,
 	// because the flag is `--id` while the stored field is `ids`.
 	It("rejects a key the selector does not define rather than ignoring it", func() {
-		_, err := store.TargetOptsFrom(map[string]any{"id": []string{"t-1"}})
+		_, err := api.ParseTargetSelector(map[string]any{"id": []string{"t-1"}})
 		Expect(err).To(MatchError(ContainSubstring(`unknown field "id"`)))
 	})
 
 	It("accepts every key the selector does define", func() {
-		opts, err := store.TargetOptsFrom(map[string]any{
+		opts, err := api.ParseTargetSelector(map[string]any{
 			"ids": []string{"t-1"}, "kind": []string{"host"}, "provider": []string{"aws"},
 			"class": []string{"non-prod"}, "tags": []string{"env=dev"},
 			"profiles": []string{"web"}, "hosts": []string{"a.example.test"},
@@ -354,21 +354,21 @@ var _ = Describe("stored target selectors", func() {
 
 var _ = Describe("Kubernetes tag selectors", func() {
 	It("matches bare and key-value tags with label-selector semantics", func() {
-		matches, err := (store.TargetOpts{Selector: "http,env=prod,tier in (frontend,api)"}).
+		matches, err := (api.TargetSelector{Selector: "http,env=prod,tier in (frontend,api)"}).
 			MatchesTags([]string{"http", "env=prod", "tier=frontend"})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(matches).To(BeTrue())
 	})
 
 	It("supports absence, existence and inequality requirements", func() {
-		matches, err := (store.TargetOpts{Selector: "!edge,env,env!=prod"}).
+		matches, err := (api.TargetSelector{Selector: "!edge,env,env!=prod"}).
 			MatchesTags([]string{"env=staging", "tier=api"})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(matches).To(BeTrue())
 	})
 
 	It("rejects conflicting values for one label key", func() {
-		_, err := (store.TargetOpts{Selector: "env"}).MatchesTags([]string{"env=prod", "env=staging"})
+		_, err := (api.TargetSelector{Selector: "env"}).MatchesTags([]string{"env=prod", "env=staging"})
 		Expect(err).To(MatchError(`conflicting values for tag "env"`))
 	})
 })

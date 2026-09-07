@@ -94,6 +94,12 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		return api.Scan{}, err
 	}
 
+	return r.startScan(ctx, opts.scanFlags, target)
+}
+
+// startScan shares target lookup, discovery and scan submission between manual runs and schedules.
+func (r *Registry) startScan(ctx context.Context, opts scanFlags, target resolvedTarget) (api.Scan, error) {
+	var err error
 	if opts.Profile, err = defaultProfile(opts.Engine, opts.Profile); err != nil {
 		return api.Scan{}, err
 	}
@@ -112,7 +118,7 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		return api.Scan{}, err
 	}
 	if direct {
-		return r.startScan(ctx, opts, directSelector, scanConfig)
+		return r.submitScan(ctx, opts, directSelector, scanConfig)
 	}
 	if r.Runtimes.Discovery == nil {
 		return api.Scan{}, fmt.Errorf("this build cannot run discovery before scanning")
@@ -162,7 +168,7 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 		}
 	}
 
-	return r.startScan(ctx, opts, scanSelector, scanConfig)
+	return r.submitScan(ctx, opts, scanSelector, scanConfig)
 }
 
 // accountSelector resolves the run's targeting onto cloud accounts.
@@ -170,7 +176,7 @@ func (r *Registry) scanSelection(ctx context.Context, opts scanRunOpts) (api.Sca
 // An explicit --host names accounts directly. For an endpoint scan the same
 // flag feeds discovery, which then reports back which hosts it found; there is
 // no such step here, so the names go straight into the selector.
-func accountSelector(target resolvedTarget) (store.TargetOpts, error) {
+func accountSelector(target resolvedTarget) (api.TargetSelector, error) {
 	if !target.explicit() {
 		return target.Inventory, nil
 	}
@@ -178,18 +184,18 @@ func accountSelector(target resolvedTarget) (store.TargetOpts, error) {
 	// describes a cloud account, and silently ignoring them would run against
 	// the whole inventory instead of the nothing they actually name.
 	if len(target.Domains) > 0 || len(target.CIDRs) > 0 {
-		return store.TargetOpts{}, fmt.Errorf(
+		return api.TargetSelector{}, fmt.Errorf(
 			"--domain and --cidr enumerate network addresses and cannot name a cloud account: use --host or an inventory filter")
 	}
-	return store.TargetOpts{Hosts: target.Hosts}, nil
+	return api.TargetSelector{Hosts: target.Hosts}, nil
 }
 
 // directScanSelector bypasses network discovery for subjects that are already
 // stable inventory records rather than addresses discovery can enumerate.
-func directScanSelector(name string, target resolvedTarget) (store.TargetOpts, bool, error) {
+func directScanSelector(name string, target resolvedTarget) (api.TargetSelector, bool, error) {
 	engine, err := enginescan.Get(name)
 	if err != nil {
-		return store.TargetOpts{}, false, err
+		return api.TargetSelector{}, false, err
 	}
 	switch engine.Spec().Subject {
 	case engines.SubjectAccounts:
@@ -197,12 +203,12 @@ func directScanSelector(name string, target resolvedTarget) (store.TargetOpts, b
 		return selector, true, err
 	case engines.SubjectProviderContexts:
 		if target.explicit() {
-			return store.TargetOpts{}, false, fmt.Errorf(
+			return api.TargetSelector{}, false, fmt.Errorf(
 				"--host, --domain and --cidr name network inputs and cannot name a provider context: use --id or an inventory filter")
 		}
 		return target.Inventory, true, nil
 	default:
-		return store.TargetOpts{}, false, nil
+		return api.TargetSelector{}, false, nil
 	}
 }
 
@@ -226,11 +232,11 @@ func defaultProfile(engineName, chosen string) (string, error) {
 	return name, nil
 }
 
-// startScan queues the run and, unless the caller asked not to, waits for it.
-func (r *Registry) startScan(
+// submitScan queues the run and waits for completion only when opts.Wait is set.
+func (r *Registry) submitScan(
 	ctx context.Context,
-	opts scanRunOpts,
-	selector store.TargetOpts,
+	opts scanFlags,
+	selector api.TargetSelector,
 	config map[string]any,
 ) (api.Scan, error) {
 	started, err := r.Runtimes.Scans.Start(ctx, scan.Request{
@@ -289,7 +295,7 @@ func (r *Registry) discoverSelection(ctx context.Context, opts discoverRunOpts) 
 	return r.Runtimes.Discovery.Run(ctx, options)
 }
 
-func (r *Registry) inventoryHosts(ctx context.Context, opts store.TargetOpts) ([]string, error) {
+func (r *Registry) inventoryHosts(ctx context.Context, opts api.TargetSelector) ([]string, error) {
 	st, err := r.store()
 	if err != nil {
 		return nil, err
@@ -317,12 +323,12 @@ func discoveredHostNames(hosts []api.DiscoveredHost) []string {
 	return uniqueStrings(names)
 }
 
-func scanSelectorFromDiscovery(hosts []string) (store.TargetOpts, error) {
+func scanSelectorFromDiscovery(hosts []string) (api.TargetSelector, error) {
 	hosts = uniqueStrings(hosts)
 	if len(hosts) == 0 {
-		return store.TargetOpts{}, fmt.Errorf("explicit discovery found no targets to scan")
+		return api.TargetSelector{}, fmt.Errorf("explicit discovery found no targets to scan")
 	}
-	return store.TargetOpts{Hosts: hosts}, nil
+	return api.TargetSelector{Hosts: hosts}, nil
 }
 
 // Preview resolves a selector to the endpoints a scan would contact, without
@@ -330,7 +336,7 @@ func scanSelectorFromDiscovery(hosts []string) (store.TargetOpts, error) {
 //
 // This exists to be looked at before a run: "which endpoints does this hit" has
 // to be answerable in advance, or an intrusive scan can surprise someone.
-func (r *Registry) Preview(ctx context.Context, opts store.TargetOpts) (Selection, error) {
+func (r *Registry) Preview(ctx context.Context, opts api.TargetSelector) (Selection, error) {
 	st, err := r.store()
 	if err != nil {
 		return Selection{}, err

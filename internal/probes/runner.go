@@ -31,7 +31,7 @@ type Runner struct {
 // which targets a selector matches is the caller's question, and answering it
 // twice would let the run and its record disagree.
 type Options struct {
-	Selector        store.TargetOpts
+	Selector        api.TargetSelector
 	Hosts           []string
 	Timeout         time.Duration
 	Concurrency     int

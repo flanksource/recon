@@ -25,8 +25,7 @@ type ProviderContext struct {
 // that would make a requested scope look clean without ever scanning it.
 func (s *Store) ProviderContexts(
 	ctx context.Context,
-	opts TargetOpts,
-	provider string,
+	opts api.TargetSelector, provider string,
 ) ([]ProviderContext, error) {
 	if provider == "" {
 		return nil, fmt.Errorf("provider is required to resolve provider contexts")

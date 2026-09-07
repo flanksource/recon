@@ -175,18 +175,18 @@ func also(base values, extra ...string) values {
 	}
 }
 
-func (r *Registry) targetFilters() []clicky.Filter[store.TargetOpts] {
-	return []clicky.Filter[store.TargetOpts]{
-		filter[store.TargetOpts]{key: "id", label: "Target", values: r.vocabulary(store.TargetIDs)},
-		filter[store.TargetOpts]{key: "kind", label: "Kind", values: fixed(targetKindNames()...)},
-		filter[store.TargetOpts]{key: "provider", label: "Provider", values: r.vocabulary(store.TargetProviders)},
-		filter[store.TargetOpts]{key: "class", label: "Class", values: fixed(classNames()...)},
-		filter[store.TargetOpts]{key: "tags", label: "Tags", values: r.vocabulary(store.TargetTags)},
-		filter[store.TargetOpts]{key: "profiles", label: "Profiles", values: r.vocabulary(store.TargetProfiles)},
-		filter[store.TargetOpts]{key: "hosts", label: "Host", values: r.vocabulary(store.TargetHosts)},
-		filter[store.TargetOpts]{key: "ports", label: "Port", values: r.vocabulary(store.TargetPorts)},
-		filter[store.TargetOpts]{key: "status", label: "HTTP status", values: r.vocabulary(store.TargetStatus)},
-		filter[store.TargetOpts]{key: "failure", label: "Failure", values: fixed(failureNames()...)},
+func (r *Registry) targetFilters() []clicky.Filter[api.TargetSelector] {
+	return []clicky.Filter[api.TargetSelector]{
+		filter[api.TargetSelector]{key: "id", label: "Target", values: r.vocabulary(store.TargetIDs)},
+		filter[api.TargetSelector]{key: "kind", label: "Kind", values: fixed(targetKindNames()...)},
+		filter[api.TargetSelector]{key: "provider", label: "Provider", values: r.vocabulary(store.TargetProviders)},
+		filter[api.TargetSelector]{key: "class", label: "Class", values: fixed(classNames()...)},
+		filter[api.TargetSelector]{key: "tags", label: "Tags", values: r.vocabulary(store.TargetTags)},
+		filter[api.TargetSelector]{key: "profiles", label: "Profiles", values: r.vocabulary(store.TargetProfiles)},
+		filter[api.TargetSelector]{key: "hosts", label: "Host", values: r.vocabulary(store.TargetHosts)},
+		filter[api.TargetSelector]{key: "ports", label: "Port", values: r.vocabulary(store.TargetPorts)},
+		filter[api.TargetSelector]{key: "status", label: "HTTP status", values: r.vocabulary(store.TargetStatus)},
+		filter[api.TargetSelector]{key: "failure", label: "Failure", values: fixed(failureNames()...)},
 	}
 }
 

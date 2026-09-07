@@ -19,7 +19,7 @@ var muteNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // removed which line of the engine's own output.
 //
 // The dimensions are ANDed and the values within one are ORed — the semantics
-// TargetOpts already documents. An empty dimension is unconstrained rather than
+// TargetSelector already documents. An empty dimension is unconstrained rather than
 // unsatisfiable; a rule that constrains nothing at all is refused rather than
 // stored, because the failure mode of an accidentally universal mute is a clean
 // scan that is not clean.
@@ -39,9 +39,8 @@ type MuteRule struct {
 	// own it selects no finding. Empty means every scan engine.
 	Engines StringList `json:"engines,omitempty"`
 
-	// Targets is a store.TargetOpts selector over the inventory — which
-	// subjects. Carried as a map because internal/api may not import the store;
-	// store.TargetOptsFrom decodes it, the same arrangement as Scan.Selector.
+	// Targets identifies inventory subjects. ParseTargetSelector validates this
+	// JSON-shaped map, using the same representation as Scan.Selector.
 	Targets map[string]any `json:"targets,omitempty"`
 
 	// Resources are globs over the resource the evidence names, which is not the

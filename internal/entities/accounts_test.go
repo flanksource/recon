@@ -4,8 +4,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/flanksource/recon/internal/api"
 	_ "github.com/flanksource/recon/internal/engines/all"
-	"github.com/flanksource/recon/internal/store"
 )
 
 var _ = Describe("routing a scan by what its engine audits", func() {
@@ -18,7 +18,7 @@ var _ = Describe("routing a scan by what its engine audits", func() {
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(direct).To(BeTrue())
-			Expect(selector).To(Equal(store.TargetOpts{IDs: []string{"gcp-prod"}}))
+			Expect(selector).To(Equal(api.TargetSelector{IDs: []string{"gcp-prod"}}))
 		})
 
 		It("sends a cloud account engine down the direct path", func() {
@@ -74,7 +74,7 @@ var _ = Describe("routing a scan by what its engine audits", func() {
 			target, err := (runTarget{Host: []string{project}}).resolve()
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(accountSelector(target)).To(Equal(store.TargetOpts{Hosts: []string{project}}))
+			Expect(accountSelector(target)).To(Equal(api.TargetSelector{Hosts: []string{project}}))
 		})
 
 		DescribeTable("refuses input that names network addresses",

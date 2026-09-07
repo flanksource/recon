@@ -36,7 +36,7 @@ func (r *Runtime) subjects(
 	ctx context.Context,
 	spec engines.Spec,
 	config map[string]any,
-	selector store.TargetOpts,
+	selector api.TargetSelector,
 ) (resolvedSubjects, error) {
 	if spec.Subject == engines.SubjectProviderContexts {
 		provider, _ := config["provider"].(string)

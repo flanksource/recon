@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/engines"
 	enginescan "github.com/flanksource/recon/internal/engines/scan"
 	"github.com/flanksource/recon/internal/mute"
-	"github.com/flanksource/recon/internal/store"
 )
 
 // describeTargets renders a rule's inventory scope as the sentence the selector
@@ -17,7 +17,7 @@ func describeTargets(rule mute.Rule) string {
 	if len(rule.Targets) == 0 && !rule.Scoped() {
 		return ""
 	}
-	opts, err := store.TargetOptsFrom(rule.MuteRule.Targets)
+	opts, err := api.ParseTargetSelector(rule.MuteRule.Targets)
 	if err != nil {
 		return ""
 	}

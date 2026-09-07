@@ -108,7 +108,7 @@ func (r *Registry) previewMute(ctx context.Context, name string, opts mutePrevie
 
 	rule := mute.Rule{MuteRule: stored}
 	if len(stored.Targets) > 0 {
-		selector, err := store.TargetOptsFrom(stored.Targets)
+		selector, err := api.ParseTargetSelector(stored.Targets)
 		if err != nil {
 			return api.MutePreview{}, fmt.Errorf("mute rule %s targets: %w", name, err)
 		}

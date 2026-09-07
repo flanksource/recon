@@ -33,7 +33,7 @@ func (o ProbeOpts) Scope(db *gorm.DB) (*gorm.DB, error) {
 			stringArray(o.Host))
 	}
 	if o.Since != "" {
-		since, err := parseSince(o.Since)
+		since, err := api.ParseSince(o.Since)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +147,7 @@ func (s *Store) GetProbe(ctx context.Context, id string) (api.ProbeRun, error) {
 // shows. Derived rather than stored, matching scans: a change to how selectors
 // read does not need a migration.
 func probeSelectorLabel(row models.Probe) (string, error) {
-	opts, err := TargetOptsFrom(row.Selector.Get())
+	opts, err := api.ParseTargetSelector(row.Selector.Get())
 	if err != nil {
 		return "", fmt.Errorf("probe %s selector: %w", row.ID, err)
 	}
