@@ -27,6 +27,10 @@ Leaving all three unset preserves the unauthenticated local workflow. Supplying 
 
 The browser automatically activates the configured organization after sign-in. The backend still verifies the organization claim on every API request; frontend gating is only the user experience, not the security boundary. All accepted organization members currently have the same access—there is no role-based authorization or local user/membership storage.
 
+Disable **Allow user-created organizations** in the Clerk instance for this single-organization deployment. With no memberships or pending invitations, Clerk then displays its built-in administrator-invitation warning and sign-out action instead of organization creation. Existing memberships are checked against the configured tenant; Recon never creates a membership automatically.
+
+Sign-in and sign-up use Clerk's prebuilt components on `/` and `/sign-up`. Organization invitations can use the deployment's root URL as their `redirect_url`; Clerk handles the invitation ticket and acceptance flow. Other session tasks, including password reset and MFA setup, remain in Clerk's prebuilt flow.
+
 ## Routes
 
 - `/` redirects to `/inventory`.

@@ -1,6 +1,17 @@
 // The serving Recon process supplies Clerk's public runtime configuration, so
 // one frontend build can be reused by every tenant deployment.
-import { ClerkProvider, SignIn, UserButton, useAuth, useClerk } from "@clerk/react";
+import {
+  ClerkProvider,
+  SignIn,
+  SignOutButton,
+  SignUp,
+  UserButton,
+  useAuth,
+  useClerk,
+  useSession,
+  useUser,
+} from "@clerk/react";
+import { Button } from "@flanksource/clicky-ui/components";
 import { useEffect, useState, type ReactNode } from "react";
 import { App } from "./App";
 
@@ -70,7 +81,14 @@ export function AuthenticatedApp() {
   if (!state.config.enabled) return <App />;
 
   return (
-    <ClerkProvider publishableKey={state.config.publishableKey} afterSignOutUrl="/">
+    <ClerkProvider
+      publishableKey={state.config.publishableKey}
+      signInUrl="/"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
+      afterSignOutUrl="/"
+    >
       <TenantGate organizationId={state.config.organizationId} />
     </ClerkProvider>
   );
@@ -78,11 +96,17 @@ export function AuthenticatedApp() {
 
 function TenantGate({ organizationId }: { organizationId: string }) {
   const { isLoaded, isSignedIn } = useAuth();
+  const { session } = useSession();
+  const { user } = useUser();
+  const pendingOrganizationMember =
+    session?.status === "pending" &&
+    session.currentTask?.key === "choose-organization" &&
+    (user?.organizationMemberships.length ?? 0) > 0;
 
   if (!isLoaded) return <FullPageMessage>Loading session…</FullPageMessage>;
-  if (!isSignedIn) {
+  if (!isSignedIn && !pendingOrganizationMember) {
     return (
-      <main className="flex h-full items-center justify-center bg-muted/30 p-6">
+      <main className="flex min-h-full items-center justify-center bg-muted/30 p-6">
         <div className="flex flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-2xl font-semibold text-foreground">Recon</h1>
@@ -90,13 +114,17 @@ function TenantGate({ organizationId }: { organizationId: string }) {
               Sign in to access this tenant’s security inventory.
             </p>
           </div>
-          <SignIn routing="hash" />
+          {window.location.pathname === "/sign-up" ? (
+            <SignUp routing="hash" />
+          ) : (
+            <SignIn routing="hash" />
+          )}
         </div>
       </main>
     );
   }
 
-  return <OrganizationGate organizationId={organizationId} />;
+  return <OrganizationGate key={session?.id} organizationId={organizationId} />;
 }
 
 function OrganizationGate({ organizationId }: { organizationId: string }) {
@@ -124,7 +152,11 @@ function OrganizationGate({ organizationId }: { organizationId: string }) {
     return (
       <FullPageMessage
         title="You do not have access to this Recon tenant"
-        action={<UserButton />}
+        action={
+          <SignOutButton>
+            <Button variant="secondary">Sign out</Button>
+          </SignOutButton>
+        }
       >
         Ask the tenant administrator to add your Clerk user to this organization.
       </FullPageMessage>
