@@ -63,7 +63,11 @@ func (u InsightSync) summary() []string {
 		fmt.Sprintf("%d open · %d resolved · %d silenced", u.Open, u.Resolved, u.Silenced),
 	}
 	if u.Closed > 0 {
-		lines = append(lines, fmt.Sprintf("%d insights on previous config links closed", u.Closed))
+		verb := "closed"
+		if u.DryRun || u.Pushed == 0 {
+			verb = "to close"
+		}
+		lines = append(lines, fmt.Sprintf("%d insights on previous config links %s", u.Closed, verb))
 	}
 	if u.Pushed > 0 {
 		lines = append(lines, fmt.Sprintf("%d insights pushed", u.Pushed))

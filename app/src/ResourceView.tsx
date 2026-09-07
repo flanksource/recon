@@ -32,14 +32,20 @@ export function ResourceView({
   const [busy, setBusy] = useState(true);
   const [unlinking, setUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setBusy(true);
     setError(null);
+    setConfigError(null);
+    setUnlinkError(null);
     Promise.all([
       fetchResource(id),
-      fetchResourceConfig(id),
+      fetchResourceConfig(id).catch((e: Error) => {
+        if (!cancelled) setConfigError(e.message);
+        return null;
+      }),
       fetchResourceFindings(id),
     ])
       .then(([found, config, evidence]) => {
@@ -79,6 +85,14 @@ export function ResourceView({
     try {
       await removeResourceConfig(id);
       setLinkedConfig(null);
+      setConfigError(null);
+      setResource({
+        ...resource,
+        configId: undefined,
+        configMatchMethod: undefined,
+        configRolledUp: undefined,
+        configServer: undefined,
+      });
     } catch (e) {
       setUnlinkError((e as Error).message);
     } finally {
@@ -106,6 +120,11 @@ export function ResourceView({
       </div>
 
       <div>
+        {configError && (
+          <div role="status" className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
+            Could not load Mission Control config details: {configError}. Stored link metadata is shown below.
+          </div>
+        )}
         {unlinkError && (
           <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {unlinkError}
@@ -135,16 +154,18 @@ export function ResourceView({
               {
                 key: "configName",
                 label: "Config name",
-                value: linkedConfig ? (
+                value: linkedConfig || resource.configId ? (
                   <span className="inline-flex items-center gap-2">
-                    <a
-                      href={linkedConfig.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {linkedConfig.name || linkedConfig.id}
-                    </a>
+                    {linkedConfig ? (
+                      <a
+                        href={linkedConfig.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {linkedConfig.name || linkedConfig.id}
+                      </a>
+                    ) : <span>Unavailable</span>}
                     <Button
                       size="sm"
                       variant="ghost"
@@ -157,15 +178,15 @@ export function ResourceView({
                 ) : "—",
               },
               { key: "configType", label: "Config type", value: display(linkedConfig?.type) },
-              { key: "configId", label: "Config ID", value: display(linkedConfig?.id) },
+              { key: "configId", label: "Config ID", value: display(resource.configId || linkedConfig?.id) },
               {
                 key: "configMatch",
                 label: "Config match",
-                value: linkedConfig
-                  ? `${linkedConfig.method || "manual"} · ${linkedConfig.rolledUp ? "roll-up" : "exact"}`
+                value: resource.configId || linkedConfig
+                  ? `${resource.configMatchMethod || linkedConfig?.method || "manual"} · ${(resource.configRolledUp ?? linkedConfig?.rolledUp) ? "roll-up" : "exact"}`
                   : "—",
               },
-              { key: "configServer", label: "Config server", value: display(linkedConfig?.server) },
+              { key: "configServer", label: "Config server", value: display(resource.configServer || linkedConfig?.server) },
               { key: "tags", label: "Tags", value: display(resource.tags?.join(", ")) },
               {
                 key: "labels",
