@@ -6,6 +6,7 @@ import { InventoryView } from "./TargetsView";
 import { ScanDetailView, ScansView } from "./ScansView";
 import { MutesView } from "./MutesView";
 import { ProfilesView } from "./ProfilesView";
+import { SchedulesView } from "./SchedulesView";
 import { ReportPlayground } from "./ReportPlayground";
 import { ResourcesView } from "./ResourcesView";
 import { FindingsView } from "./FindingsView";
@@ -25,6 +26,7 @@ const TABS = [
   { path: "/resources", label: "Resources" },
   { path: "/findings", label: "Findings" },
   { path: "/scans", label: "Scans" },
+  { path: "/schedules", label: "Schedules" },
   { path: "/reports", label: "Reports" },
   { path: "/profiles", label: "Profiles" },
   { path: "/templates", label: "Templates" },
@@ -59,6 +61,7 @@ function AppContent({ accountControl }: AppProps) {
   // not exist yet: muting a finding from the results is a link into a prefilled
   // draft rather than a second editor somewhere else.
   const muteMatch = router.pathname.match(/^\/mutes(?:\/([^/]+))?$/);
+  const scheduleMatch = router.pathname.match(/^\/schedules(?:\/([^/]+))?$/);
   // A resource is addressable so a finding can link to the thing it is about.
   const resourceMatch = router.pathname.match(/^\/resources(?:\/([^/]+))?$/);
   const findingMatch = router.pathname.match(/^\/findings\/([^/]+)$/);
@@ -84,7 +87,9 @@ function AppContent({ accountControl }: AppProps) {
               ? "/resources"
               : findingMatch || findingGroupMatch
                 ? "/findings"
-                : router.pathname;
+                : scheduleMatch
+                  ? "/schedules"
+                  : router.pathname;
   // The primary nav, built once so it can go either in the bar below or into
   // the top bar of a view that renders its own AppShell.
   const tabs = TABS.map((tab) =>
@@ -152,6 +157,12 @@ function AppContent({ accountControl }: AppProps) {
     />
   ) : router.pathname === "/scans" ? (
     <ScansView onOpenScan={(id) => router.navigate(`/scans/${encodeURIComponent(id)}`)} />
+  ) : scheduleMatch ? (
+    <SchedulesView
+      selected={scheduleMatch[1] ? decodeURIComponent(scheduleMatch[1]) : undefined}
+      onSelect={(name) => router.navigate(name ? `/schedules/${encodeURIComponent(name)}` : "/schedules")}
+      onOpenScan={(id) => router.navigate(`/scans/${encodeURIComponent(id)}`)}
+    />
   ) : findingGroupMatch ? (
     <FindingGroupView
       engine={decodeURIComponent(findingGroupMatch[1])}

@@ -6,9 +6,9 @@ hardening already in the repo (VPC flow logs, Data Access audit logs, client-IP
 capture in `clickhouse/schema/`) by continuously checking what an unauthenticated
 attacker actually sees.
 
-Scans are **run locally on demand** — there is no CI wiring and nothing is deployed
-into the clusters. Everything is orchestrated through `Taskfile.yaml`; the repo-root
-`Makefile` exposes thin `make nuclei-*` wrappers.
+Scans can run **on demand or on recurring schedules** with `reconctl serve` — there
+is no CI wiring and nothing is deployed into the clusters. `Taskfile.yaml` also
+provides on-demand scans; the repo-root `Makefile` exposes thin `make nuclei-*` wrappers.
 
 ## Layout
 
@@ -386,6 +386,53 @@ execute, while `GET /api/v1/discover` and `GET /api/v1/scan` list history. Reque
 bodies use the flag names, for example
 `{"domain":["flanksource.com"],"profile":"default"}` or
 `{"selector":"env=prod","profile":"safe"}`.
+
+## Recurring scans
+
+The **Schedules** tab creates, views, edits, enables/disables, and deletes recurring
+scan schedules. Each has its own inventory target selection, scanning engine,
+stored profile, cron frequency, and IANA timezone. For example, use `0 2 * * *`
+for nightly priority scans and `0 3 1 * *` for monthly comprehensive scans, with
+`Asia/Katmandu` for local calendar time. Cron also accepts `@daily`, `@monthly`,
+and intervals such as `@every 24h`. New schedules are enabled by default; uncheck
+**Enabled** to save one without activating it.
+
+Schedules are stored in Postgres and executed automatically by `reconctl serve`.
+There is no configuration file or restart requirement: changes are picked up by
+the server's one-second polling loop. Saving an enabled schedule calculates its
+next future firing. Disabling or deleting stops future attempts, not a scan that
+has already been accepted. The name is a stable identifier and cannot be renamed.
+
+Target filters have the same meaning as the inventory filters, including stable
+`ids`, `hosts`, `class`, `tags`, and label `selector` expressions. The advanced
+selector editor accepts the stored JSON format; `{}` explicitly covers the whole
+inventory. Targets and profiles are resolved afresh at each firing. Scheduled
+scans use the same discovery, mute rules, confirmation gates, queue, history,
+and artifacts as manual scans. Intrusive scans of production, public, or
+unclassified targets require explicit authorization in the schedule.
+
+The UI shows the next firing, last attempt, recent scan history, and execution errors.
+Each scan records either the verified Clerk `creator_user_id` or the schedule's
+immutable `creator_schedule_id`. No local users
+table is required. CLI, auth-disabled, and unattributed historical scans leave
+these fields null. Schedule deletion is soft: it hides the schedule and stops future
+attempts while preserving its identity for scan attribution. Deleted names remain
+reserved. Existing scans without recorded attribution stay unattributed.
+The API is `GET/POST /api/v1/schedule`, `PUT /api/v1/schedule` (with `id`), and
+`GET/DELETE /api/v1/schedule/{name}`; the CLI exposes `reconctl schedule` CRUD.
+
+Run exactly one Recon server per database, including during deployments: stop the
+old process before starting its replacement. In-memory exclusion prevents the same
+schedule from overlapping itself, and scheduled worker capacity follows scan
+concurrency rather than database pool size. Shutdown gives workers ten seconds to
+stop before logging a timeout and allowing the server to exit.
+Firings missed while a schedule is discovering, queued, or running are skipped.
+After downtime, an overdue schedule runs once, not once for every missed interval,
+then resumes its calendar. A server must be running for execution; failures are
+recorded and the next scheduled attempt is still eligible. This is not an
+exactly-once guarantee across crashes or database connection loss; interruption
+can leave an existing scan's last persisted state unfinished. Scheduling does
+not generate reports, PDFs, or notifications.
 
 ## Syncing current insights to Mission Control
 

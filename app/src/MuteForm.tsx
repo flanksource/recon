@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button } from "@flanksource/clicky-ui/components";
-import { MuteTargets } from "./MuteTargets";
+import { TargetSelector } from "./TargetSelector";
 import { SEVERITIES, severityOf } from "./types";
 import { MUTE_DIMENSIONS, muteSelects } from "./mute-types";
 import type { MutePreview, MuteRule } from "./mute-types";
@@ -165,7 +165,7 @@ export function MuteForm({
             </Field>
           ))}
 
-          <MuteTargets
+          <TargetSelector
             targets={rule.targets}
             onChange={(targets) => set({ targets })}
           />

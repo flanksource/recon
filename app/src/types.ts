@@ -560,6 +560,8 @@ export type ScanFiles = {
 export type Scan = Identified & {
   id: string;
   name: string;
+  creatorUserId?: string;
+  creatorScheduleId?: string;
   engine: string;
   engineVersion?: string;
   profile: string;
