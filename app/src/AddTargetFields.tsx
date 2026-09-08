@@ -70,7 +70,7 @@ export function AddTargetFields({ draft, onChange, profiles, tagVocabulary }: Pr
       </label>
 
       <fieldset className="flex flex-col gap-1 text-xs">
-        <legend className="font-medium">Scan profiles</legend>
+        <legend className="font-medium">Scan profiles (optional)</legend>
         {profiles.length === 0 ? (
           <p className="text-muted-foreground">
             {draft.kind === "provider-context" && !draft.provider
@@ -103,8 +103,9 @@ export function AddTargetFields({ draft, onChange, profiles, tagVocabulary }: Pr
           </div>
         )}
         <span className="text-muted-foreground">
-          At least one is required — a target no profile names is one nothing
-          ever scans.
+          Assignments let you filter which targets to scan. Manual and scheduled
+          scans choose their execution profile independently; these assignments
+          do not restrict which profiles can run against this target.
         </span>
       </fieldset>
 

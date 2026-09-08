@@ -370,7 +370,7 @@ export function AddTargetDialog({ open, onClose, onCreated, tagVocabulary }: Pro
               size="sm"
               onClick={() => void create()}
               loading={saving}
-              disabled={saving || draft.profiles.length === 0}
+              disabled={saving}
             >
               Add target
             </Button>

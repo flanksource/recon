@@ -71,7 +71,7 @@ table "targets" {
     null    = false
     type    = sql("text[]")
     default = sql("'{}'::text[]")
-    comment = "curated scan profiles; the schema requires at least one"
+    comment = "optional scan profile assignments for inventory filtering"
   }
   column "ports" {
     null    = true
@@ -143,13 +143,6 @@ table "targets" {
   // The allOf if/then pair from the JSON Schema, in its SQL form.
   check "targets_reason_iff_deactivated" {
     expr = "(class = 'deactivated') = (reason IS NOT NULL)"
-  }
-  // cardinality(), not array_length(): array_length('{}', 1) is NULL rather
-  // than 0, and a CHECK passes on NULL, so the obvious spelling silently
-  // accepts the empty array the schema's minItems forbids.
-  //
-  check "targets_profiles_nonempty" {
-    expr = "cardinality(profiles) >= 1"
   }
   // A CHECK cannot contain a subquery, so bound the array with quantifiers.
   check "targets_ports_bounded" {
