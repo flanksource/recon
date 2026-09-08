@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql/driver"
 	"fmt"
 	"regexp"
 	"time"
@@ -56,16 +55,20 @@ func (s *Store) scheduleRow(ctx context.Context, input api.ScanSchedule) (models
 	if _, err := api.ParseTargetSelector(input.Targets); err != nil {
 		return row, err
 	}
-	engine, err := enginescan.Get(input.Engine)
-	if err != nil {
-		return row, err
-	}
-	profile, err := s.GetProfile(ctx, "scan:"+input.Engine+":"+input.Profile)
-	if err != nil {
-		return row, err
-	}
-	if err := engine.Spec().ValidateConfig(profile.Config); err != nil {
-		return row, err
+	// A missing engine or deleted profile must not prevent pausing a schedule.
+	// Check execution dependencies again when the schedule is enabled.
+	if input.Enabled {
+		engine, err := enginescan.Get(input.Engine)
+		if err != nil {
+			return row, err
+		}
+		profile, err := s.GetProfile(ctx, "scan:"+input.Engine+":"+input.Profile)
+		if err != nil {
+			return row, err
+		}
+		if err := engine.Spec().ValidateConfig(profile.Config); err != nil {
+			return row, err
+		}
 	}
 	frequency, err := input.Frequency()
 	if err != nil {
@@ -130,37 +133,11 @@ func (s *Store) DueSchedules(ctx context.Context) ([]string, error) {
 	return names, err
 }
 
-// RunDueSchedule holds a session advisory lock across discovery, queueing and execution.
-// The lock coordinates servers and is released on connection loss; no long-lived
-// transaction prevents UI edits. A compare-and-swap claim serializes edits with admission.
+// RunDueSchedule claims an occurrence without overwriting concurrent configuration edits.
+// The single server's scheduler owns in-memory exclusion for the full run lifetime.
 func (s *Store) RunDueSchedule(ctx context.Context, name string, run func(api.ScanSchedule) (api.Scan, error)) error {
-	db, err := s.DB(ctx).DB()
-	if err != nil {
-		return err
-	}
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	key := "recon:scan-schedule:" + name
-	var locked bool
-	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(hashtextextended($1, 0))", key).Scan(&locked); err != nil {
-		return err
-	}
-	if !locked {
-		return nil
-	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := conn.ExecContext(cleanup, "SELECT pg_advisory_unlock(hashtextextended($1, 0))", key); err != nil {
-			// Never return a possibly locked session to the pool.
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		}
-	}()
 	var row models.ScanSchedule
-	err = s.DB(ctx).Where("name = ?", name).First(&row).Error
+	err := s.DB(ctx).Where("name = ?", name).First(&row).Error
 	if IsNotFound(err) {
 		return nil
 	}

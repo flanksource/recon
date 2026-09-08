@@ -56,26 +56,33 @@ func updateSchedule(st *store.Store, ctx context.Context, name string, body map[
 	return st.UpdateSchedule(ctx, schedule)
 }
 
-// RunSchedules polls durable due times. Per-process admission avoids piling up
-// goroutines, while the store's advisory locks coordinate other server processes.
-// Cancellation stops polling and joins workers before the database is closed.
+// RunSchedules runs once per server, with one server per database. In-memory
+// exclusion covers discovery, queueing and execution without pinning SQL sessions.
+// Shutdown gives workers ten seconds to stop before allowing the server to exit.
 func (r *Registry) RunSchedules(ctx context.Context) {
-	db, err := r.st.DB(ctx).DB()
-	if err != nil {
-		logger.Errorf("start scan schedules: %v", err)
-		return
-	}
-	// Advisory locks pin sessions; reserve the other half of the pool for
-	// scan persistence and UI requests rather than letting queued jobs starve them.
-	capacity := db.Stats().MaxOpenConnections / 2
-	if capacity == 0 {
+	// Bound pre-scan discovery as well as scans using the server's startup setting.
+	capacity := r.Runtimes.Scans.Concurrency
+	if capacity < 1 {
 		capacity = 1
 	}
 	slots := make(chan struct{}, capacity)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	var workers sync.WaitGroup
-	defer workers.Wait()
+	defer func() {
+		done := make(chan struct{})
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
+		timer := time.NewTimer(10 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			logger.Errorf("scan schedule shutdown timed out; workers may still be stopping")
+		}
+	}()
 	var active sync.Map
 	for {
 		select {
@@ -88,6 +95,9 @@ func (r *Registry) RunSchedules(ctx context.Context) {
 				continue
 			}
 			for _, name := range names {
+				if ctx.Err() != nil {
+					return
+				}
 				if _, busy := active.LoadOrStore(name, true); busy {
 					continue
 				}
@@ -117,7 +127,7 @@ func (r *Registry) RunSchedules(ctx context.Context) {
 						}
 						finished, err := r.Runtimes.Scans.Wait(ctx, started.ID)
 						if ctx.Err() != nil {
-							// Keep the database lock until the accepted run has stopped.
+							// The bounded worker join also covers a stuck cancellation call.
 							_ = r.Runtimes.Scans.CancelID(started.ID)
 							return r.Runtimes.Scans.Wait(context.WithoutCancel(ctx), started.ID)
 						}
