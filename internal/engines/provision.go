@@ -135,7 +135,7 @@ func (p *Provisioner) Resolve(spec Spec) (string, error) {
 
 	managed := filepath.Join(p.BinDir, spec.Binary)
 	if executable(managed) {
-		return managed, nil
+		return filepath.Abs(managed)
 	}
 	found, err := exec.LookPath(spec.Binary)
 	if err != nil {
@@ -183,7 +183,8 @@ func (p *Provisioner) Status(spec Spec) Status {
 	}
 	status.Path = path
 	status.Installed = true
-	status.Managed = spec.Provisioning != ProvisioningPathOnly && filepath.Dir(path) == filepath.Clean(p.BinDir)
+	binDir, err := filepath.Abs(p.BinDir)
+	status.Managed = err == nil && spec.Provisioning != ProvisioningPathOnly && filepath.Dir(path) == binDir
 	return status
 }
 
