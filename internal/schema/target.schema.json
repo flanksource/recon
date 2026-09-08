@@ -68,7 +68,6 @@
     "profiles": {
       "type": "array",
       "items": { "type": "string", "pattern": "^scan:[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$" },
-      "minItems": 1,
       "uniqueItems": true
     },
     "ports": {

@@ -636,11 +636,11 @@ var _ = Describe("the declarative schema", Ordered, Label("db"), func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("rejects an empty profiles array", func() {
+		It("accepts an empty profiles array", func() {
 			_, err := db.SQL().Exec(
 				`INSERT INTO targets (id, host, class, profiles, tags)
 				 VALUES ('a.example.test', 'a.example.test', 'non-prod', '{}'::text[], '{}'::text[])`)
-			Expect(err).To(MatchError(ContainSubstring("targets_profiles_nonempty")))
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		DescribeTable("bounds curated ports",

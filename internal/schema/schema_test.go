@@ -242,8 +242,6 @@ var _ = Describe("target schema", func() {
 			func(d map[string]any) { d["class"] = "staging" }, "value must be one of"),
 		Entry("a malformed stable id",
 			func(d map[string]any) { d["id"] = "gcp/project" }, "does not match pattern"),
-		Entry("an empty profiles array",
-			func(d map[string]any) { d["profiles"] = []any{} }, "minItems"),
 		Entry("a profile name the profile table could not hold",
 			func(d map[string]any) { d["profiles"] = []any{"Aggressive Scan"} }, "pattern"),
 		Entry("a duplicated profile",
