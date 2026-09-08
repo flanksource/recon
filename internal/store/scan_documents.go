@@ -6,7 +6,6 @@ import (
 
 	"github.com/flanksource/recon/internal/api"
 	"github.com/flanksource/recon/internal/models"
-	"gorm.io/gorm"
 )
 
 // Projecting many scan rows at once.
@@ -124,8 +123,7 @@ func (s *Store) scansByID(ctx context.Context, states []api.FindingState) (map[s
 	}
 
 	var rows []models.Scan
-	if err := s.DB(ctx).Preload("CreatorSchedule", func(db *gorm.DB) *gorm.DB { return db.Unscoped() }).
-		Where("id = ANY(?)", stringArray(keys(wanted))).Find(&rows).Error; err != nil {
+	if err := s.DB(ctx).Where("id = ANY(?)", stringArray(keys(wanted))).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("read scans for %d finding states: %w", len(states), err)
 	}
 	documents, err := s.scanDocuments(ctx, rows)
