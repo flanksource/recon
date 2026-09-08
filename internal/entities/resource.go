@@ -41,8 +41,6 @@ func (r *Registry) registerResource() {
 			WithMethod("GET").WithShort("Read the linked Mission Control catalog item")).
 		WithAction(entity.TypedActionWithContext("unlink-config", resourceConfigFlags{}, r.unlinkResourceConfig).
 			WithShort("Remove the stored Mission Control config link")).
-		WithAction(entity.TypedActionWithContext("sync", resourceSyncFlags{}, r.syncResources).
-			WithOptionalID().WithShort("Sync current states for the selected resources to Mission Control")).
 		WithAction(entity.TypedActionWithContext("mute", resourceMuteFlags{}, r.muteResource).
 			WithShort("Mute findings on this exact resource")).
 		Register()
