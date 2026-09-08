@@ -1,4 +1,4 @@
-// The inventory scope of a mute rule.
+// The inventory scope shared by mute rules and scan schedules.
 //
 // Two controls over one value, deliberately. The filter bar is the same one the
 // inventory listing uses, so scoping a rule reads like filtering targets and the
@@ -7,7 +7,7 @@
 // not offer — a label selector, a last-seen window — and for reading back what
 // a rule imported from elsewhere actually says.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FilterBar } from "@flanksource/clicky-ui/components";
 import { useEntityFilters } from "./filters";
 import type { FilterSelection } from "./types";
@@ -15,6 +15,7 @@ import type { FilterSelection } from "./types";
 type Props = {
   targets: Record<string, unknown> | undefined;
   onChange: (targets: Record<string, unknown> | undefined) => void;
+  onValidityChange?: (valid: boolean) => void;
 };
 
 /**
@@ -78,35 +79,36 @@ function beyondTheBar(targets: Record<string, unknown> | undefined): Record<stri
   );
 }
 
-export function MuteTargets({ targets, onChange }: Props) {
+export function TargetSelector({ targets, onChange, onValidityChange }: Props) {
   const { filters, selection, setSelection, error } = useEntityFilters("target");
   const [advanced, setAdvanced] = useState(false);
   const [draft, setDraft] = useState(() => JSON.stringify(targets ?? {}, null, 2));
   const [invalid, setInvalid] = useState<string | null>(null);
 
+  useEffect(() => {
+    onValidityChange?.(invalid === null);
+  }, [invalid, onValidityChange]);
+
   const scoped = useMemo(() => Object.keys(targets ?? {}).length > 0, [targets]);
 
-  // Seed the bar from the rule. Keyed on the serialised selector so switching
-  // rules re-seeds, while an edit made through the bar does not bounce back.
+  // Seed before publishing bar edits: the hook's initially empty selection
+  // must never replace a saved scope with the whole inventory.
   const serialised = JSON.stringify(targets ?? {});
-  useEffect(() => {
-    setSelection(toSelection(targets));
-    setDraft(JSON.stringify(targets ?? {}, null, 2));
-    setInvalid(null);
-    // setSelection is stable for the hook's lifetime; re-running on it would
-    // fight every keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serialised]);
-
-  // Push what the bar holds back onto the rule, preserving the fields the bar
-  // cannot show rather than dropping them on the first click.
+  const seeded = useRef<string | null>(null);
   const barSerialised = JSON.stringify(selection);
   useEffect(() => {
+    if (seeded.current !== serialised) {
+      seeded.current = serialised;
+      setSelection(toSelection(targets));
+      setDraft(JSON.stringify(targets ?? {}, null, 2));
+      setInvalid(null);
+      return;
+    }
     const next = { ...beyondTheBar(targets), ...toSelector(selection) };
     if (JSON.stringify(next) === serialised) return;
     onChange(Object.keys(next).length > 0 ? next : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barSerialised]);
+  }, [serialised, barSerialised]);
 
   const applyAdvanced = useCallback(
     (text: string) => {
@@ -148,8 +150,8 @@ export function MuteTargets({ targets, onChange }: Props) {
 
       <p className="mb-2 text-xs text-muted-foreground">
         {scoped
-          ? "Only findings from the targets this selector matches."
-          : "Every target. Narrow it to keep a rule from reaching further than intended."}
+          ? "Only inventory targets matching these filters."
+          : "Every inventory target. Add filters to narrow the selection."}
       </p>
 
       {error && (

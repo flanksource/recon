@@ -33,6 +33,8 @@ export type FindingSelector = {
 };
 
 export function fetchScans(params?: {
+  "creator-schedule-id"?: string;
+  "creator-user-id"?: string;
   engine?: string;
   profile?: string;
   phase?: string;

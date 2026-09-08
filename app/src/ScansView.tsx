@@ -146,6 +146,16 @@ function SeverityBar({ run }: { run: Scan }) {
   );
 }
 
+function ScanCreator({ scan }: { scan: Scan }) {
+  return (
+    <p className="text-xs text-muted-foreground" title={scan.creatorScheduleId}>
+      Triggered by {scan.creatorScheduleId
+        ? `schedule ${scan.creatorScheduleId}`
+        : scan.creatorUserId ? `user ${scan.creatorUserId}` : "unknown (not recorded)"}
+    </p>
+  );
+}
+
 function RunCard({ run, onClick }: { run: Scan; onClick: () => void }) {
   return (
     <button
@@ -174,6 +184,7 @@ function RunCard({ run, onClick }: { run: Scan; onClick: () => void }) {
           {run.muted ? ` · ${run.muted} muted` : ""}
         </span>
       </div>
+      <ScanCreator scan={run} />
       <SeverityBar run={run} />
     </button>
   );
@@ -395,6 +406,7 @@ export function ScanDetailView({
                 ? `${scan.engine} · ${scan.profile} · ${scan.selectorLabel}`
                 : id}
             </p>
+            {scan && <ScanCreator scan={scan} />}
           </div>
           <Tabs
             tabs={[
