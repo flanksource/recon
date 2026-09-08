@@ -214,7 +214,7 @@ function ScheduleEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const history = useQuery({
     queryKey: ["schedule-scans", stored?.id],
-    queryFn: () => fetchScans({ "creator-schedule-id": stored!.id!, limit: 10 }),
+    queryFn: () => fetchScans({ "creator-schedule-id": stored!.id!, limit: 3 }),
     enabled: !!stored?.id,
     refetchInterval: 5000,
   });
@@ -424,19 +424,41 @@ function ScheduleEditor({
               ? new Date(stored.lastRun).toLocaleString()
               : "Not run yet"}
           </p>
-          <h3 className="mt-3 font-medium">Recent scans (latest 10)</h3>
+          <h3 className="mt-3 font-medium">Recent scans (latest 3)</h3>
           {history.isPending ? <p>Loading scans…</p> : history.isError ? (
             <p role="alert">Unable to load scan history.</p>
           ) : !history.data?.length ? <p>No recorded scans yet.</p> : (
-            <ul className="space-y-1">
-              {history.data.map((run) => (
-                <li key={run.id}>
-                  <button type="button" className="text-primary underline" onClick={() => onOpenScan(run.id)}>
-                    {run.name} · {run.phase} · {new Date(run.startedAt).toLocaleString()}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2 overflow-x-auto">
+              <table aria-label="Recent scans" className="w-full text-left text-sm">
+                <thead className="border-b border-border text-xs text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="py-2 pr-4 font-medium">Scan</th>
+                    <th scope="col" className="py-2 pr-4 font-medium">Status</th>
+                    <th scope="col" className="py-2 font-medium">Started</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {history.data.map((run) => (
+                    <tr key={run.id}>
+                      <td className="py-2 pr-4">
+                        <button
+                          type="button"
+                          className="block max-w-64 truncate text-primary underline"
+                          title={run.name}
+                          onClick={() => onOpenScan(run.id)}
+                        >
+                          {run.name}
+                        </button>
+                      </td>
+                      <td className="whitespace-nowrap py-2 pr-4">{run.phase}</td>
+                      <td className="whitespace-nowrap py-2">
+                        {new Date(run.startedAt).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {stored.lastError && (
             <p role="alert" className="mt-2 text-destructive">
