@@ -45,5 +45,18 @@ export function syncFindings(params: InsightSelector, sync: SyncRequest): Promis
 }
 
 export function syncResources(params: InsightSelector, sync: SyncRequest): Promise<InsightSync> {
-  return request<InsightSync>(`${API}/resource/sync`, json("POST", syncBody(params, sync)));
+  const { status, severity, engine, search, since, "first-seen": firstSeen, "last-seen": lastSeen,
+    id, ids, sort: _sort, order: _order, limit: _limit, offset: _offset, ...resources } = params;
+  return syncFindings({
+    ...resources,
+    status: "open,resolved,muted,manual",
+    severity,
+    resource: id ?? ids,
+    "resource-health": status,
+    "resource-engine": engine,
+    "resource-search": search,
+    "resource-since": since,
+    "resource-first-seen": firstSeen,
+    "resource-last-seen": lastSeen,
+  }, sync);
 }

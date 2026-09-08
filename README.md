@@ -389,15 +389,26 @@ bodies use the flag names, for example
 
 ## Syncing current insights to Mission Control
 
-Resources and current finding states can be synced to Mission Control, where each resource/check pair becomes
+Current finding states can be synced to Mission Control, where each resource/check pair becomes
 one stable **insight** (`config_analysis`) attached to the config item it is about:
 
 ```bash
 faro auth login --server https://mission-control.example.com
 reconctl finding sync --status open --dry-run
 reconctl finding sync --status open
-reconctl resource sync --provider gcp --account example-project --dry-run
+reconctl finding sync --provider gcp --account example-project --dry-run
 ```
+
+These commands also work in fish. Sync uploads insights, not resources or config items.
+Use `--status open,resolved,muted,manual` to sync every finding lifecycle status.
+`--state present,absent` filters resource presence, not finding status.
+`--resource-health` selects `failing` (open/manual checks), `clean` (recorded checks
+but none open/manual), or `unchecked` (no recorded checks), with no restriction by default.
+`--resource-since`, `--resource-first-seen`, and `--resource-last-seen` filter resource
+observation timestamps, not finding timestamps. `--severity high,medium,critical`
+syncs only findings matching any of those severities, not other findings on the same resource.
+`--resource-engine` and `--resource-search` select by the resource's
+describing engines and name/UID, while `--engine` and `--search` filter findings.
 
 The credential is faro's — there is no server or token flag, and `--context`
 picks between configured servers. The endpoint requires the `agent-push`

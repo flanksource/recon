@@ -18,7 +18,7 @@ type FindingStateOpts struct {
 	Resource []string `json:"resource,omitempty" flag:"resource" help:"Only these resources"`
 	Provider []string `json:"provider,omitempty" flag:"provider" help:"Only these providers"`
 	Account  []string `json:"account,omitempty" flag:"account" help:"Only these accounts or projects"`
-	Kind     []string `json:"kind,omitempty" flag:"kind" help:"Only these resource kinds"`
+	Kind     []string `json:"kind,omitempty" flag:"kind" help:"Resource kinds: account, cloud-resource, artifact, endpoint (comma-separated)"`
 	Type     []string `json:"type,omitempty" flag:"type" help:"Only these resource types; prefix ! to exclude"`
 	Service  []string `json:"service,omitempty" flag:"service" help:"Only these services"`
 	Region   []string `json:"region,omitempty" flag:"region" help:"Only these regions"`
@@ -26,16 +26,23 @@ type FindingStateOpts struct {
 	Engine   []string `json:"engine,omitempty" flag:"engine" help:"Only these engines"`
 	Tag      []string `json:"tag,omitempty" flag:"tag" help:"Only resources with these tags; prefix ! to exclude"`
 	Label    []string `json:"label,omitempty" flag:"label" help:"Only resources with these key:value labels; prefix ! to exclude"`
-	State    []string `json:"state,omitempty" flag:"state" help:"Only present or absent resources"`
+	State    []string `json:"state,omitempty" flag:"state" help:"Resource presence: present (observed) or absent (no longer seen by a covering scan); default: both"`
+
+	ResourceHealth    []string `json:"resourceHealth,omitempty" flag:"resource-health" help:"Resource check summary: failing (open/manual checks), clean (checked, none open/manual), unchecked (no checks); default: all"`
+	ResourceEngine    []string `json:"resourceEngine,omitempty" flag:"resource-engine" help:"Only resources described by these engines"`
+	ResourceSearch    string   `json:"resourceSearch,omitempty" flag:"resource-search" help:"Substring match on resource name or uid"`
+	ResourceSince     string   `json:"resourceSince,omitempty" flag:"resource-since" help:"Only resources last seen since this time (RFC3339 or a duration such as 24h)"`
+	ResourceFirstSeen string   `json:"resourceFirstSeen,omitempty" flag:"resource-first-seen" help:"Only resources first seen in this range (>=from,<=to)"`
+	ResourceLastSeen  string   `json:"resourceLastSeen,omitempty" flag:"resource-last-seen" help:"Only resources last seen in this range (>=from,<=to)"`
 
 	Check    []string `json:"check,omitempty" flag:"check" help:"Only these check IDs"`
-	Status   []string `json:"status,omitempty" flag:"status" help:"Only open, resolved, muted or manual states"`
-	Severity []string `json:"severity,omitempty" flag:"severity" help:"Only these severities"`
+	Status   []string `json:"status,omitempty" flag:"status" help:"Finding lifecycle: open (failed; also includes manual), resolved, muted (accepted), manual (needs human review); comma-separated; sync defaults to open"`
+	Severity []string `json:"severity,omitempty" flag:"severity" help:"Filter findings by severity: critical, high, medium, low, info, unknown; comma-separated, e.g. high,medium,critical"`
 	Search   string   `json:"search,omitempty" flag:"search" help:"Substring match on check or resource"`
 	Sort     string   `json:"sort,omitempty" flag:"sort" help:"Sort by severity, check, affected or last-seen" default:"severity"`
-	Order    string   `json:"order,omitempty" flag:"order" help:"Sort direction" default:"asc"`
-	Limit    int      `json:"limit,omitempty" flag:"limit" help:"Most N rows" default:"100"`
-	Offset   int      `json:"offset,omitempty" flag:"offset" help:"Skip N rows"`
+	Order    string   `json:"order,omitempty" flag:"order" help:"Sort direction: asc or desc" default:"asc"`
+	Limit    int      `json:"limit,omitempty" flag:"limit" help:"Most N rows; ignored by sync, which processes all matches" default:"100"`
+	Offset   int      `json:"offset,omitempty" flag:"offset" help:"Skip N rows; ignored by sync"`
 }
 
 func (o FindingStateOpts) Validate() error {
@@ -65,6 +72,9 @@ func (o FindingStateOpts) resourceOpts() ResourceOpts {
 		IDs: o.Resource, Provider: o.Provider, Account: o.Account, Kind: o.Kind,
 		Type: o.Type, Service: o.Service, Region: o.Region, Target: o.Target,
 		Tag: o.Tag, Label: o.Label, State: o.State,
+		Status: o.ResourceHealth, Engine: o.ResourceEngine,
+		Search: o.ResourceSearch, Since: o.ResourceSince,
+		FirstSeen: o.ResourceFirstSeen, LastSeen: o.ResourceLastSeen,
 	}
 }
 

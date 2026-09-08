@@ -28,11 +28,13 @@ describe("insight sync API", () => {
       configs: [], unresolved: [],
     }), { status: 200 }));
 
-    await sync({ provider: "gcp", status: "open" }, { dryRun: true });
+    await sync({ provider: "gcp", status: entity === "resource" ? "failing" : "open" }, { dryRun: true });
 
-    expect(fetch).toHaveBeenCalledWith(`/api/v1/${entity}/sync`, expect.objectContaining({
+    expect(fetch).toHaveBeenCalledWith("/api/v1/finding/sync", expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ provider: "gcp", status: "open", "dry-run": true }),
+      body: JSON.stringify(entity === "resource"
+        ? { provider: "gcp", status: "open,resolved,muted,manual", "resource-health": "failing", "dry-run": true }
+        : { provider: "gcp", status: "open", "dry-run": true }),
     }));
   });
 

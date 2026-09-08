@@ -21,18 +21,12 @@ type syncFlags struct {
 	DryRun     bool     `flag:"dry-run" help:"Resolve and preview without writing"`
 }
 
-type resourceSyncFlags struct {
-	store.ResourceOpts
-	syncFlags
-}
-
 type findingSyncFlags struct {
 	store.FindingStateOpts
 	syncFlags
 }
 
-func (resourceSyncFlags) ClickyActionFlags() {}
-func (findingSyncFlags) ClickyActionFlags()  {}
+func (findingSyncFlags) ClickyActionFlags() {}
 
 // choices reads the `identity=config-id` pairs. A malformed pair is an error
 // rather than a skipped choice: the sync it was meant to steer would otherwise
@@ -57,27 +51,6 @@ func (f syncFlags) choices() (map[string]uuid.UUID, error) {
 	return choices, nil
 }
 
-func (r *Registry) syncResources(ctx context.Context, _ string, opts resourceSyncFlags) (api.InsightSync, error) {
-	st, err := r.store()
-	if err != nil {
-		return api.InsightSync{}, err
-	}
-	selector := opts.ResourceOpts
-	selector.Limit, selector.Offset = 0, 0
-	resources, err := st.ListResources(ctx, selector)
-	if err != nil {
-		return api.InsightSync{}, err
-	}
-	if len(resources) == 0 {
-		return r.pushStates(ctx, st, nil, 0, opts.syncFlags)
-	}
-	stateOpts := store.FindingStateOpts{Resource: make([]string, 0, len(resources))}
-	for _, resource := range resources {
-		stateOpts.Resource = append(stateOpts.Resource, resource.ID)
-	}
-	return r.syncStates(ctx, st, stateOpts, len(resources), opts.syncFlags)
-}
-
 func (r *Registry) syncFindings(ctx context.Context, _ string, opts findingSyncFlags) (api.InsightSync, error) {
 	st, err := r.store()
 	if err != nil {
@@ -97,20 +70,6 @@ func (r *Registry) syncFindings(ctx context.Context, _ string, opts findingSyncF
 		resources[state.Resource.ID] = struct{}{}
 	}
 	return r.pushStates(ctx, st, states, len(resources), opts.syncFlags)
-}
-
-func (r *Registry) syncStates(
-	ctx context.Context,
-	st *store.Store,
-	selector store.FindingStateOpts,
-	matchedResources int,
-	flags syncFlags,
-) (api.InsightSync, error) {
-	states, err := st.ListInsightStates(ctx, selector)
-	if err != nil {
-		return api.InsightSync{}, err
-	}
-	return r.pushStates(ctx, st, states, matchedResources, flags)
 }
 
 func (r *Registry) pushStates(
