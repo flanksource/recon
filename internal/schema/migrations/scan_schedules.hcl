@@ -63,6 +63,10 @@ table "scan_schedules" {
     null = false
     default = sql("now()")
   }
+  column "deleted_at" {
+    type = timestamptz
+    null = true
+  }
   primary_key {
     columns = [column.name]
   }

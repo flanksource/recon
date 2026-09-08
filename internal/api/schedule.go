@@ -22,6 +22,8 @@ type ScanSchedule struct {
 	NextRun   *time.Time     `json:"nextRun,omitempty"`
 	LastRun   *time.Time     `json:"lastRun,omitempty"`
 	LastError string         `json:"lastError,omitempty"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
 }
 
 // GetID keeps entity addresses stable when schedules are edited.
@@ -56,7 +58,7 @@ func (s ScanSchedule) Frequency() (cron.Schedule, error) {
 
 // ScanScheduleFrom accepts only editable fields, not execution state supplied by a client.
 func ScanScheduleFrom(body map[string]any) (ScanSchedule, error) {
-	for _, key := range []string{"id", "nextRun", "lastRun", "lastError"} {
+	for _, key := range []string{"id", "nextRun", "lastRun", "lastError", "createdAt", "updatedAt"} {
 		if _, ok := body[key]; ok {
 			return ScanSchedule{}, fmt.Errorf("%s is read-only", key)
 		}
