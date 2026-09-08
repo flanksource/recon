@@ -39,8 +39,9 @@ type Scan struct {
 	EngineVersion string `json:"engineVersion,omitempty"`
 	Profile       string `json:"profile"`
 
-	CreatorUserID       string `json:"creatorUserId,omitempty"`
-	CreatorScheduleID   string `json:"creatorScheduleId,omitempty"`
+	CreatorUserID     string `json:"creatorUserId,omitempty"`
+	CreatorScheduleID string `json:"creatorScheduleId,omitempty"`
+	// Resolved from the retained schedule row, not stored on the scan.
 	CreatorScheduleName string `json:"creatorScheduleName,omitempty"`
 
 	Selector      map[string]any `json:"selector"`

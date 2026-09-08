@@ -110,7 +110,7 @@ func (r *Registry) RunSchedules(ctx context.Context) {
 						started, err := r.startScan(ctx, scanFlags{
 							Engine: schedule.Engine, Profile: schedule.Profile, Confirm: schedule.Confirm,
 						}, resolvedTarget{Inventory: selector}, scan.Creator{
-							ScheduleID: schedule.ID, ScheduleName: schedule.Name,
+							ScheduleID: schedule.ID,
 						})
 						if err != nil {
 							return started, err

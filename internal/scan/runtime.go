@@ -31,9 +31,8 @@ const maxDuration = 30 * time.Minute
 // Creator is copied from a verified user or claimed schedule before queueing.
 // It is internal transport state, never decoded from scan action input.
 type Creator struct {
-	UserID       string
-	ScheduleID   string
-	ScheduleName string
+	UserID     string
+	ScheduleID string
 }
 
 // Request is what starts a scan.
@@ -321,7 +320,6 @@ func (r *Runtime) enqueue(
 	}
 	if request.Creator.ScheduleID != "" {
 		input.CreatorScheduleID = &request.Creator.ScheduleID
-		input.CreatorScheduleName = &request.Creator.ScheduleName
 	}
 	row, err := r.Store.CreateScan(ctx, input)
 	if err != nil {

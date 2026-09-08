@@ -81,7 +81,7 @@ func (s *Store) ListScans(ctx context.Context, opts ScanOpts) ([]api.Scan, error
 		query = query.Order("started_at DESC")
 	}
 	var rows []models.Scan
-	if err := query.Find(&rows).Error; err != nil {
+	if err := query.Preload("CreatorSchedule", func(db *gorm.DB) *gorm.DB { return db.Unscoped() }).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list scans: %w", err)
 	}
 
@@ -126,7 +126,9 @@ func (s *Store) GetScan(ctx context.Context, id string) (api.Scan, error) {
 // file is called and what anyone reading the runs list will type.
 func (s *Store) scanRow(ctx context.Context, id string) (models.Scan, error) {
 	var row models.Scan
-	err := s.DB(ctx).Where("id::text = ? OR name = ?", id, id).First(&row).Error
+	// Historical attribution includes schedules hidden by soft deletion.
+	err := s.DB(ctx).Preload("CreatorSchedule", func(db *gorm.DB) *gorm.DB { return db.Unscoped() }).
+		Where("id::text = ? OR name = ?", id, id).First(&row).Error
 	if err != nil {
 		if IsNotFound(err) {
 			return models.Scan{}, NotFound("scan", id)
@@ -192,6 +194,9 @@ func (s *Store) CreateScan(ctx context.Context, scan models.Scan) (models.Scan, 
 	}
 	if err := s.DB(ctx).Create(&scan).Error; err != nil {
 		return models.Scan{}, fmt.Errorf("create scan: %w", err)
+	}
+	if scan.CreatorScheduleID != nil {
+		return s.scanRow(ctx, scan.ID)
 	}
 	return scan, nil
 }

@@ -5,8 +5,7 @@
 -- Older overwritten links cannot be inferred from timing or target selectors.
 ALTER TABLE IF EXISTS scans
   ADD COLUMN IF NOT EXISTS creator_user_id text,
-  ADD COLUMN IF NOT EXISTS creator_schedule_id uuid,
-  ADD COLUMN IF NOT EXISTS creator_schedule_name text;
+  ADD COLUMN IF NOT EXISTS creator_schedule_id uuid;
 
 DO $$
 BEGIN
@@ -22,12 +21,11 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'scan_schedules' AND column_name = 'last_scan'
   ) THEN
     UPDATE scans r
-    SET creator_schedule_id = s.id, creator_schedule_name = s.name
+    SET creator_schedule_id = s.id
     FROM scan_schedules s
     WHERE r.id::text = s.last_scan
       AND r.creator_user_id IS NULL
       AND r.creator_schedule_id IS NULL
-      AND r.creator_schedule_name IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM scan_schedules other
         WHERE other.last_scan = s.last_scan AND other.id <> s.id

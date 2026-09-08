@@ -110,7 +110,8 @@ func (s *Store) UpdateSchedule(ctx context.Context, input api.ScanSchedule) (api
 	return s.GetSchedule(ctx, row.Name)
 }
 
-// DeleteSchedule prevents future firings; already accepted scans keep their own lifecycle.
+// DeleteSchedule soft-deletes configuration so scan attribution remains resolvable.
+// GORM excludes deleted rows from CRUD, due polling and admission updates.
 func (s *Store) DeleteSchedule(ctx context.Context, name string) error {
 	result := s.DB(ctx).Where("name = ?", name).Delete(&models.ScanSchedule{})
 	if result.Error != nil {
