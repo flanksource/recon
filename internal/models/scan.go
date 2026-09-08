@@ -21,9 +21,8 @@ type Scan struct {
 	EngineVersion *string `gorm:"column:engine_version"`
 	Profile       string  `gorm:"column:profile"`
 
-	CreatorUserID     *string       `gorm:"<-:create"`
-	CreatorScheduleID *string       `gorm:"<-:create"`
-	CreatorSchedule   *ScanSchedule `gorm:"foreignKey:CreatorScheduleID;references:ID;->"`
+	CreatorUserID     *string `gorm:"<-:create"`
+	CreatorScheduleID *string `gorm:"<-:create"`
 
 	Selector      JSON[map[string]any] `gorm:"column:selector;type:jsonb"`
 	EndpointCount int                  `gorm:"column:endpoint_count"`
@@ -89,9 +88,6 @@ func (s Scan) Document(findings int, hosts []string, label string) api.Scan {
 		Stats:             s.Stats.V,
 		Hosts:             hosts,
 		Result:            deref(s.ResultPath),
-	}
-	if s.CreatorSchedule != nil {
-		scan.CreatorScheduleName = s.CreatorSchedule.Name
 	}
 	if s.FinishedAt != nil {
 		scan.FinishedAt = localTimestamp(*s.FinishedAt)
