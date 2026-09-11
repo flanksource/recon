@@ -6,12 +6,12 @@ replace github.com/glebarez/sqlite => github.com/clarkmcc/gorm-sqlite v0.0.0-202
 
 require (
 	github.com/clerk/clerk-sdk-go/v2 v2.7.0
-	github.com/flanksource/clicky v1.21.57
-	github.com/flanksource/commons v1.57.0
-	github.com/flanksource/commons-db v0.1.29
-	github.com/flanksource/deps v1.0.41
-	github.com/flanksource/duty v1.0.1371
-	github.com/flanksource/incident-commander v0.0.1934
+	github.com/flanksource/clicky v1.21.63
+	github.com/flanksource/commons v1.59.0
+	github.com/flanksource/commons-db v0.1.36
+	github.com/flanksource/deps v1.0.42
+	github.com/flanksource/duty v1.0.1383
+	github.com/flanksource/incident-commander v0.0.1952
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
 	github.com/logrusorgru/aurora/v4 v4.0.0
@@ -466,7 +466,7 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
 	github.com/flanksource/gomplate/v3 v3.24.89
-	github.com/flanksource/is-healthy v1.0.90 // indirect
+	github.com/flanksource/is-healthy v1.0.92 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
