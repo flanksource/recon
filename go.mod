@@ -6,12 +6,12 @@ replace github.com/glebarez/sqlite => github.com/clarkmcc/gorm-sqlite v0.0.0-202
 
 require (
 	github.com/clerk/clerk-sdk-go/v2 v2.7.0
-	github.com/flanksource/clicky v1.21.57
-	github.com/flanksource/commons v1.57.0
-	github.com/flanksource/commons-db v0.1.29
-	github.com/flanksource/deps v1.0.41
-	github.com/flanksource/duty v1.0.1371
-	github.com/flanksource/incident-commander v0.0.1934
+	github.com/flanksource/clicky v1.21.73
+	github.com/flanksource/commons v1.60.0
+	github.com/flanksource/commons-db v0.1.45
+	github.com/flanksource/deps v1.0.42
+	github.com/flanksource/duty v1.0.1388
+	github.com/flanksource/incident-commander v0.0.1970
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
 	github.com/logrusorgru/aurora/v4 v4.0.0
@@ -144,7 +144,7 @@ require (
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
-	github.com/ebitengine/purego v0.10.0 // indirect
+	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
@@ -328,7 +328,7 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
-	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
+	github.com/shirou/gopsutil/v4 v4.26.7 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
@@ -465,8 +465,8 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
-	github.com/flanksource/gomplate/v3 v3.24.89
-	github.com/flanksource/is-healthy v1.0.90 // indirect
+	github.com/flanksource/gomplate/v3 v3.24.90
+	github.com/flanksource/is-healthy v1.0.92 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
